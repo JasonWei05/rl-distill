@@ -42,10 +42,11 @@ def _get_pool():
 def _verify_in_subprocess(ground_truth_boxed: str, model_output: str) -> float:
     """Run math_verify in a subprocess where signal.alarm() works."""
     from math_verify.grader import verify
-    from math_verify.parser import ExprExtractionConfig, LatexExtractionConfig, parse
+    from math_verify.parser import LatexExtractionConfig, parse
 
     gold_targets = (LatexExtractionConfig(),)
-    pred_targets = (ExprExtractionConfig(), LatexExtractionConfig())
+    # Only extract from \boxed{} to prevent reward hacking with bare numbers
+    pred_targets = (LatexExtractionConfig(),)
 
     extracted_gold = parse(ground_truth_boxed, gold_targets)
     extracted_pred = parse(model_output, pred_targets)

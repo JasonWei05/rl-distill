@@ -56,10 +56,14 @@ def default_compute_score(
 
         # from . import math_verify
         # res = math_verify.compute_score(solution_str, ground_truth)
-    elif data_source in ["math_dapo", "math", "math_dapo_reasoning"] or data_source.startswith("aime"):
-        from . import math_dapo
+    elif (
+        data_source in ["math_dapo", "math", "math_dapo_reasoning", "math500", "olympiadbench", "minervamath", "gsm8k"]
+        or data_source.startswith("aime")
+    ):
+        from . import math_verify
 
-        res = math_dapo.compute_score(solution_str, ground_truth)
+        score = math_verify.compute_score(solution_str, ground_truth)
+        res = {"score": score, "acc": score > 0.5}
     elif data_source in [
         "numina_aops_forum",
         "numina_synthetic_math",
