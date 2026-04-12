@@ -339,6 +339,14 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                             f"in, using a generation config created from the model config when saving hf_model."
                         )
 
+                # Downcast FSDP2 master (fp32) params to bf16 before writing.
+                # HF save_pretrained(state_dict=...) uses the dict verbatim and
+                # ignores save_model.torch_dtype, so without this the safetensors
+                # files land in fp32 (2× size, no quality gain for eval/serving).
+                state_dict = {
+                    k: (v.to(torch.bfloat16) if v.is_floating_point() else v)
+                    for k, v in state_dict.items()
+                }
                 save_model.save_pretrained(hf_local_path, state_dict=state_dict)
                 log_with_rank(
                     f"Saved hf_model to {os.path.abspath(hf_local_path)}",
