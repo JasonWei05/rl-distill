@@ -131,15 +131,30 @@ def compute_topk_loss(
     - student_mass: (bsz, seqlen/cp_size)
     - teacher_mass: (bsz, seqlen/cp_size)
     """
+    loss_mode = distillation_config.distillation_loss.loss_mode
     match config.strategy:
         case "fsdp":
             import verl.trainer.distillation.fsdp.losses as fsdp_losses
 
-            distillation_loss_fn = fsdp_losses.compute_forward_kl_topk
+            if loss_mode == "forward_kl_topk":
+                distillation_loss_fn = fsdp_losses.compute_forward_kl_topk
+            elif loss_mode == "reverse_kl_topk":
+                distillation_loss_fn = fsdp_losses.compute_reverse_kl_topk
+            else:
+                raise NotImplementedError(
+                    f"FSDP top-k distillation: unsupported loss_mode={loss_mode!r}. "
+                    f"Expected one of: 'forward_kl_topk', 'reverse_kl_topk'."
+                )
         case "megatron":
             import verl.trainer.distillation.megatron.losses as megatron_losses
 
-            distillation_loss_fn = megatron_losses.compute_forward_kl_topk
+            if loss_mode == "forward_kl_topk":
+                distillation_loss_fn = megatron_losses.compute_forward_kl_topk
+            else:
+                raise NotImplementedError(
+                    f"Megatron top-k distillation currently only implements "
+                    f"'forward_kl_topk'; got loss_mode={loss_mode!r}."
+                )
         case _:
             raise NotImplementedError(f"Unsupported strategy: {config.strategy=}")
 
@@ -314,6 +329,55 @@ def compute_forward_kl_topk(
     }
 
     # Due to use of top-k, student and teacher distributions don't sum to 1 -> divergences can be negative.
+    distillation_losses = distillation_losses.clamp_min(0.0)
+
+    return distillation_losses, distillation_metrics
+
+
+@register_distillation_loss(DistillationLossSettings(names=["reverse_kl_topk"], use_topk=True))  # type: ignore[arg-type]
+def compute_reverse_kl_topk(
+    config: ActorConfig,
+    distillation_config: DistillationConfig,
+    model_output: dict,
+    data: TensorDict,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    """Compute reverse KL distillation loss on teacher's top-k support.
+
+    Reverse KL is KL(student || teacher), mode-seeking — pushes the student to
+    concentrate on teacher's peaks rather than cover all teacher-supported
+    tokens (which forward KL does). Natural objective for on-policy
+    distillation: the outer expectation is already over student samples.
+
+    Support approximation: partial sum over teacher's top-k indices (same
+    payload as forward_kl_topk — no extra teacher work). Student mass outside
+    teacher's top-k contributes zero direct loss, but softmax backprop still
+    pushes mass toward teacher's support because Q depends on full student
+    logits.
+
+    Returns:
+      - distillation_losses: (bsz, resp_len)
+      - distillation_metrics: dict with student_mass / teacher_mass stats
+    """
+    distillation_losses = no_padding_2_padding(model_output["distillation_losses"], data)
+    student_mass = no_padding_2_padding(model_output["student_mass"], data)
+    teacher_mass = no_padding_2_padding(model_output["teacher_mass"], data)
+    response_mask_bool = data["response_mask"].bool()
+    assert distillation_losses.shape == student_mass.shape == teacher_mass.shape == response_mask_bool.shape
+
+    student_mass = student_mass[response_mask_bool]
+    teacher_mass = teacher_mass[response_mask_bool]
+    distillation_metrics = {
+        "distillation/student_mass": student_mass.mean().item(),
+        "distillation/student_mass_min": Metric(AggregationType.MIN, student_mass.min()),
+        "distillation/student_mass_max": Metric(AggregationType.MAX, student_mass.max()),
+        "distillation/teacher_mass": teacher_mass.mean().item(),
+        "distillation/teacher_mass_min": Metric(AggregationType.MIN, teacher_mass.min()),
+        "distillation/teacher_mass_max": Metric(AggregationType.MAX, teacher_mass.max()),
+    }
+
+    # Partial-sum reverse KL on teacher's top-k support can be negative when
+    # student mass on that support < teacher mass (typically early in training).
+    # Clamp to 0, same convention as forward_kl_topk.
     distillation_losses = distillation_losses.clamp_min(0.0)
 
     return distillation_losses, distillation_metrics
