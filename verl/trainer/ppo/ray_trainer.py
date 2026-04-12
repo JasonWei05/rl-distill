@@ -611,6 +611,12 @@ class RayPPOTrainer:
                 else:
                     reward_extra_infos_dict[key].extend(values if isinstance(values, list) else [values])
 
+            # collect response length per sample
+            max_response_length = test_batch.batch["responses"].shape[-1]
+            response_attention_mask = test_batch.batch["attention_mask"][:, -max_response_length:]
+            response_lengths = response_attention_mask.sum(-1).cpu().tolist()
+            reward_extra_infos_dict["response_length"].extend(response_lengths)
+
             # collect num_turns of each prompt
             if "__num_turns__" in test_batch.non_tensor_batch:
                 sample_turns.append(test_batch.non_tensor_batch["__num_turns__"])
