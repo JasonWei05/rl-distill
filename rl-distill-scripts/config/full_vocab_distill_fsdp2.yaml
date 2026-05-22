@@ -1,0 +1,109 @@
+defaults:
+  - model@model: hf_model
+  - engine@engine: fsdp
+  - optim@optim: fsdp
+  - profiler@profiler: profiler
+  - _self_
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+teacher_model:
+  path: ${oc.env:TEACHER_MODEL_PATH,/tmp/rl_fresh_moe_models/gemma-3-4b-pt-dense}
+  dtype: bfloat16
+  temperature: 1.0
+  chunk_size: ${oc.decode:${oc.env:FULL_VOCAB_KL_CHUNK_SIZE,64}}
+  top_k: ${oc.decode:${oc.env:TEACHER_TOP_K,0}}
+  trust_remote_code: false
+  attn_implementation: flash_attention_2
+  use_hidden_states: true
+
+data:
+  train_batch_size: 64
+  micro_batch_size_per_gpu: 1
+  max_token_len_per_gpu: 20480
+  use_dynamic_bsz: false
+  train_files: ${oc.env:TRAIN_FILE,/home/tiger/verl/data/dapo_gemma3_4b_pt_teacher_v7_independent/train.parquet}
+  val_files: ${oc.env:VAL_FILE,/home/tiger/verl/data/dapo_gemma3_4b_pt_teacher_v7_independent/validation.parquet}
+  input_ids_key: input_ids
+  response_mask_key: response_mask
+  pad_mode: no_padding
+  max_length: 20480
+  truncation: right
+  shuffle: true
+  seed: 42
+  custom_cls:
+    path: full_vocab_distill_dataset.py
+    name: FullVocabDistillDataset
+  use_shm: false
+  num_workers: 2
+  train_max_samples: -1
+  val_max_samples: -1
+  use_logits_processor: true
+  skip_lm_log_probs: true
+  use_hidden_logits_processor: true
+
+checkpoint:
+  _target_: verl.trainer.config.CheckpointConfig
+  save_contents: ["model", "optimizer", "extra", "hf_model"]
+  load_contents: ["model", "optimizer", "extra"]
+  mbridge_config: {}
+
+trainer:
+  default_local_dir: ${oc.env:CKPTS_DIR,/tmp/verl/ckpts/full-vocab-distill/${oc.env:EXP_NAME,gemma3-27b-pt-from-4b-pt}}
+  project_name: ${oc.env:PROJECT_NAME,full-vocab-distill}
+  experiment_name: ${oc.env:EXP_NAME,gemma3-27b-pt-from-4b-pt}
+  total_epochs: 100
+  total_training_steps: 4000
+  logger: ${oc.decode:${oc.env:TRAIN_LOGGER,'["console","wandb"]'}}
+  seed: 42
+  save_freq: ${oc.decode:${oc.env:SAVE_FREQ,500}}
+  test_freq: ${oc.decode:${oc.env:TEST_FREQ,100}}
+  val_before_train: ${oc.decode:${oc.env:VAL_BEFORE_TRAIN,true}}
+  max_ckpt_to_keep: ${oc.decode:${oc.env:MAX_CKPT_TO_KEEP,1}}
+  balance_batch: false
+  resume_mode: auto
+  device: cuda
+  nnodes: ${oc.decode:${oc.env:NNODES,2}}
+  n_gpus_per_node: ${oc.decode:${oc.env:NPROC_PER_NODE,8}}
+  profile_interval: [-1, -1]
+  hf_push:
+    enable: ${oc.decode:${oc.env:HF_PUSH_ENABLE,true}}
+    repo_id: ${oc.env:HF_PUSH_REPO,JWei05/DAPO-Gemma3-27B-PT-FullVocabDistill-From-Gemma3-4B-PT-DAPO-17.4k}
+    private: ${oc.decode:${oc.env:HF_PUSH_PRIVATE,false}}
+    delete_local_after: ${oc.decode:${oc.env:HF_PUSH_DELETE_LOCAL,false}}
+    max_to_keep: ${oc.decode:${oc.env:HF_PUSH_MAX_TO_KEEP,8}}
+
+model:
+  path: ${oc.env:MODEL_PATH,/tmp/hf_models/gemma-3-27b-pt}
+  enable_gradient_checkpointing: true
+  use_remove_padding: true
+  use_fused_kernels: false
+  override_config:
+    attn_implementation: flash_attention_2
+
+engine:
+  strategy: fsdp2
+  fsdp_size: -1
+  model_dtype: fp32
+  dtype: bfloat16
+  use_torch_compile: true
+  ulysses_sequence_parallel_size: 1
+  reshard_after_forward: true
+  param_offload: false
+  optimizer_offload: false
+  offload_policy: false
+  wrap_policy:
+    transformer_layer_cls_to_wrap:
+      - Gemma3DecoderLayer
+
+optim:
+  lr: 1e-5
+  lr_warmup_steps: 100
+  lr_scheduler_type: cosine
+  total_training_steps: 4000
+  min_lr_ratio: 0.0
+  weight_decay: 0.1
+  betas: [0.9, 0.98]
+  clip_grad: 1.0

@@ -786,6 +786,46 @@ class RayPPOTrainer:
                     OmegaConf.select(self.config.global_profiler.global_tool_config.nsys, "worker_nsight_options")
                 )
         wg_kwargs["device_name"] = self.device_name
+        master_addr = os.environ.get("VERL_RAY_MASTER_ADDR")
+        master_port = os.environ.get("VERL_RAY_MASTER_PORT")
+        if bool(master_addr) != bool(master_port):
+            raise ValueError("VERL_RAY_MASTER_ADDR and VERL_RAY_MASTER_PORT must be set together")
+        if master_addr and master_port:
+            wg_kwargs["master_addr"] = master_addr
+            wg_kwargs["master_port"] = master_port
+        if master_port_range := os.environ.get("VERL_RAY_MASTER_PORT_RANGE"):
+            start, end = [int(part.strip()) for part in master_port_range.replace(":", ",").split(",", 1)]
+            wg_kwargs["master_port_range"] = [start, end]
+        worker_env = {
+            key: value
+            for key in (
+                "VLLM_TARGET_DEVICE",
+                "VLLM_FORCE_PLATFORM",
+                "VLLM_USE_V1",
+                "NCCL_SOCKET_IFNAME",
+                "NCCL_SOCKET_FAMILY",
+                "NCCL_IB_DISABLE",
+                "GLOO_SOCKET_IFNAME",
+                "VERL_RAY_MASTER_IFNAME",
+                "CUDA_HOME",
+                "CUDA_PATH",
+                "CUDA_INC_PATH",
+                "CUDACXX",
+                "HF_HOME",
+                "HF_HUB_CACHE",
+                "TRANSFORMERS_CACHE",
+                "XDG_CACHE_HOME",
+                "VLLM_CACHE_ROOT",
+                "TORCHINDUCTOR_CACHE_DIR",
+                "TRITON_CACHE_DIR",
+                "CUDA_CACHE_PATH",
+                "FLASHINFER_WORKSPACE_BASE",
+                "FLASHINFER_CUBIN_DIR",
+            )
+            if (value := os.environ.get(key))
+        }
+        if worker_env:
+            wg_kwargs["worker_env"] = worker_env
 
         for resource_pool, class_dict in self.resource_pool_to_cls.items():
             if not class_dict:
@@ -1472,21 +1512,22 @@ class RayPPOTrainer:
                     else:  # Recompute old_log_probs
                         with marked_timer("old_log_prob", timing_raw, color="blue"):
                             old_log_prob, old_log_prob_mfu = self._compute_old_log_prob(batch)
-                            entropys = old_log_prob.batch["entropys"]
-                            response_masks = batch.batch["response_mask"]
-                            actor_config = self.config.actor_rollout_ref.actor
-                            entropy_agg = agg_loss(
-                                loss_mat=entropys,
-                                loss_mask=response_masks,
-                                loss_agg_mode=actor_config.loss_agg_mode,
-                                loss_scale_factor=actor_config.loss_scale_factor,
-                            )
                             old_log_prob_metrics = {
-                                "actor/entropy": entropy_agg.detach().item(),
                                 "perf/mfu/actor_infer": old_log_prob_mfu,
                             }
+                            if "entropys" in old_log_prob.batch:
+                                entropys = old_log_prob.batch["entropys"]
+                                response_masks = batch.batch["response_mask"]
+                                actor_config = self.config.actor_rollout_ref.actor
+                                entropy_agg = agg_loss(
+                                    loss_mat=entropys,
+                                    loss_mask=response_masks,
+                                    loss_agg_mode=actor_config.loss_agg_mode,
+                                    loss_scale_factor=actor_config.loss_scale_factor,
+                                )
+                                old_log_prob_metrics["actor/entropy"] = entropy_agg.detach().item()
+                                old_log_prob.batch.pop("entropys")
                             metrics.update(old_log_prob_metrics)
-                            old_log_prob.batch.pop("entropys")
                             if "routed_experts" in batch.batch and "routed_experts" in old_log_prob.batch:
                                 raise ValueError(
                                     "Detected conflicting router replay configuration: "

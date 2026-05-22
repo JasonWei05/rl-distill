@@ -9,6 +9,8 @@ OVERWRITE="${OVERWRITE:-0}"
 mkdir -p "${DATA_DIR}"
 
 TRAIN_FILE="${DATA_DIR}/dapo-math-17k.parquet"
+DAPO_OPENMATH2_TRAIN_FILE="${DATA_DIR}/dapo_openmath2_mix_train.parquet"
+DAPO_OPENMATH2_VAL_FILE="${DATA_DIR}/dapo_openmath2_mix_val.parquet"
 
 # Intermediate files (downloaded, used to produce val sets)
 AIME2024_8X_FILE="${DATA_DIR}/math__aime2024_repeated_8x_240.parquet"
@@ -39,6 +41,9 @@ if [[ ! -f "${TRAIN_FILE}" || "${OVERWRITE}" -eq 1 ]]; then
 else
   echo "Training file found: ${TRAIN_FILE}"
 fi
+
+# --- DAPO/OpenMathInstruct2 train/val split ---
+DATA_DIR="${DATA_DIR}" OVERWRITE="${OVERWRITE}" bash "${SCRIPT_DIR}/prepare_dapo_openmath2_mix_split.sh"
 
 # --- AIME 2024 ---
 if [[ ! -f "${AIME2024_8X_FILE}" || "${OVERWRITE}" -eq 1 ]]; then
@@ -155,6 +160,8 @@ for path, ds in updates:
 echo ""
 echo "=== Summary ==="
 echo "Train file:        ${TRAIN_FILE}"
+echo "OpenMath2 train:   ${DAPO_OPENMATH2_TRAIN_FILE}"
+echo "OpenMath2 val:     ${DAPO_OPENMATH2_VAL_FILE}"
 echo "AIME 2024 32x:     ${AIME2024_32X_FILE}"
 echo "AIME 2025 32x:     ${AIME2025_32X_FILE}"
 echo "AIME 2026 32x:     ${AIME2026_32X_FILE}"

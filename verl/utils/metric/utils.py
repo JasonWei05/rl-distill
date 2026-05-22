@@ -22,6 +22,16 @@ import numpy as np
 import torch
 
 
+def _metric_to_numpy(value: Any) -> Any:
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy()
+    if isinstance(value, list):
+        return [_metric_to_numpy(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_metric_to_numpy(item) for item in value)
+    return value
+
+
 def reduce_metrics(metrics: dict[str, Union["Metric", list[Any]]]) -> dict[str, Any]:
     """
     Reduces a dictionary of metric lists by computing the mean, max, or min of each list.
@@ -50,11 +60,11 @@ def reduce_metrics(metrics: dict[str, Union["Metric", list[Any]]]) -> dict[str, 
         if isinstance(val, Metric):
             metrics[key] = val.aggregate()
         elif "max" in key:
-            metrics[key] = np.max(val)
+            metrics[key] = np.max(_metric_to_numpy(val))
         elif "min" in key:
-            metrics[key] = np.min(val)
+            metrics[key] = np.min(_metric_to_numpy(val))
         else:
-            metrics[key] = np.mean(val)
+            metrics[key] = np.mean(_metric_to_numpy(val))
     return metrics
 
 

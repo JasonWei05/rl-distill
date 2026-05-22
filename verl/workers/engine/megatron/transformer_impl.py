@@ -22,6 +22,7 @@ import torch
 import torch.distributed
 from megatron.core import parallel_state as mpu
 from megatron.core.pipeline_parallel import get_forward_backward_func
+from megatron.core.transformer.moe.moe_utils import get_moe_layer_wise_logging_tracker, track_moe_metrics
 from omegaconf import OmegaConf
 from tensordict import TensorDict
 
@@ -163,6 +164,8 @@ class MegatronEngine(BaseEngine):
         self.dtype = PrecisionType.to_dtype(self.param_dtype)
 
         override_transformer_config = mapping_string_to_attn_backend({**self.engine_config.override_transformer_config})
+        gemma3_moe_num_experts = override_transformer_config.pop("gemma3_moe_num_experts", None)
+        gemma3_moe_aux_loss_coeff = override_transformer_config.pop("gemma3_moe_aux_loss_coeff", 1e-2)
 
         self.provider = None
         self.vanilla_bridge = self.engine_config.vanilla_mbridge
@@ -216,6 +219,20 @@ class MegatronEngine(BaseEngine):
             provider.variable_seq_lengths = True
             provider.moe_token_dispatcher_type = "alltoall"
             provider.moe_router_load_balancing_type = "none"
+
+            if gemma3_moe_num_experts is not None:
+                from megatron.bridge.models.gemma.gemma3_provider import gemma3_moe_layer_spec
+
+                provider.num_moe_experts = int(gemma3_moe_num_experts)
+                provider.moe_router_topk = 1
+                provider.moe_ffn_hidden_size = provider.ffn_hidden_size
+                provider.moe_grouped_gemm = False
+                provider.moe_router_load_balancing_type = "aux_loss"
+                provider.moe_aux_loss_coeff = float(gemma3_moe_aux_loss_coeff)
+                provider.moe_router_pre_softmax = False
+                provider.moe_token_dispatcher_type = "alltoall"
+                provider.moe_permute_fusion = True
+                provider.transformer_layer_spec = gemma3_moe_layer_spec
 
             # Apply QAT: set quantization layer spec and patch Megatron-Bridge
             if self._qat_enabled:
@@ -674,6 +691,12 @@ class MegatronEngine(BaseEngine):
                 losses_reduced[0]["metrics"] = {}
             losses_reduced[0]["metrics"].update(metrics)
 
+        moe_metrics = self._consume_moe_metrics(n_micro_batch)
+        if moe_metrics and len(losses_reduced) > 0:
+            if "metrics" not in losses_reduced[0]:
+                losses_reduced[0]["metrics"] = {}
+            losses_reduced[0]["metrics"].update(moe_metrics)
+
         if RouterReplayHelper.is_r2_record_action(self.tf_config):
             if self.tf_config.virtual_pipeline_model_parallel_size is not None:
                 # config = self.actor_module[0].module.module.config
@@ -702,6 +725,36 @@ class MegatronEngine(BaseEngine):
             RouterReplay.clear_global_indices()
             RouterReplay.clear_global_router_replay_action()
         return output
+
+    def _consume_moe_metrics(self, n_micro_batch: int) -> dict[str, torch.Tensor]:
+        tracker = get_moe_layer_wise_logging_tracker()
+        if "load_balancing_loss" not in tracker:
+            return {}
+
+        total_loss_dict = {}
+        track_moe_metrics(
+            loss_scale=1.0 / n_micro_batch,
+            iteration=0,
+            total_loss_dict=total_loss_dict,
+            track_names=["load_balancing_loss"],
+            num_layers=self.tf_config.num_layers,
+            moe_layer_freq=self.tf_config.moe_layer_freq,
+            mtp_num_layers=self.tf_config.mtp_num_layers,
+            pg_collection=getattr(self.tf_config, "_pg_collection", None),
+        )
+
+        router_loss = total_loss_dict.get("load_balancing_loss")
+        if router_loss is None:
+            return {}
+
+        router_loss_coeff = getattr(self.tf_config, "moe_aux_loss_coeff", 0.0)
+        if isinstance(router_loss_coeff, list):
+            router_loss_coeff = router_loss_coeff[0] if router_loss_coeff else 0.0
+        router_loss_scaled = router_loss * float(router_loss_coeff)
+        return {
+            "train/router_loss": router_loss.detach(),
+            "train/router_loss_scaled": router_loss_scaled.detach(),
+        }
 
     def get_per_tensor_param(self, base_sync_done=False, **kwargs):
         peft_config = None
@@ -887,7 +940,26 @@ class MegatronEngineWithLMHead(MegatronEngine):
             data_format = "thd" if self.engine_config.use_remove_padding else "bshd"
 
             def logits_processor(logits, label, temperature):
-                assert logits.shape[:2] == label.shape[:2]
+                if isinstance(logits, tuple | list):
+                    logits = next(item for item in logits if torch.is_tensor(item))
+                if logits.shape[:2] != label.shape[:2]:
+                    if (
+                        data_format == "thd"
+                        and logits.ndim >= 2
+                        and label.ndim == 2
+                        and tuple(logits.shape[:2]) == tuple(label.transpose(0, 1).shape)
+                    ):
+                        label = label.transpose(0, 1).contiguous()
+                        if isinstance(temperature, torch.Tensor) and temperature.shape == label.transpose(0, 1).shape:
+                            temperature = temperature.transpose(0, 1).contiguous()
+                    else:
+                        raise AssertionError(
+                            "logits/label shape mismatch before log-prob computation: "
+                            f"logits={tuple(logits.shape)}, label={tuple(label.shape)}, "
+                            "temperature="
+                            f"{tuple(temperature.shape) if isinstance(temperature, torch.Tensor) else temperature}, "
+                            f"data_format={data_format}"
+                        )
                 # avoid non-positive temperature such as padding
                 temperature[temperature <= 0] = 1e-8
                 assert torch.all(temperature > 0).item(), f"temperature tensor must be positive. Got {temperature}"

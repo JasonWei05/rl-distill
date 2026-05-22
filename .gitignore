@@ -130,3 +130,17 @@ logs
 log
 outputs
 .history
+
+# rl-distill local artifacts
+rl-distill-scripts/_logs/
+rl-distill-scripts/_runs/
+rl-distill-scripts/_model_metadata/
+rl-distill-scripts/outputs/
+rl-distill-scripts/wandb/
+rl-distill-scripts/data/random_entry_samples/
+dapo/wandb/
+eval_results/
+Megatron-Bridge/
+Megatron-LM/
+modelchef/
+nohup.out

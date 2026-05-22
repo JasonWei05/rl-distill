@@ -72,6 +72,22 @@ def _with_routing_replay_flag(enabled: bool):
     return decorator
 
 
+def _make_ray_cpu_serializable(value):
+    """Move nested metric tensors off CUDA before returning them to a CPU Ray driver."""
+    if isinstance(value, torch.Tensor):
+        value = value.detach().cpu()
+        if value.numel() == 1:
+            return value.item()
+        return value
+    if isinstance(value, dict):
+        return {key: _make_ray_cpu_serializable(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [_make_ray_cpu_serializable(val) for val in value]
+    if isinstance(value, tuple):
+        return tuple(_make_ray_cpu_serializable(val) for val in value)
+    return value
+
+
 class TrainingWorker(Worker, DistProfilerExtension):
     """
     TrainingWorker provides a Tinker-like API (https://thinkingmachines.ai/tinker/) as a RayWorkerGroup
@@ -226,6 +242,7 @@ class TrainingWorker(Worker, DistProfilerExtension):
             final_metrics["mfu"] = estimated_flops / promised_flops / torch.distributed.get_world_size()
             if forward_only:
                 final_metrics["mfu"] /= 3.0
+        final_metrics = _make_ray_cpu_serializable(final_metrics)
         # model outputs
         model_output = output.pop("model_output", {})
         # We only return final_metrics
@@ -317,6 +334,7 @@ class TrainingWorker(Worker, DistProfilerExtension):
                             )
                     append_to_dict(metrics, output)
 
+                metrics = _make_ray_cpu_serializable(metrics)
                 output = tu.get_tensordict(tensor_dict={}, non_tensor_dict={"metrics": metrics}).cpu()
             else:
                 output = None

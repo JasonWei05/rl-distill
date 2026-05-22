@@ -172,10 +172,11 @@ class HFModelConfig(BaseConfig):
             self.processor.chat_template = self.tokenizer.chat_template
 
         if self.custom_chat_template is not None:
+            self.tokenizer.chat_template = self.custom_chat_template
             if self.processor is not None:
                 self.processor.chat_template = self.custom_chat_template
-            else:
-                self.tokenizer.chat_template = self.custom_chat_template
+                if getattr(self.processor, "tokenizer", None) is not None:
+                    self.processor.tokenizer.chat_template = self.custom_chat_template
 
         self.local_hf_config_path = copy_to_local(self.hf_config_path, use_shm=self.use_shm)
         self.generation_config = get_generation_config(

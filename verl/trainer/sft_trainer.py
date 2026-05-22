@@ -14,6 +14,7 @@
 
 
 import os
+import time
 from functools import partial
 
 from tensordict.tensorclass import NonTensorData
@@ -35,7 +36,7 @@ from verl.utils import tensordict_utils as tu
 from verl.utils.checkpoint import CheckpointHandler
 from verl.utils.dataset.dataset_utils import SFTTensorCollator
 from verl.utils.dataset.multiturn_sft_dataset import MultiTurnSFTDataset
-from verl.utils.device import auto_set_device, get_device_name
+from verl.utils.device import auto_set_device, get_device_name, get_torch_device
 from verl.utils.distributed import destroy_global_process_group
 from verl.utils.logger import log_with_rank
 from verl.utils.memory_utils import aggressive_empty_cache
@@ -45,6 +46,68 @@ from verl.workers.engine_workers import TrainingWorker
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_SFT_LOGGING_LEVEL", "WARN"))
+
+
+def _iter_loggable_numbers(value):
+    if isinstance(value, list | tuple):
+        for item in value:
+            yield from _iter_loggable_numbers(item)
+        return
+    if torch.is_tensor(value):
+        if value.numel() != 1:
+            return
+        yield value.detach().item()
+        return
+    if isinstance(value, int | float):
+        yield value
+
+
+def _to_loggable_scalar(value):
+    values = list(_iter_loggable_numbers(value))
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _to_loggable_sum(value):
+    values = list(_iter_loggable_numbers(value))
+    if not values:
+        return None
+    return sum(values)
+
+
+def _to_loggable_min(value):
+    values = list(_iter_loggable_numbers(value))
+    if not values:
+        return None
+    return min(values)
+
+
+def _to_loggable_max(value):
+    values = list(_iter_loggable_numbers(value))
+    if not values:
+        return None
+    return max(values)
+
+
+def _synchronize_accelerator():
+    device_module = get_torch_device()
+    is_available = getattr(device_module, "is_available", None)
+    if is_available is not None and not is_available():
+        return
+    synchronize = getattr(device_module, "synchronize", None)
+    if synchronize is not None:
+        synchronize()
+
+
+def _aggregate_loggable_metric(key, value):
+    if key.endswith(("/sum", "_sum", "/active_tokens", "/token_count")):
+        return _to_loggable_sum(value)
+    if key.endswith("/min"):
+        return _to_loggable_min(value)
+    if key.endswith("/max"):
+        return _to_loggable_max(value)
+    return _to_loggable_scalar(value)
 
 
 class SFTTrainer:
@@ -350,9 +413,51 @@ class SFTTrainer:
             "pad_mode": self.config.data.pad_mode,
             "pad_token_id": self.model_config.tokenizer.pad_token_id,
         }
+        for key in (
+            "use_logits_processor",
+            "skip_lm_log_probs",
+            "distillation_use_topk",
+            "use_hidden_logits_processor",
+        ):
+            if key in self.config.data:
+                meta_info[key] = self.config.data[key]
+
+        def run_validation(step_for_log: int):
+            val_losses = []
+            val_meta_info = dict(meta_info)
+            if "VAL_TEACHER_TOP_K" in os.environ:
+                val_meta_info["teacher_top_k_override"] = int(os.environ["VAL_TEACHER_TOP_K"])
+            if "VAL_FULL_VOCAB_KL_CHUNK_SIZE" in os.environ:
+                val_meta_info["teacher_chunk_size_override"] = int(os.environ["VAL_FULL_VOCAB_KL_CHUNK_SIZE"])
+            for val_data in self.val_dataloader:
+                val_data = tu.get_tensordict(tensor_dict=val_data, non_tensor_dict=val_meta_info)
+                output = self.training_client.infer_batch(val_data)
+
+                if self.engine.is_mp_src_rank_with_outputs():
+                    metrics = tu.get(output, "metrics")
+                    val_losses.append(metrics["loss"])
+
+            metric = None
+            if self.engine.is_mp_src_rank_with_outputs():
+                val_loss = torch.mean(torch.tensor(val_losses, device=self.device_name))
+                # average over data parallel group
+                dp_group = self.engine.get_data_parallel_group()
+                if dp_group is not None:
+                    torch.distributed.all_reduce(val_loss, op=torch.distributed.ReduceOp.AVG, group=dp_group)
+
+            if is_logging:
+                metric = {"val/loss": val_loss.detach().item()}
+                metric["val/total_loss"] = metric["val/loss"]
+                print(f"Validation metrics at step {step_for_log}: {metric}", flush=True)
+                tracking.log(data=metric, step=step_for_log)
+            torch.distributed.barrier()
+            return metric
 
         train_time = 0
         total_tokens = 0
+        if self.val_dataloader is not None and getattr(self.config.trainer, "val_before_train", False):
+            last_valid_metric = run_validation(global_step)
+
         for epoch in range(start_epoch, self.config.trainer.total_epochs):
             self.train_sampler.set_epoch(epoch=epoch)
 
@@ -382,16 +487,36 @@ class SFTTrainer:
                 if global_step == self.start_profile_step:
                     self.training_client.start_profile()
                 # train for on batch
+                _synchronize_accelerator()
+                step_start_time = time.perf_counter()
                 output = self.training_client.train_batch(data=data)
+                _synchronize_accelerator()
+                step_time = time.perf_counter() - step_start_time
+                train_time += step_time
 
                 if global_step == self.end_profile_step:
                     self.training_client.stop_profile()
 
                 if self.engine.is_mp_src_rank_with_outputs():
                     metrics = tu.get(output, "metrics")
+                    metrics = {
+                        k: v
+                        for k, v in ((k, _aggregate_loggable_metric(k, v)) for k, v in metrics.items())
+                        if v is not None
+                    }
+                    if (
+                        "full_vocab_kl/token_sum" in metrics
+                        and "full_vocab_kl/active_tokens" in metrics
+                        and metrics["full_vocab_kl/active_tokens"] > 0
+                    ):
+                        metrics["full_vocab_kl/mean"] = (
+                            metrics["full_vocab_kl/token_sum"] / metrics["full_vocab_kl/active_tokens"]
+                        )
+                    if "loss" in metrics and "train/router_loss_scaled" in metrics:
+                        metrics["total_loss"] = metrics["loss"] + metrics["train/router_loss_scaled"]
 
                     # TODO: we can actual accumulate metrics for N steps and perform aggregate metrics
-                    for k in ["loss", "grad_norm", "lr", "mfu"]:
+                    for k in ["loss", "total_loss", "grad_norm", "lr", "mfu"]:
                         if k in metrics.keys():
                             value = metrics.pop(k)
                             metrics[f"train/{k}"] = value
@@ -401,40 +526,23 @@ class SFTTrainer:
                     ).item()
                     total_tokens += metrics["train/global_tokens"]
                     metrics["train/total_tokens(B)"] = total_tokens / 1e9
+                    metrics["train/step_time_s"] = step_time
+                    metrics["train/avg_step_time_s"] = train_time / max(global_step - self.resume_global_step, 1)
+                    metrics["train/steps_per_hour"] = 3600.0 / step_time if step_time > 0 else 0.0
 
                     if self.engine.get_data_parallel_rank() == 0:
                         tracking.log(data=metrics, step=global_step)
 
                 is_last_step = global_step >= self.total_training_steps
-                is_valid_step = global_step % self.test_freq == 0
-                is_save_step = global_step % self.save_freq == 0
+                is_valid_step = self.test_freq > 0 and global_step % self.test_freq == 0
+                is_save_step = self.save_freq > 0 and global_step % self.save_freq == 0
 
                 # early exit or validation step
-                if is_last_step and self.val_dataloader is not None or (self.test_freq > 0 and is_valid_step):
+                if self.val_dataloader is not None and (is_last_step or is_valid_step):
                     # Perform validation
-                    val_losses = []
-                    for val_data in self.val_dataloader:
-                        val_data = tu.get_tensordict(tensor_dict=val_data, non_tensor_dict=meta_info)
-                        output = self.training_client.infer_batch(val_data)
+                    last_valid_metric = run_validation(global_step)
 
-                        if self.engine.is_mp_src_rank_with_outputs():
-                            metrics = tu.get(output, "metrics")
-                            val_losses.append(metrics["loss"])
-
-                    if self.engine.is_mp_src_rank_with_outputs():
-                        val_loss = torch.mean(torch.tensor(val_losses, device=self.device_name))
-                        # average over data parallel group
-                        dp_group = self.engine.get_data_parallel_group()
-                        if dp_group is not None:
-                            torch.distributed.all_reduce(val_loss, op=torch.distributed.ReduceOp.AVG, group=dp_group)
-
-                    if is_logging:
-                        metric = {"val/loss": val_loss.detach().item()}
-                        tracking.log(data=metric, step=global_step)
-                        last_valid_metric = metric
-                    torch.distributed.barrier()
-
-                if is_last_step or (self.save_freq > 0 and is_save_step):
+                if is_last_step or is_save_step:
                     aggressive_empty_cache(force_sync=True)
                     self.ckpt_handler.save_checkpoint(step=global_step)
 

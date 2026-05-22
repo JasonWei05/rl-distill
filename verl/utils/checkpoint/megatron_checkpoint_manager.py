@@ -157,9 +157,15 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         self.vanilla_bridge = self.provider is None
         self.peft_cls = peft_cls
         self.rank = torch.distributed.get_rank()
-        # Megatron-Bridge is Okay to load/save HF checkpoint for value model as well
+        moe_requires_dist_checkpoint = getattr(self.transformer_config, "num_moe_experts", None) is not None
+        # Megatron-Bridge is okay to load/save HF checkpoint for value models. MoE
+        # models need distributed checkpoints because the dense HF Gemma config does
+        # not represent router/expert parameters.
         self.use_dist_checkpointing = (
-            use_dist_checkpointing or not self.bridge or (self.vanilla_bridge and self.is_value_model)
+            use_dist_checkpointing
+            or moe_requires_dist_checkpoint
+            or not self.bridge
+            or (self.vanilla_bridge and self.is_value_model)
         )
         self.use_hf_checkpoint = not self.use_dist_checkpointing
 
@@ -669,7 +675,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                     transformer_config_dict.pop(key)
                 transformer_config_path = get_transformer_config_checkpoint_path(local_path)
                 with open(transformer_config_path, "w") as f:
-                    json.dump(transformer_config_dict, f, indent=2)
+                    json.dump(transformer_config_dict, f, indent=2, default=str)
 
         if self.should_save_hf_model and not self.use_hf_checkpoint:
             # wait for everyone to dump to local

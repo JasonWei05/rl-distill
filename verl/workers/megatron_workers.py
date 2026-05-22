@@ -85,6 +85,22 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
+def _make_ray_cpu_serializable(value):
+    """Move nested metric tensors off CUDA before returning them to a CPU Ray driver."""
+    if isinstance(value, torch.Tensor):
+        value = value.detach().cpu()
+        if value.numel() == 1:
+            return value.item()
+        return value
+    if isinstance(value, dict):
+        return {key: _make_ray_cpu_serializable(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [_make_ray_cpu_serializable(val) for val in value]
+    if isinstance(value, tuple):
+        return tuple(_make_ray_cpu_serializable(val) for val in value)
+    return value
+
+
 def set_random_seed(seed, only_rollout=False):
     import random
 
@@ -136,10 +152,11 @@ class MegatronWorker(Worker):
             self.processor = tokenizer_or_path
 
         if self.config.model.get("custom_chat_template", None) is not None:
+            self.tokenizer.chat_template = self.config.model.custom_chat_template
             if self.processor is not None:
                 self.processor.chat_template = self.config.model.custom_chat_template
-            else:
-                self.tokenizer.chat_template = self.config.model.custom_chat_template
+                if getattr(self.processor, "tokenizer", None) is not None:
+                    self.processor.tokenizer.chat_template = self.config.model.custom_chat_template
 
         # Step 2: get the hf
         hf_config = AutoConfig.from_pretrained(self.local_path, trust_remote_code=trust_remote_code)
@@ -804,6 +821,8 @@ class ActorRolloutRefWorker(MegatronWorker, DistProfilerExtension):
         metrics["actor/lr"] = get_megatron_last_lr(self.actor_optimizer)
         self.actor_optimizer_scheduler.step(1)
 
+        metrics = _make_ray_cpu_serializable(metrics)
+
         # TODO: here, we should return all metrics
         output = DataProto(meta_info={"metrics": metrics})
         output = output.to("cpu")
@@ -917,10 +936,13 @@ class ActorRolloutRefWorker(MegatronWorker, DistProfilerExtension):
         if self.enable_routing_replay and self.config.actor.router_replay.mode == "R3":
             RouterReplay.set_global_router_replay_action(RouterReplayAction.REPLAY_FORWARD)
 
+        calculate_entropy = (not is_lora) and self.config.actor.get("calculate_entropy", False)
         with adapter_ctx:
-            output, entropys, layers_topk_idx = self.actor.compute_log_prob(data=data, calculate_entropy=not is_lora)
+            output, entropys, layers_topk_idx = self.actor.compute_log_prob(
+                data=data, calculate_entropy=calculate_entropy
+            )
         tensors = {"ref_log_prob": output} if is_lora else {"old_log_probs": output}
-        if not is_lora:
+        if calculate_entropy:
             tensors["entropys"] = entropys
         output = DataProto.from_dict(
             tensors=tensors,

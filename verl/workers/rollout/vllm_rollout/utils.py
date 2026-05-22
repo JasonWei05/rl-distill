@@ -78,7 +78,22 @@ def get_device_uuid(device_id: int) -> str:
         else:
             return f"NPU-{device_id}"
     else:
-        return current_platform.get_device_uuid(device_id)
+        try:
+            return current_platform.get_device_uuid(device_id)
+        except Exception as exc:
+            # vLLM platform detection can fall back to the generic Platform when
+            # NVML is not usable in a Ray worker. The socket only needs to be
+            # unique on the local node, so a stable host/device fallback is OK.
+            visible_devices = [d for d in os.getenv("CUDA_VISIBLE_DEVICES", "").split(",") if d]
+            physical_device = visible_devices[device_id] if device_id < len(visible_devices) else str(device_id)
+            host = platform.node() or "localhost"
+            safe_host = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in host)
+            logger.warning(
+                "Falling back to synthetic CUDA device UUID for device %s because vLLM returned %r",
+                device_id,
+                exc,
+            )
+            return f"CUDA-{safe_host}-{physical_device}"
 
 
 def get_vllm_max_lora_rank(lora_rank: int):
@@ -117,6 +132,26 @@ def monkey_patch_compute_logits(model, vocab_size: int):
         return logits
 
     model.compute_logits = MethodType(compute_logits, model)
+
+
+def _skip_multimodal_reload_weight(name: str) -> bool:
+    """Return whether an async rollout reload weight belongs to an unused MM tower."""
+    mm_tokens = ("vision_tower", "multi_modal_projector")
+    parts = name.split(".")
+    return any(token in parts for token in mm_tokens)
+
+
+def _filter_multimodal_reload_weights(
+    weights: list[tuple[str, torch.Tensor]],
+) -> list[tuple[str, torch.Tensor]]:
+    if os.getenv("VERL_SKIP_VLLM_MM_WEIGHT_RELOAD", "0") != "1":
+        return weights
+
+    filtered = [(name, tensor) for name, tensor in weights if not _skip_multimodal_reload_weight(name)]
+    skipped = len(weights) - len(filtered)
+    if skipped:
+        logger.info("Skipped %d multimodal tower/projector weights during vLLM async reload", skipped)
+    return filtered
 
 
 class vLLMColocateWorkerExtension:
@@ -261,6 +296,7 @@ class vLLMColocateWorkerExtension:
                 logger.info(f"FP8 weights loaded (async), loaded_params: {len(loaded_params)}")
             else:
                 logger.info("Loading standard weights (non-FP8, async)")
+                weights = _filter_multimodal_reload_weights(weights)
                 self.model_runner.model.load_weights(weights)
 
     def _get_zmq_handle(self) -> str:

@@ -55,6 +55,19 @@ Writes to `${HOME}/verl/data/`. Datasets:
 - Train: `dapo-math-17k.parquet` (BytedTsinghua-SIA/DAPO-Math-17k)
 - Val: AIME 2024 / 2025 / 2026 (×32), MATH500 (×2), OlympiadBench (×2), MinervaMath (×4), GSM8K test
 
+Custom DAPO/OpenMathInstruct2 mix:
+
+```bash
+source .venv/bin/activate
+python3 rl-distill-scripts/data/split_dapo_openmath2_mix.py
+```
+
+The source dataset is `JWei05/DAPO-OpenMathInstruct2-34k` / `dapo_openmath2_mix.parquet`.
+The split is deterministic with `--seed 42`: 1,500 random rows are held out for validation and the rest are used for training.
+Outputs:
+- Train: `${HOME}/verl/data/dapo_openmath2_mix_train.parquet` (33,296 rows)
+- Val: `${HOME}/verl/data/dapo_openmath2_mix_val.parquet` (1,500 rows)
+
 Reward scoring is routed to `math_verify` (LatexExtractionConfig only — only `\boxed{}` answers score). See `verl/utils/reward_score/`.
 
 ## 4. Model download (once per node with local storage)

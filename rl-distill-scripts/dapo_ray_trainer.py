@@ -28,6 +28,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from dapo.hf_push import HFPusher
 from verl import DataProto
 from verl.trainer.ppo.core_algos import agg_loss
 from verl.trainer.ppo.metric_utils import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics
@@ -44,8 +45,6 @@ from verl.utils.metric import reduce_metrics
 from verl.utils.profiler import marked_timer
 from verl.utils.rollout_skip import RolloutSkip
 
-from dapo.hf_push import HFPusher
-
 
 class RayDAPOTrainer(RayPPOTrainer):
     """
@@ -61,9 +60,16 @@ class RayDAPOTrainer(RayPPOTrainer):
             private: bool = True
             delete_local_after: bool = False
             max_to_keep: Optional[int] = None   # keep N most-recent step_* folders on hub
+            freq: Optional[int] = None           # only upload every N steps
         """
         cfg = self.config.trainer.get("hf_push", None)
         if cfg is None or not cfg.get("enable", False):
+            return
+        upload_freq = cfg.get("freq", None)
+        if upload_freq is None:
+            upload_freq = cfg.get("upload_freq", None)
+        if upload_freq is not None and int(upload_freq) > 0 and step % int(upload_freq) != 0:
+            print(f"[HFPusher] skip step {step}: upload freq is {upload_freq}", flush=True)
             return
         # NOTE: we do NOT check isdir() here because in multi-node FSDP runs
         # rank-0 of the actor_rollout worker group may live on a *different* Ray
@@ -72,7 +78,9 @@ class RayDAPOTrainer(RayPPOTrainer):
         # node; whichever node holds the files performs the upload.
         hf_dir = os.path.join(
             self.config.trainer.default_local_dir,
-            f"global_step_{step}", "actor", "huggingface",
+            f"global_step_{step}",
+            "actor",
+            "huggingface",
         )
         if getattr(self, "_hf_pusher", None) is None:
             self._hf_pusher = HFPusher(
@@ -140,21 +148,22 @@ class RayDAPOTrainer(RayPPOTrainer):
         # recompute old_log_probs
         with marked_timer("old_log_prob", timing_raw, "blue"):
             old_log_prob, old_log_prob_mfu = self._compute_old_log_prob(batch)
-            entropys = old_log_prob.batch["entropys"]
-            response_masks = batch.batch["response_mask"]
-            actor_config = self.config.actor_rollout_ref.actor
-            entropy_agg = agg_loss(
-                loss_mat=entropys,
-                loss_mask=response_masks,
-                loss_agg_mode=actor_config.loss_agg_mode,
-                loss_scale_factor=actor_config.loss_scale_factor,
-            )
             old_log_prob_metrics = {
-                "actor/entropy": entropy_agg.detach().item(),
                 "perf/mfu/actor_infer": old_log_prob_mfu,
             }
+            if "entropys" in old_log_prob.batch:
+                entropys = old_log_prob.batch["entropys"]
+                response_masks = batch.batch["response_mask"]
+                actor_config = self.config.actor_rollout_ref.actor
+                entropy_agg = agg_loss(
+                    loss_mat=entropys,
+                    loss_mask=response_masks,
+                    loss_agg_mode=actor_config.loss_agg_mode,
+                    loss_scale_factor=actor_config.loss_scale_factor,
+                )
+                old_log_prob_metrics["actor/entropy"] = entropy_agg.detach().item()
+                old_log_prob.batch.pop("entropys")
             metrics.update(old_log_prob_metrics)
-            old_log_prob.batch.pop("entropys")
             batch = batch.union(old_log_prob)
 
         if self.use_reference_policy:
@@ -288,6 +297,13 @@ class RayDAPOTrainer(RayPPOTrainer):
                     # repeat to align with repeated responses in rollout
                     new_batch = new_batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
                     new_batch = new_batch.union(gen_batch_output)
+
+                    # On-policy distillation: ask colocated teacher for per-token logprobs
+                    # of the student-sampled tokens. No-op unless distillation.enabled=true.
+                    if self._should_compute_teacher_colocate(new_batch):
+                        with marked_timer("teacher", timing_raw, color="cyan"):
+                            batch_teacher = self._compute_teacher_colocate(new_batch)
+                            new_batch = new_batch.union(batch_teacher)
 
                     if self.config.algorithm.use_kl_in_reward:
                         # We need these metrics for apply_kl_penalty if using kl in reward

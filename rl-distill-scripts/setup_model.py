@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+# Copyright 2024 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Download a Gemma 3 PT model and patch its tokenizer with the IT chat template.
 
 The Gemma 3 PT (pretrained/base) models don't ship with a chat template since
@@ -46,8 +60,8 @@ def main():
         "--it-source",
         default="google/gemma-3-4b-it",
         help="IT model to copy the chat template from (default: google/gemma-3-4b-it). "
-             "All Gemma 3 IT models share the same template, so 4b-it works for any size. "
-             "Only used when --variant=pt.",
+        "All Gemma 3 IT models share the same template, so 4b-it works for any size. "
+        "Only used when --variant=pt.",
     )
     args = parser.parse_args()
 
@@ -64,7 +78,7 @@ def main():
         it_tok = AutoTokenizer.from_pretrained(args.it_source)
         pt_tok = AutoTokenizer.from_pretrained(str(output_dir))
     else:
-        print(f"\n=== Patching IT chat template (remove strict role check) ===")
+        print("\n=== Patching IT chat template (remove strict role check) ===")
         # IT model already has the template; just patch it for verl compatibility
         it_tok = AutoTokenizer.from_pretrained(str(output_dir))
         pt_tok = it_tok
@@ -97,18 +111,14 @@ def main():
     print(f"Normal prompt: {r1!r}")
 
     # Edge cases verl needs
-    r2 = tok.apply_chat_template(
-        [{"role": "user", "content": ""}], tokenize=False, add_generation_prompt=False
-    )
-    r3 = tok.apply_chat_template(
-        [{"role": "user", "content": ""}] * 2, tokenize=False, add_generation_prompt=False
-    )
+    r2 = tok.apply_chat_template([{"role": "user", "content": ""}], tokenize=False, add_generation_prompt=False)
+    r3 = tok.apply_chat_template([{"role": "user", "content": ""}] * 2, tokenize=False, add_generation_prompt=False)
     print(f"Empty user (system_prompt init): OK (len={len(r2)})")
     print(f"Two empty users (system_prompt init): OK (len={len(r3)})")
 
-    print(f"\n=== Done ===")
+    print("\n=== Done ===")
     print(f"Model ready at: {output_dir}")
-    print(f"Use it in your training script with:")
+    print("Use it in your training script with:")
     print(f"  MODEL_PATH={output_dir}")
 
 

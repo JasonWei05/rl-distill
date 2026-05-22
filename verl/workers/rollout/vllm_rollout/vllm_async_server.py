@@ -13,10 +13,12 @@
 # limitations under the License.
 import argparse
 import asyncio
+import importlib
 import inspect
 import json
 import logging
 import os
+import socket
 from pprint import pprint
 from typing import Any, Callable, Optional
 
@@ -155,8 +157,23 @@ class vLLMHttpServer:
             self._master_port = None
             self._dp_rpc_port = None
             self._dp_master_port = None
+            self._master_sock = None
+            self._dp_rpc_sock = None
+            self._dp_master_sock = None
+        self._vllm_port_sock = None
 
         self._post_init(cuda_visible_devices)
+
+    def _release_reserved_port_sockets(self):
+        for attr in ("_master_sock", "_dp_rpc_sock", "_dp_master_sock", "_vllm_port_sock"):
+            sock = getattr(self, attr, None)
+            if sock is None:
+                continue
+            try:
+                sock.close()
+            except OSError:
+                logger.warning("Failed to close reserved socket %s", attr, exc_info=True)
+            setattr(self, attr, None)
 
     def get_master_address(self):
         """Get master address and port for data parallel.
@@ -264,6 +281,8 @@ class vLLMHttpServer:
             "compilation_config": compilation_config,
             **engine_kwargs,
         }
+        if self.model_config.custom_chat_template is not None:
+            args["chat-template"] = self.model_config.custom_chat_template
 
         # update profiler args
         profiler_args = build_vllm_profiler_args(
@@ -372,6 +391,10 @@ class vLLMHttpServer:
             await self.run_headless(server_args)
 
     async def run_server(self, args: argparse.Namespace):
+        self._release_reserved_port_sockets()
+        self._prepare_vllm_process_env()
+        self._set_vllm_port_floor()
+
         engine_args = AsyncEngineArgs.from_cli_args(args)
         usage_context = UsageContext.OPENAI_API_SERVER
         vllm_config = engine_args.create_engine_config(usage_context=usage_context)
@@ -415,6 +438,10 @@ class vLLMHttpServer:
 
     async def run_headless(self, args: argparse.Namespace):
         """Run headless server in a separate thread."""
+        self._release_reserved_port_sockets()
+        self._prepare_vllm_process_env()
+        self._set_vllm_port_floor()
+
         args.api_server_count = 0
 
         def run_headless_wrapper():
@@ -435,6 +462,92 @@ class vLLMHttpServer:
 
         self.task = asyncio.create_task(asyncio.to_thread(run_headless_wrapper))
         self.task.add_done_callback(on_run_headless_done)
+
+    def _set_vllm_port_floor(self):
+        requested_port = os.getenv("VERL_VLLM_PORT")
+        if requested_port:
+            vllm_port = int(requested_port)
+        elif os.getenv("VERL_VLLM_RANDOM_PORTS", "0").lower() in {"1", "true", "yes"}:
+            vllm_port, _ = get_free_port(self._server_address)
+        else:
+            port_base = self._get_int_env("VERL_VLLM_PORT_BASE", 52000)
+            port_stride = self._get_int_env("VERL_VLLM_PORT_STRIDE", 100)
+            node_stride = self._get_int_env("VERL_VLLM_NODE_PORT_STRIDE", 10)
+            vllm_port = port_base + self.replica_rank * port_stride + self.node_rank * node_stride
+        vllm_port = self._first_available_tcp_port(vllm_port, address=self._server_address)
+        os.environ["VLLM_PORT"] = str(vllm_port)
+        self._patch_vllm_open_port_allocator(vllm_port)
+        logger.info(
+            "Set VLLM_PORT=%s for replica_rank=%s node_rank=%s",
+            vllm_port,
+            self.replica_rank,
+            self.node_rank,
+        )
+
+    @staticmethod
+    def _first_available_tcp_port(start_port: int, attempts: int = 50, address: str = "") -> int:
+        family = socket.AF_INET6 if is_valid_ipv6_address(address) else socket.AF_INET
+        bind_address = address if address else ("::" if family == socket.AF_INET6 else "")
+        for port in range(start_port, start_port + attempts):
+            with socket.socket(family, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                try:
+                    sock.bind((bind_address, port))
+                except OSError:
+                    continue
+                return port
+        return start_port
+
+    @staticmethod
+    def _get_int_env(key: str, default: int) -> int:
+        value = os.getenv(key)
+        if not value:
+            return default
+        return int(value)
+
+    def _patch_vllm_open_port_allocator(self, start_port: int):
+        next_port = {"value": start_port}
+
+        def get_open_port():
+            port = self._first_available_tcp_port(next_port["value"], attempts=100, address=self._server_address)
+            next_port["value"] = port + 1
+            return port
+
+        module_names = (
+            "vllm.utils.network_utils",
+            "vllm.v1.executor.multiproc_executor",
+            "vllm.v1.executor.ray_executor",
+            "vllm.v1.executor.uniproc_executor",
+            "vllm.v1.engine.core_client",
+            "vllm.v1.utils",
+            "vllm.distributed.device_communicators.shm_broadcast",
+            "vllm.distributed.kv_transfer.kv_connector.v1.moriio.moriio_common",
+        )
+        for module_name in module_names:
+            try:
+                module = importlib.import_module(module_name)
+            except Exception:
+                continue
+            if hasattr(module, "get_open_port"):
+                module.get_open_port = get_open_port
+        logger.info("Patched vLLM get_open_port allocator from base port %s", start_port)
+
+    def _prepare_vllm_process_env(self):
+        for key in ("PYTORCH_CUDA_ALLOC_CONF", "PYTORCH_ALLOC_CONF"):
+            value = os.environ.get(key)
+            if value and "expandable_segments:True" in value:
+                parts = [part for part in value.split(",") if part != "expandable_segments:True"]
+                if parts:
+                    os.environ[key] = ",".join(parts)
+                else:
+                    os.environ.pop(key, None)
+                logger.info("Removed expandable_segments:True from %s before starting vLLM", key)
+        try:
+            from verl.utils.device import set_expandable_segments
+
+            set_expandable_segments(False)
+        except Exception:
+            logger.debug("Could not disable expandable_segments before starting vLLM", exc_info=True)
 
     async def generate(
         self,
@@ -479,6 +592,10 @@ class vLLMHttpServer:
         )
         sampling_params["logprobs"] = 0 if sampling_params.pop("logprobs", False) else None
         sampling_params.setdefault("repetition_penalty", self.config.get("repetition_penalty", 1.0))
+        # verl consumes token ids from vLLM and decodes them itself for rewards.
+        # Disabling vLLM-side detokenization avoids tokenizer prefix-stream
+        # failures on long, high-temperature Gemma PT rollouts.
+        sampling_params.setdefault("detokenize", False)
         sampling_params = SamplingParams(max_tokens=max_tokens, **sampling_params)
         prompt_ids = qwen2_5_vl_dedup_image_tokens(prompt_ids, self.model_config.processor)
         multi_modal_data = {}

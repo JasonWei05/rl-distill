@@ -20,6 +20,7 @@ import logging
 import os
 import warnings
 from contextlib import nullcontext
+from functools import wraps
 from typing import Callable, ContextManager, Optional
 
 import torch
@@ -79,6 +80,106 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 device_name = get_device_name()
+
+
+def _patch_gemma3_skip_lm_head():
+    try:
+        from transformers.models.gemma3.modeling_gemma3 import (
+            Gemma3CausalLMOutputWithPast,
+            Gemma3ForConditionalGeneration,
+        )
+    except Exception:
+        return
+
+    if getattr(Gemma3ForConditionalGeneration, "_verl_skip_lm_head_patched", False):
+        return
+
+    orig_forward = Gemma3ForConditionalGeneration.forward
+
+    @wraps(orig_forward)
+    def forward_with_skip_lm_head(
+        self,
+        input_ids=None,
+        pixel_values=None,
+        attention_mask=None,
+        position_ids=None,
+        past_key_values=None,
+        token_type_ids=None,
+        cache_position=None,
+        inputs_embeds=None,
+        labels=None,
+        use_cache=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+        logits_to_keep=0,
+        skip_lm_head=False,
+        **lm_kwargs,
+    ):
+        if not skip_lm_head:
+            return orig_forward(
+                self,
+                input_ids=input_ids,
+                pixel_values=pixel_values,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                past_key_values=past_key_values,
+                token_type_ids=token_type_ids,
+                cache_position=cache_position,
+                inputs_embeds=inputs_embeds,
+                labels=labels,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+                logits_to_keep=logits_to_keep,
+                **lm_kwargs,
+            )
+
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        outputs = self.model(
+            input_ids=input_ids,
+            pixel_values=pixel_values,
+            token_type_ids=token_type_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            labels=labels,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+            cache_position=cache_position,
+            **lm_kwargs,
+        )
+
+        hidden_states = outputs[0]
+        slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
+        hidden_states = hidden_states[:, slice_indices, :]
+
+        if not return_dict:
+            return (hidden_states,) + outputs[1:]
+
+        return Gemma3CausalLMOutputWithPast(
+            loss=None,
+            logits=hidden_states,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+            image_hidden_states=outputs.image_hidden_states,
+        )
+
+    Gemma3ForConditionalGeneration.forward = forward_with_skip_lm_head
+    Gemma3ForConditionalGeneration._verl_skip_lm_head_patched = True
+
+
+_patch_gemma3_skip_lm_head()
 
 
 class FSDPEngine(BaseEngine):
@@ -916,7 +1017,9 @@ class FSDPEngineWithLMHead(FSDPEngine):
 
             # pad and slice the inputs if sp > 1
             if self.use_ulysses_sp:
-                is_vlm_model = hasattr(getattr(self.module, "module", self.module).config, "vision_config")
+                module_config = getattr(getattr(self.module, "module", self.module), "config", None)
+                model_type = getattr(module_config, "model_type", None)
+                is_vlm_model = hasattr(module_config, "vision_config") and model_type not in {"gemma3", "gemma3_moe"}
                 if is_vlm_model:
                     # vlm model's inputs will be sliced after embedding
                     input_ids_rmpad, position_ids_rmpad, pad_size = ulysses_pad(
@@ -1016,6 +1119,10 @@ class FSDPEngineWithLMHead(FSDPEngine):
         use_fused_kernels = tu.get_non_tensor_data(data=micro_batch, key="use_fused_kernels", default=False)
         calculate_entropy = tu.get_non_tensor_data(data=micro_batch, key="calculate_entropy", default=False)
         distillation_use_topk = tu.get_non_tensor_data(data=micro_batch, key="distillation_use_topk", default=False)
+        use_logits_processor = tu.get_non_tensor_data(
+            data=micro_batch, key="use_logits_processor", default=distillation_use_topk
+        )
+        skip_lm_log_probs = tu.get_non_tensor_data(data=micro_batch, key="skip_lm_log_probs", default=False)
 
         model_output = {}
 
@@ -1037,11 +1144,14 @@ class FSDPEngineWithLMHead(FSDPEngine):
                 inplace_backward = True
                 if calculate_entropy:
                     inplace_backward = False
-                log_probs = logprobs_from_logits(
-                    logits=logits_rmpad,
-                    labels=input_ids_rmpad_rolled,
-                    inplace_backward=inplace_backward,
-                )
+                if skip_lm_log_probs:
+                    log_probs = torch.zeros(logits_rmpad.shape[:-1], dtype=torch.float32, device=logits_rmpad.device)
+                else:
+                    log_probs = logprobs_from_logits(
+                        logits=logits_rmpad,
+                        labels=input_ids_rmpad_rolled,
+                        inplace_backward=inplace_backward,
+                    )
 
                 # compute entropy
                 if calculate_entropy:
@@ -1053,7 +1163,7 @@ class FSDPEngineWithLMHead(FSDPEngine):
                         )
 
                 # logits_processor_func return tensors with shape (1, total_nnz/sp_size)
-                if distillation_use_topk:
+                if use_logits_processor:
                     outputs = logits_processor_func(student_logits=logits_rmpad.unsqueeze(0), data=micro_batch)
                     cu_seqlens = input_ids.offsets()
                     for k, v in outputs.items():
@@ -1138,6 +1248,63 @@ class FSDPEngineWithLMHead(FSDPEngine):
         # actually, we should avoid assigning like this...
         micro_batch = micro_batch.to(get_device_id())
         model_inputs, output_args = self.prepare_model_inputs(micro_batch=micro_batch)
+        use_hidden_logits_processor = tu.get_non_tensor_data(
+            data=micro_batch, key="use_hidden_logits_processor", default=False
+        )
+
+        if use_hidden_logits_processor:
+            if self.use_ulysses_sp:
+                raise NotImplementedError("use_hidden_logits_processor currently requires sp_size=1")
+            if loss_function is None:
+                raise ValueError("use_hidden_logits_processor requires a loss function")
+
+            input_ids = micro_batch["input_ids"]
+            loss_mask = micro_batch["loss_mask"]
+            cu_seqlens = input_ids.offsets()
+            flat_loss_mask = loss_mask.values()
+            active_mask = torch.zeros_like(flat_loss_mask, dtype=torch.bool)
+            for start, end in zip(cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=True):
+                if end - start > 1:
+                    active_mask[start : end - 1] = flat_loss_mask[start + 1 : end].to(torch.bool)
+            student_active_flat_idx = active_mask.nonzero(as_tuple=True)[0]
+            module = getattr(self.module, "module", self.module)
+
+            with torch.autocast(device_type=device_name, dtype=torch.bfloat16):
+                raw_output = self.module(
+                    **model_inputs,
+                    use_cache=False,
+                    logits_to_keep=student_active_flat_idx,
+                    skip_lm_head=True,
+                    return_dict=True,
+                )
+
+                outputs = loss_function(
+                    student_hidden=raw_output.logits,
+                    student_active_flat_idx=student_active_flat_idx,
+                    student_lm_head=module.lm_head,
+                    student_config=module.config,
+                    data=micro_batch,
+                )
+
+                model_output = {}
+                for key, value in outputs.items():
+                    value = value.squeeze(0)
+                    model_output[key] = torch.nested.nested_tensor_from_jagged(value, cu_seqlens)
+
+                log_probs = torch.zeros(int(cu_seqlens[-1].item()), dtype=torch.float32, device=flat_loss_mask.device)
+                model_output["log_probs"] = torch.nested.nested_tensor_from_jagged(log_probs, cu_seqlens)
+
+                loss, metrics = loss_function(
+                    model_output=model_output, data=micro_batch, dp_group=self.get_data_parallel_group()
+                )
+
+                output = {
+                    "model_output": model_output,
+                    "loss": loss.detach().item(),
+                    "metrics": metrics,
+                }
+
+                return loss, output
 
         with torch.autocast(device_type=device_name, dtype=torch.bfloat16):
             raw_output = self.module(

@@ -1,0 +1,77 @@
+defaults:
+  - model@model: hf_model
+  - engine@engine: fsdp
+  - optim@optim: fsdp
+  - profiler@profiler: profiler
+  - _self_
+
+# The defaults above (model/hf_model, engine/fsdp, optim/fsdp, profiler/profiler)
+# live in verl/trainer/config/. Add it to Hydra's searchpath so they resolve.
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+data:
+  train_batch_size: 64
+  micro_batch_size_per_gpu: 2
+  max_token_len_per_gpu: 32768
+  use_dynamic_bsz: True
+  train_files: ${oc.env:TRAIN_FILE}
+  # Loss-based validation on the held-out split of DAPO-Math-17k
+  # (produced by data/split_sft_dataset.py). Uses the same DistillSFTDataset
+  # + forward_kl_loss as training — reported as `val/loss` on wandb.
+  val_files: ${oc.env:VAL_FILE,null}
+  messages_key: messages
+  pad_mode: no_padding
+  max_length: 22528
+  truncation: right
+  custom_cls:
+    path: distill_dataset.py
+    name: DistillSFTDataset
+  use_shm: False
+  apply_chat_template_kwargs: {}
+  num_workers: 4
+  ignore_input_ids_mismatch: False
+
+checkpoint:
+  _target_: verl.trainer.config.CheckpointConfig
+  # Include hf_model so each save writes a loadable HF-format dir at
+  # {default_local_dir}/global_step_{N}/huggingface/ for HF-Hub uploads.
+  save_contents: ["model", "optimizer", "extra", "hf_model"]
+  load_contents: ["model", "optimizer", "extra"]
+  mbridge_config: {}
+
+trainer:
+  default_local_dir: ${oc.env:CKPTS_DIR}
+  project_name: ${oc.env:PROJECT_NAME,distill}
+  experiment_name: ${oc.env:EXP_NAME,offpolicy-distill}
+  total_epochs: 3
+  total_training_steps: null
+  logger: ['console', 'wandb']
+  seed: 42
+  # Save every SAVE_FREQ steps; each save writes an HF-format dir and (if
+  # hf_push.enable) pushes it to HF Hub asynchronously.
+  save_freq: ${oc.decode:${oc.env:SAVE_FREQ,50}}
+  # Loss-based val cadence on the DAPO held-out split.
+  test_freq: ${oc.decode:${oc.env:TEST_FREQ,5}}
+  # Run loss-based validation before the first optimizer step so W&B gets an
+  # initial val/loss point at step 0.
+  val_before_train: ${oc.decode:${oc.env:VAL_BEFORE_TRAIN,true}}
+  # Keep at most this many full checkpoint dirs on local disk (FSDP shards +
+  # optimizer + extra). Small by default since HF has the durable copy.
+  max_ckpt_to_keep: ${oc.decode:${oc.env:MAX_CKPT_TO_KEEP,2}}
+  balance_batch: True
+  resume_mode: auto
+  device: cuda
+  nnodes: 1
+  n_gpus_per_node: 8
+  profile_interval: [-1, -1]
+  # HF-Hub upload of each saved checkpoint (rank-0 only, async).
+  hf_push:
+    enable: ${oc.decode:${oc.env:HF_PUSH_ENABLE,false}}
+    repo_id: ${oc.env:HF_PUSH_REPO,}
+    private: ${oc.decode:${oc.env:HF_PUSH_PRIVATE,false}}
+    delete_local_after: ${oc.decode:${oc.env:HF_PUSH_DELETE_LOCAL,false}}
+    # Ring-buffer: when the (N+1)-th save uploads, the oldest step folder on
+    # the Hub is deleted via HfApi.delete_folder. Default 10 (user cap).
+    max_to_keep: ${oc.decode:${oc.env:HF_PUSH_MAX_TO_KEEP,10}}

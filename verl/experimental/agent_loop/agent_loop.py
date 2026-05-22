@@ -15,6 +15,7 @@ import asyncio
 import logging
 import os
 import random
+import sys
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 from uuid import uuid4
@@ -59,6 +60,35 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 DEFAULT_ROUTING_CACHE_SIZE = 10000
+
+
+def _drop_vllm_platform_cache():
+    for module_name in list(sys.modules):
+        if module_name == "vllm.platforms" or module_name.startswith("vllm.platforms."):
+            sys.modules.pop(module_name, None)
+
+
+def _get_rollout_replica_class_for_controller(rollout: str):
+    """Load rollout replica classes safely from CPU-only controller actors."""
+    if rollout.startswith("vllm"):
+        old_target = os.environ.get("VLLM_TARGET_DEVICE")
+        old_force_platform = os.environ.get("VLLM_FORCE_PLATFORM")
+        os.environ["VLLM_TARGET_DEVICE"] = "cpu"
+        os.environ["VLLM_FORCE_PLATFORM"] = "cpu"
+        _drop_vllm_platform_cache()
+        try:
+            return get_rollout_replica_class(rollout)
+        finally:
+            if old_target is None:
+                os.environ.pop("VLLM_TARGET_DEVICE", None)
+            else:
+                os.environ["VLLM_TARGET_DEVICE"] = old_target
+            if old_force_platform is None:
+                os.environ.pop("VLLM_FORCE_PLATFORM", None)
+            else:
+                os.environ["VLLM_FORCE_PLATFORM"] = old_force_platform
+            _drop_vllm_platform_cache()
+    return get_rollout_replica_class(rollout)
 
 
 @ray.remote
@@ -1027,7 +1057,7 @@ class AgentLoopManager:
 
         # for recipe to change
         if not hasattr(self, "rollout_replica_class"):
-            self.rollout_replica_class = get_rollout_replica_class(self.rollout_config.name)
+            self.rollout_replica_class = _get_rollout_replica_class_for_controller(self.rollout_config.name)
         if not hasattr(self, "agent_loop_workers_class"):
             if OmegaConf.select(self.config, "actor_rollout_ref.model.model_type", default=None) == "diffusion_model":
                 from verl.experimental.agent_loop.diffusion_agent_loop import DiffusionAgentLoopWorker
@@ -1115,7 +1145,12 @@ class AgentLoopManager:
             teacher_servers = None
             teacher_load_balancer_handle = None
 
-        node_ids = [node["NodeID"] for node in ray.nodes() if node["Alive"] and node["Resources"].get("CPU", 0) > 0]
+        nodes = [node for node in ray.nodes() if node["Alive"] and node["Resources"].get("CPU", 0) > 0]
+        if os.getenv("VERL_AGENT_LOOP_PREFER_GPU_NODES", "0").lower() in {"1", "true", "yes", "on"}:
+            gpu_nodes = [node for node in nodes if node["Resources"].get("GPU", 0) > 0]
+            if gpu_nodes:
+                nodes = gpu_nodes
+        node_ids = [node["NodeID"] for node in nodes]
         for i in range(num_workers):
             # Round-robin scheduling over the all nodes
             node_id = node_ids[i % len(node_ids)]

@@ -729,12 +729,20 @@ def postprocess_bshd_engine(
 
 
 def build_vlm_attn_mask_thd(input_ids: torch.Tensor, pad_token_id: int = None):
-    input_ids_rmpad = input_ids.to_padded_tensor(pad_token_id)
+    seqlens_in_batch = input_ids.offsets().diff()
+
+    tp_size = mpu.get_tensor_model_parallel_world_size()
+    cp_size = mpu.get_context_parallel_world_size()
+    align_size = tp_size * cp_size * 2 if cp_size > 1 else tp_size
+    pad_size = (align_size - seqlens_in_batch % align_size) % align_size
+    seqlens_in_batch_padded = seqlens_in_batch + pad_size
+    max_seqlen = int(seqlens_in_batch_padded.max().item())
+
+    input_ids_rmpad = input_ids.to_padded_tensor(pad_token_id, output_size=(input_ids.shape[0], max_seqlen))
 
     if is_npu_available:
         return input_ids_rmpad, None
 
-    seqlens_in_batch = input_ids.offsets().diff()
     attention_mask = torch.zeros_like(input_ids_rmpad, dtype=torch.bool)
     for i, seqlen in enumerate(seqlens_in_batch):
         attention_mask[i, :seqlen] = True

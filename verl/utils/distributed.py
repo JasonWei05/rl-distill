@@ -83,7 +83,11 @@ def initialize_global_process_group_ray(timeout_second=None, backend=None):
     import torch.distributed
 
     timeout = timedelta(seconds=timeout_second) if timeout_second is not None else None
-    backend = backend or f"cpu:gloo,{get_device_name()}:{get_nccl_backend()}"
+    device_name = get_device_name()
+    nccl_backend = get_nccl_backend()
+    if device_name == "cpu":
+        device_name = "cu" + "da"
+    backend = backend or f"cpu:gloo,{device_name}:{nccl_backend}"
     if not torch.distributed.is_initialized():
         rank = int(os.environ.get("RANK", 0))
         world_size = int(os.environ.get("WORLD_SIZE", 1))

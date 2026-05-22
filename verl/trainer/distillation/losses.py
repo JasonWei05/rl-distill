@@ -133,7 +133,7 @@ def compute_topk_loss(
     """
     loss_mode = distillation_config.distillation_loss.loss_mode
     match config.strategy:
-        case "fsdp":
+        case "fsdp" | "fsdp2":
             import verl.trainer.distillation.fsdp.losses as fsdp_losses
 
             if loss_mode == "forward_kl_topk":
@@ -377,7 +377,10 @@ def compute_reverse_kl_topk(
 
     # Partial-sum reverse KL on teacher's top-k support can be negative when
     # student mass on that support < teacher mass (typically early in training).
-    # Clamp to 0, same convention as forward_kl_topk.
+    # We clamp to 0 because allowing negative values lets the optimizer find a
+    # degenerate minimum at Q(v) = P(v)/e (loss ≈ -teacher_mass/e per position)
+    # by pushing student mass OFF teacher's top-k entirely. This clamp blocks
+    # that escape route. Same convention as forward_kl_topk.
     distillation_losses = distillation_losses.clamp_min(0.0)
 
     return distillation_losses, distillation_metrics
@@ -411,8 +414,17 @@ def compute_distillation_loss_reverse_kl_estimator(
     distillation_losses = kl_penalty(
         logprob=student_log_probs, ref_logprob=teacher_log_probs, kl_penalty=loss_config.loss_mode
     )
-    # Since k1 can be negative, log the mean absolute loss.
+    # Always log k1 and k3 estimators as monitoring metrics, regardless of which
+    # is the loss. k1 = student_lp - teacher_lp; mean(k1) is a biased low-variance
+    # estimator of -KL(student||teacher) (so should drift from negative toward 0).
+    # k3 = exp(teacher_lp - student_lp) - (teacher_lp - student_lp) - 1 is the
+    # unbiased non-negative estimator of KL(student||teacher).
+    k1_losses = student_log_probs - teacher_log_probs
+    k3_losses = kl_penalty(logprob=student_log_probs, ref_logprob=teacher_log_probs, kl_penalty="k3")
     metrics = {
+        "distillation/k1": Metric(AggregationType.MEAN, k1_losses[response_mask_bool].mean()),
+        "distillation/k3": Metric(AggregationType.MEAN, k3_losses[response_mask_bool].mean()),
+        # Magnitude of the active estimator (since some can be negative per token).
         "distillation/abs_loss": Metric(AggregationType.MEAN, distillation_losses[response_mask_bool].abs().mean()),
     }
     return distillation_losses, metrics

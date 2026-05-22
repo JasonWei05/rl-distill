@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -xeuo pipefail
+set -euo pipefail
 
 # Load API keys from .env
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -52,8 +52,9 @@ MODEL_PATH=${MODEL_PATH:-"${RAY_DATA_HOME}/models/gemma-3-27b-it"}
 # Local copies are deleted after HF upload so only ~1–2 ckpts live on disk at once.
 CKPTS_DIR=${CKPTS_DIR:-"/tmp/verl/ckpts/${project_name}/${exp_name}"}
 HF_PUSH_REPO=${HF_PUSH_REPO:-"JWei05/dapo-gemma3-27b-it"}
-TRAIN_FILE=${TRAIN_FILE:-"${RAY_DATA_HOME}/data/dapo-math-17k.parquet"}
-VAL_FILES="['${RAY_DATA_HOME}/data/math__aime2024_repeated_32x_960.parquet','${RAY_DATA_HOME}/data/math__aime2025_repeated_32x_960.parquet','${RAY_DATA_HOME}/data/math__aime2026_repeated_32x_960.parquet','${RAY_DATA_HOME}/data/math__math_500_repeated_2x_1000.parquet','${RAY_DATA_HOME}/data/math__olympiadbench_repeated_2x.parquet','${RAY_DATA_HOME}/data/math__minervamath_repeated_4x.parquet','${RAY_DATA_HOME}/data/math__gsm8k_test.parquet']"
+DATA_SEED=${DATA_SEED:-42}
+TRAIN_FILE=${TRAIN_FILE:-"${RAY_DATA_HOME}/data/dapo_openmath2_mix_train.parquet"}
+VAL_FILES="['${RAY_DATA_HOME}/data/dapo_openmath2_mix_val_compat.parquet','${RAY_DATA_HOME}/data/math__aime2024_repeated_32x_960_compat.parquet','${RAY_DATA_HOME}/data/math__aime2025_repeated_32x_960_compat.parquet','${RAY_DATA_HOME}/data/math__aime2026_repeated_32x_960_compat.parquet','${RAY_DATA_HOME}/data/math__math_500_repeated_2x_1000_compat.parquet','${RAY_DATA_HOME}/data/math__olympiadbench_repeated_2x_compat.parquet','${RAY_DATA_HOME}/data/math__minervamath_repeated_4x_compat.parquet','${RAY_DATA_HOME}/data/math__gsm8k_test_compat.parquet']"
 
 # Algorithm
 temperature=1.0
@@ -72,21 +73,17 @@ enable_chunked_prefill=True
 
 export TORCH_NCCL_AVOID_RECORD_STREAMS=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
-export NCCL_SOCKET_IFNAME=bond0
-export NCCL_SOCKET_FAMILY=AF_INET6
-export GLOO_SOCKET_IFNAME=bond0
+export NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-eth0}
+export NCCL_SOCKET_FAMILY=${NCCL_SOCKET_FAMILY:-AF_INET6}
+export GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-eth0}
 
 python3 -m dapo.main_dapo \
-    +ray_kwargs.ray_init.runtime_env.env_vars.NCCL_SOCKET_IFNAME=bond0 \
-    +ray_kwargs.ray_init.runtime_env.env_vars.NCCL_SOCKET_FAMILY=AF_INET6 \
-    +ray_kwargs.ray_init.runtime_env.env_vars.GLOO_SOCKET_IFNAME=bond0 \
-    +ray_kwargs.ray_init.runtime_env.env_vars.WANDB_API_KEY="${WANDB_API_KEY}" \
-    +ray_kwargs.ray_init.runtime_env.env_vars.HF_TOKEN="${HF_TOKEN}" \
+    +ray_kwargs.ray_init.runtime_env=null \
     data.train_files="${TRAIN_FILE}" \
     data.val_files="${VAL_FILES}" \
     data.prompt_key=prompt \
     data.shuffle=True \
-    data.seed=42 \
+    data.seed=${DATA_SEED} \
     data.truncation='left' \
     data.max_prompt_length=${max_prompt_length} \
     data.max_response_length=${max_response_length} \
@@ -114,7 +111,7 @@ python3 -m dapo.main_dapo \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.optim.lr=1e-6 \
-    actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
+    actor_rollout_ref.actor.optim.lr_warmup_steps=20 \
     actor_rollout_ref.actor.optim.weight_decay=0.1 \
     actor_rollout_ref.actor.ppo_mini_batch_size=${train_prompt_mini_bsz} \
     actor_rollout_ref.actor.fsdp_config.param_offload=${offload} \
@@ -142,7 +139,7 @@ python3 -m dapo.main_dapo \
     actor_rollout_ref.actor.strategy=fsdp2 \
     actor_rollout_ref.actor.fsdp_config.fsdp_size=-1 \
     '+actor_rollout_ref.actor.fsdp_config.wrap_policy.transformer_layer_cls_to_wrap=["Gemma3DecoderLayer"]' \
-    'actor_rollout_ref.actor.checkpoint.save_contents=[hf_model]' \
+    'actor_rollout_ref.actor.checkpoint.save_contents=[model,optimizer,extra,hf_model]' \
     reward_model.reward_manager=dapo \
     reward.reward_kwargs.overlong_buffer_cfg.enable=${enable_overlong_buffer} \
     reward.reward_kwargs.overlong_buffer_cfg.len=${overlong_buffer_len} \
@@ -156,7 +153,7 @@ python3 -m dapo.main_dapo \
     trainer.nnodes="${NNODES}" \
     trainer.val_before_train=True \
     trainer.test_freq=2 \
-    trainer.save_freq=10 \
+    trainer.save_freq=20 \
     trainer.max_actor_ckpt_to_keep=2 \
     +trainer.hf_push.enable=True \
     +trainer.hf_push.repo_id="${HF_PUSH_REPO}" \

@@ -37,6 +37,37 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
+def _get_ipv4_addr_for_ifname(ifname: str) -> Optional[str]:
+    try:
+        import fcntl
+        import struct
+
+        clean_ifname = ifname.strip().lstrip("=")
+        if not clean_ifname:
+            return None
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            ifreq = struct.pack("256s", clean_ifname[:15].encode("utf-8"))
+            return socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x8915, ifreq)[20:24])
+    except Exception as exc:
+        logger.warning("Failed to get IPv4 address for interface %s: %s", ifname, exc)
+        return None
+
+
+def _get_ray_master_addr() -> str:
+    override = os.getenv("VERL_RAY_MASTER_ADDR")
+    if override:
+        return override.strip("[]")
+
+    ifnames = os.getenv("VERL_RAY_MASTER_IFNAME")
+    if ifnames:
+        for ifname in ifnames.split(","):
+            addr = _get_ipv4_addr_for_ifname(ifname)
+            if addr:
+                return addr
+
+    return ray.util.get_node_ip_address().strip("[]")
+
+
 def get_random_string(length: int) -> str:
     import random
     import string
@@ -79,16 +110,23 @@ def sort_placement_group_by_node_ip(pgs: list[PlacementGroup]) -> list[Placement
     node_ip = {node["NodeID"]: node["NodeManagerAddress"] for node in ray.nodes()}
     pg_ip = {}
     for pg in pgs:
-        specs = ray._private.state.state.placement_group_table(pg.id)
+        try:
+            specs = ray._private.state.state.placement_group_table(pg.id)
+        except Exception:
+            return pgs
         # all bunles should be on the same node
         node_id = specs["bundles_to_node_id"][0]
         pg_ip[pg.id] = node_ip[node_id]
+    preferred_master_node_ip = os.environ.get("VERL_RAY_MASTER_NODE_IP")
+    if preferred_master_node_ip:
+        preferred_ips = {ip.strip() for ip in preferred_master_node_ip.split(",") if ip.strip()}
+        return sorted(pgs, key=lambda pg: (pg_ip[pg.id] not in preferred_ips, pg_ip[pg.id]))
     return sorted(pgs, key=lambda pg: pg_ip[pg.id])
 
 
 @ray.remote
 def get_master_addr_port(master_port_range: Optional[list[int]] = None) -> tuple[str, str]:
-    addr = ray.util.get_node_ip_address().strip("[]")
+    addr = _get_ray_master_addr()
 
     if master_port_range is None:
         with socket.socket() as s:
@@ -218,11 +256,15 @@ class ResourcePoolManager:
 
     def _check_resource_available(self):
         """Check if the resource pool can be satisfied in this ray cluster."""
-        node_available_resources = ray._private.state.available_resources_per_node()
-        node_available_gpus = {
-            node: node_info.get("GPU", 0) if "GPU" in node_info else node_info.get("NPU", 0)
-            for node, node_info in node_available_resources.items()
-        }
+        try:
+            node_available_resources = ray._private.state.available_resources_per_node()
+            node_available_gpus = {
+                node: node_info.get("GPU", 0) if "GPU" in node_info else node_info.get("NPU", 0)
+                for node, node_info in node_available_resources.items()
+            }
+        except Exception:
+            cluster_resources = ray.cluster_resources()
+            node_available_gpus = {"ray_client_cluster": cluster_resources.get("GPU", cluster_resources.get("NPU", 0))}
 
         # check total required gpus can be satisfied
         total_available_gpus = sum(node_available_gpus.values())
@@ -514,12 +556,20 @@ class RayWorkerGroup(WorkerGroup):
     def _get_master_addr_port(self, pg, bundle_index=0, master_port_range=None):
         """Get master addr and port for this worker group"""
         if self._master_addr is None and self._master_port is None:
+            task_options = {
+                "scheduling_strategy": PlacementGroupSchedulingStrategy(
+                    placement_group=pg, placement_group_bundle_index=bundle_index
+                ),
+            }
+            task_env = {
+                key: value
+                for key in ("VERL_RAY_MASTER_ADDR", "VERL_RAY_MASTER_IFNAME")
+                if (value := os.environ.get(key))
+            }
+            if task_env:
+                task_options["runtime_env"] = {"env_vars": task_env}
             self._master_addr, self._master_port = ray.get(
-                get_master_addr_port.options(
-                    scheduling_strategy=PlacementGroupSchedulingStrategy(
-                        placement_group=pg, placement_group_bundle_index=bundle_index
-                    ),
-                ).remote(master_port_range=master_port_range)
+                get_master_addr_port.options(**task_options).remote(master_port_range=master_port_range)
             )
         elif self._master_addr is not None and self._master_port is not None:
             logger.debug(f"{self._master_addr=} {self._master_port=}")

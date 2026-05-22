@@ -21,12 +21,46 @@ import socket
 
 import hydra
 import ray
+from omegaconf import OmegaConf
 
 from verl.experimental.reward_loop import migrate_legacy_reward_impl
-from verl.trainer.main_ppo import TaskRunner, create_rl_dataset, create_rl_sampler, run_ppo
+from verl.trainer.main_ppo import (
+    TaskRunner,
+    create_rl_dataset,
+    create_rl_sampler,
+    get_ppo_ray_runtime_env,
+    run_ppo,
+)
 from verl.trainer.ppo.utils import need_critic, need_reference_policy
 from verl.utils.config import validate_config
 from verl.utils.device import auto_set_device
+
+
+def _materialize_custom_chat_template(config):
+    template = config.actor_rollout_ref.model.get("custom_chat_template", None)
+    if not isinstance(template, str):
+        return
+
+    path = None
+    if template.startswith("@"):
+        path = template[1:]
+    elif template.startswith("file://"):
+        path = template[len("file://") :]
+
+    if path:
+        path = os.path.expandvars(os.path.expanduser(path))
+        with open(path, encoding="utf-8") as f:
+            config.actor_rollout_ref.model.custom_chat_template = f.read()
+
+
+def _apply_custom_chat_template(tokenizer, processor, template):
+    if not template:
+        return
+    tokenizer.chat_template = template
+    if processor is not None:
+        processor.chat_template = template
+        if getattr(processor, "tokenizer", None) is not None:
+            processor.tokenizer.chat_template = template
 
 
 class DAPOTaskRunner(TaskRunner):
@@ -40,12 +74,14 @@ class DAPOTaskRunner(TaskRunner):
         from verl.utils.fs import copy_to_local
 
         print(f"TaskRunner hostname: {socket.gethostname()}, PID: {os.getpid()}")
+        _materialize_custom_chat_template(config)
         pprint(OmegaConf.to_container(config, resolve=True))
         OmegaConf.resolve(config)
 
         actor_rollout_cls, ray_worker_group_cls = self.add_actor_rollout_worker(config)
         self.add_critic_worker(config)
         self.add_reward_model_resource_pool(config)
+        self.add_teacher_model_resource_pool(config)
         self.add_ref_policy_worker(config, actor_rollout_cls)
 
         validate_config(
@@ -63,6 +99,11 @@ class DAPOTaskRunner(TaskRunner):
         trust_remote_code = config.data.get("trust_remote_code", False)
         tokenizer = hf_tokenizer(local_path, trust_remote_code=trust_remote_code)
         processor = hf_processor(local_path, trust_remote_code=trust_remote_code, use_fast=True)
+        _apply_custom_chat_template(
+            tokenizer,
+            processor,
+            config.actor_rollout_ref.model.get("custom_chat_template", None),
+        )
 
         resource_pool_manager = self.init_resource_pool_mgr(config)
 
@@ -109,6 +150,22 @@ class DAPOTaskRunner(TaskRunner):
 def main(config):
     auto_set_device(config)
     config = migrate_legacy_reward_impl(config)
+    if os.environ.get("DAPO_LOCAL_TASK_RUNNER") == "1":
+        ray_init_kwargs = config.ray_kwargs.get("ray_init", {})
+        runtime_env_kwargs = ray_init_kwargs.get("runtime_env", {})
+        runtime_env_value = (
+            OmegaConf.to_container(runtime_env_kwargs, resolve=True)
+            if OmegaConf.is_config(runtime_env_kwargs)
+            else runtime_env_kwargs
+        )
+        runtime_env = (
+            None if runtime_env_value is None else OmegaConf.merge(get_ppo_ray_runtime_env(), runtime_env_kwargs)
+        )
+        ray_init_kwargs = OmegaConf.create({**ray_init_kwargs, "runtime_env": runtime_env})
+        print(f"ray init kwargs: {ray_init_kwargs}")
+        ray.init(**OmegaConf.to_container(ray_init_kwargs))
+        DAPOTaskRunner().run(config)
+        return
     run_ppo(config, task_runner_class=ray.remote(num_cpus=1)(DAPOTaskRunner))
 
 

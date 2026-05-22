@@ -383,10 +383,11 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         self.processor = hf_processor(local_path, trust_remote_code=trust_remote_code)
 
         if self.config.model.get("custom_chat_template", None) is not None:
+            self.tokenizer.chat_template = self.config.model.custom_chat_template
             if self.processor is not None:
                 self.processor.chat_template = self.config.model.custom_chat_template
-            else:
-                self.tokenizer.chat_template = self.config.model.custom_chat_template
+                if getattr(self.processor, "tokenizer", None) is not None:
+                    self.processor.tokenizer.chat_template = self.config.model.custom_chat_template
 
         torch_dtype = fsdp_config.get("model_dtype", None)
         if torch_dtype is None:
@@ -1409,10 +1410,11 @@ class CriticWorker(Worker, DistProfilerExtension):
         self.processor = hf_processor(tokenizer_path, trust_remote_code=config.model.get("trust_remote_code", False))
 
         if self.config.model.get("custom_chat_template", None) is not None:
+            self.tokenizer.chat_template = self.config.model.custom_chat_template
             if self.processor is not None:
                 self.processor.chat_template = self.config.model.custom_chat_template
-            else:
-                self.tokenizer.chat_template = self.config.model.custom_chat_template
+                if getattr(self.processor, "tokenizer", None) is not None:
+                    self.processor.tokenizer.chat_template = self.config.model.custom_chat_template
         override_config = OmegaConf.to_container(OmegaConf.create(self.config.model.get("override_config", {})))
         override_config_kwargs = {
             "bos_token_id": self.tokenizer.bos_token_id,
