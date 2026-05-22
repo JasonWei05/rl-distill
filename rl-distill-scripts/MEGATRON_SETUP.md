@@ -1,31 +1,48 @@
 # Megatron RL setup notes
 
-Standalone venv + patches for running verl + DAPO + megatron-core on B200.
-The existing FSDP2 venv (`/mlx_devbox/.../rl-distill/.venv`) is left untouched.
+Standalone venv for running verl + DAPO + Megatron/mbridge on B200.
+The default venv is separate from the normal FSDP2 venv, so `.venv` is left
+untouched.
+
+## Quickstart
+
+```bash
+bash setup_megatron.sh
+MEGATRON_VENV="$PWD/.venv-megatron" bash rl-distill-scripts/gemma3_4b_pt_megatron_20k.sh
+```
+
+Useful overrides:
+
+```bash
+VENV_DIR=/shared/path/.venv-megatron CUDA_HOME=/tmp/cuda-12.9 MAX_JOBS=64 bash setup_megatron.sh
+MEGATRON_VENV=/shared/path/.venv-megatron CUDA_HOME_OVERRIDE=/tmp/cuda-12.9 bash rl-distill-scripts/gemma3_4b_pt_megatron_20k.sh
+```
 
 ## Layout
 
 | Path | Purpose |
 |---|---|
-| `/mlx_devbox/users/jason.wei/playground/rl_distill_megatron_env/.venv` | Megatron venv (Python 3.12, on shared storage so all workers see it) |
-| `/tmp/cuda-12.9` | Userspace CUDA 12.9 toolkit (host nvcc is 12.6 and can't target sm_100/B200) |
-| `setup_megatron.sh` / `setup_megatron_frozen_dep.txt` | Reproducible install of the venv |
+| `.venv-megatron` | Default Megatron venv (Python 3.12). Override with `VENV_DIR` / `MEGATRON_VENV` when shared storage is needed. |
+| `/tmp/cuda-12.9` or `/usr/local/cuda` | CUDA toolkit. Override with `CUDA_HOME` at setup time or `CUDA_HOME_OVERRIDE` at launch time. |
+| `setup_megatron.sh` | Reproducible install of the Megatron venv. The local frozen dependency dump is not committed because it can contain private editable URLs. |
 | `rl-distill-scripts/gemma3_4b_pt_megatron_20k.sh` | Single-node Gemma3-4B-PT DAPO entrypoint |
-| `rl-distill-scripts/_ops/_kill_and_relaunch_4b.sh` | Helper: kill any prior run, then relaunch |
 
 ## Pinned versions (in the megatron venv)
 
-- `ray==2.54.0` — must match the ray version of any cluster you connect to
-  (the FSDP2 venv ships 2.55; we don't connect to it, but pinning avoids surprises)
-- `megatron-core==0.15.3` — 0.16+ has API churn that breaks more of mbridge
-- `mbridge==0.15.1` — latest published; needs the patch below
+- `torch==2.10.0+cu129`
+- `vllm==0.18.0`
+- `transformers==5.3.0`
+- `Megatron-LM @ core_v0.16.0`
+- `mbridge @ 641a5a01de71080b2200d10e369090e40c9a351c`
+- `flash-attn==2.8.3`
+- `TransformerEngine @ release_v2.12`
+- `flash-linear-attention==0.4.1`
+- `peft==0.18.1`
+- `trl==0.27.0`
 
-Reinstall after rebuilding the venv:
-
-```bash
-VENV=/mlx_devbox/users/jason.wei/playground/rl_distill_megatron_env/.venv
-"$VENV/bin/pip" install --no-deps "ray==2.54.0" "megatron-core==0.15.3"
-```
+Set `RAY_VERSION=2.54.0` when you need to match an existing Ray cluster. The
+default launcher uses an isolated local Ray instance, so it does not need to
+match the normal FSDP2 venv's Ray version.
 
 ## Isolated ray cluster
 
@@ -54,33 +71,11 @@ Set in `gemma3_4b_pt_megatron_20k.sh` and forwarded into ray's
 
 | Var | Value | Why |
 |---|---|---|
-| `CUDA_HOME` | `/tmp/cuda-12.9` | Override host CUDA 12.6 (no sm_100 support) |
+| `CUDA_HOME` | setup/launch CUDA path | Override host CUDA when it cannot target sm_100/B200 |
 | `LD_LIBRARY_PATH` | venv's `nccl/lib`, `nvjitlink/lib`, `$CUDA_HOME/lib64` | Resolve nccl + nvjitlink without poisoning system paths |
 | `TORCH_CUDA_ARCH_LIST` | `"10.0"` (quoted!) | B200 = sm_100. megatron-core's `unified_memory.py` JITs a CUDA ext at import time and otherwise crashes with `IndexError: list index out of range`. Quote it so Hydra parses it as str, not float. |
 | `NCCL_SOCKET_IFNAME=lo`, `NCCL_SOCKET_FAMILY=AF_INET`, `GLOO_SOCKET_IFNAME=lo` | — | Single-node loopback transport |
 | `TORCH_NCCL_AVOID_RECORD_STREAMS=1`, `CUDA_DEVICE_MAX_CONNECTIONS=1` | — | Standard Megatron NCCL hygiene |
-
-## mbridge patch (vendored)
-
-mbridge 0.15.1's `Gemma3TransformerLayer.__init__` and
-`MemoryEfficientAttention.__init__` only accept the legacy
-`model_comm_pgs=` kwarg. megatron-core ≥ 0.15 renamed it to
-`pg_collection=`, so megatron's `build_module` now blows up with
-`TypeError: ... unexpected keyword argument 'pg_collection'`.
-
-Fix: a venv-wide auto-loaded monkey-patch that rebinds both `__init__`s to
-accept either name.
-
-| Path | Purpose |
-|---|---|
-| `.venv/.../site-packages/mbridge_pg_collection_patch.py` | Patch module. Idempotent (`_pg_patched` sentinel), per-class try/except so non-megatron interpreters no-op silently. |
-| `.venv/.../site-packages/mbridge_pg_collection_patch.pth` | Single-line `import mbridge_pg_collection_patch`. Python's `site.py` runs this at every interpreter start — including ray worker actors — so the patch applies before mbridge is consumed. |
-
-Verify with `bash rl-distill-scripts/_ops/_verify_pg_patch.sh` — should print
-`patched: True` for both classes.
-
-If mbridge ever ships an upstream fix, delete those two files and the patch
-disappears.
 
 ## Single-node 4B parallelism
 
@@ -95,20 +90,17 @@ REF_TP=1    REF_PP=1    REF_CP=1    REF_EP=1
 VPP is set to `null` whenever PP=1 (Megatron's interleaved schedule is invalid
 otherwise).
 
-## Launch / stop
+## Launch
 
 ```bash
-# Launch (detaches via setsid+nohup so mlx worker login can return):
-mlx worker login 883483 -- "bash /mlx_devbox/users/jason.wei/playground/rl-distill/rl-distill-scripts/_ops/_kill_and_relaunch_4b.sh"
-
-# Tail:
-mlx worker login 883483 -- "tail -f /mlx_devbox/users/jason.wei/playground/rl-distill/rl-distill-scripts/_logs/gemma3_4b_pt_mega.log"
-
-# Stop:
-mlx worker login 883483 -- "bash /mlx_devbox/users/jason.wei/playground/rl-distill/rl-distill-scripts/_ops/_stop_4b_pt_megatron.sh"
+MEGATRON_VENV="$PWD/.venv-megatron" \
+CUDA_HOME_OVERRIDE=/tmp/cuda-12.9 \
+bash rl-distill-scripts/gemma3_4b_pt_megatron_20k.sh
 ```
 
-PID lives at `rl-distill-scripts/_logs/gemma3_4b_pt_mega.pid`.
+Use the repo-local `MEGATRON_VENV` default when running directly from the
+checkout. Use an absolute shared path for `MEGATRON_VENV` when running through
+a remote worker command.
 
 ## Common errors → fixes (history)
 
@@ -116,6 +108,6 @@ PID lives at `rl-distill-scripts/_logs/gemma3_4b_pt_mega.pid`.
 |---|---|---|
 | `RuntimeError: Version mismatch: cluster Ray 2.54 vs process 2.55` | Connected to existing FSDP2-venv ray cluster | Pin venv ray to 2.54, force `address=local` |
 | `AssertionError: Unknown backend: megatron` | Ray workers spawned in FSDP2 venv (no megatron) | Isolated local ray (above) |
-| `TypeError: Gemma3TransformerLayer.__init__() got an unexpected keyword argument 'pg_collection'` | mbridge ↔ megatron-core API drift | Vendored monkey-patch (above) |
+| `TypeError: Gemma3TransformerLayer.__init__() got an unexpected keyword argument 'pg_collection'` | mbridge / megatron-core API drift | Use the pinned mbridge commit and Megatron-LM ref from `setup_megatron.sh` |
 | `IndexError: list index out of range` in `_get_cuda_arch_flags` | torch JIT can't detect arch on cold ray worker | Set `TORCH_CUDA_ARCH_LIST="10.0"` (quoted) |
 | `runtime_env['env_vars'] must be Dict[str,str], but value 10.0 is float` | Hydra coerced unquoted `10.0` to float | Quote the value in the override: `…=\"10.0\"` |

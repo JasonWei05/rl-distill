@@ -9,24 +9,29 @@ if [ -f "${PROJECT_ROOT}/.env" ]; then
     set +a
 fi
 
-# Activate the megatron venv built by setup_megatron.sh.
-# The new venv lives outside rl-distill/.venv so the FSDP2 setup is untouched.
-MEGATRON_VENV="${MEGATRON_VENV:-/mlx_devbox/users/jason.wei/playground/rl_distill_megatron_env/.venv}"
+# Activate the Megatron venv built by setup_megatron.sh.
+MEGATRON_VENV="${MEGATRON_VENV:-${PROJECT_ROOT}/.venv-megatron}"
 unset PYTHONPATH
 unset LD_LIBRARY_PATH
 source "${MEGATRON_VENV}/bin/activate"
-# Userspace CUDA 12.9 (host nvcc is 12.6 which can't target sm_100/B200).
-export CUDA_HOME="${CUDA_HOME_OVERRIDE:-/tmp/cuda-12.9}"
+# Userspace CUDA 12.9 can be provided on hosts whose system CUDA cannot target
+# sm_100/B200. setup_megatron.sh uses the same default.
+DEFAULT_CUDA_HOME="/usr/local/cuda"
+if [ -d /tmp/cuda-12.9 ]; then
+    DEFAULT_CUDA_HOME="/tmp/cuda-12.9"
+fi
+export CUDA_HOME="${CUDA_HOME_OVERRIDE:-${CUDA_HOME:-${DEFAULT_CUDA_HOME}}}"
 PATH_NO_SYS_CUDA=$(echo ":$PATH:" | sed 's|:/usr/local/cuda[^:]*:|:|g; s|^:||; s|:$||')
 export PATH="$CUDA_HOME/bin:$PATH_NO_SYS_CUDA"
 NCCL_ROOT="${MEGATRON_VENV}/lib/python3.12/site-packages/nvidia/nccl"
+NVJITLINK_ROOT="${MEGATRON_VENV}/lib/python3.12/site-packages/nvidia/nvjitlink"
 export CPATH="${NCCL_ROOT}/include:${CPATH:-}"
-export LD_LIBRARY_PATH="${NCCL_ROOT}/lib:${CUDA_HOME}/lib64"
+export LD_LIBRARY_PATH="${NCCL_ROOT}/lib:${NVJITLINK_ROOT}/lib:${CUDA_HOME}/lib64"
 
 export VLLM_USE_V1=1
 # B200 = sm_100. Required for torch.utils.cpp_extension.load_inline JIT
 # (megatron-core's unified_memory module compiles at import time).
-export TORCH_CUDA_ARCH_LIST="10.0"
+export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-10.0}"
 
 project_name='DAPO'
 exp_name=${EXP_NAME:-"DAPO-Gemma3-4B-PT-Megatron-$(date +%Y%m%d-%H%M)"}
@@ -115,9 +120,9 @@ python3 -m dapo.main_dapo \
     +ray_kwargs.ray_init._temp_dir=/tmp/ray_megatron \
     +ray_kwargs.ray_init.include_dashboard=False \
     +ray_kwargs.ray_init.runtime_env.env_vars.RAY_ENABLE_WINDOWS_OR_OSX_CLUSTER=\"false\" \
-    +ray_kwargs.ray_init.runtime_env.env_vars.TORCH_CUDA_ARCH_LIST=\"10.0\" \
-    +ray_kwargs.ray_init.runtime_env.env_vars.CUDA_HOME=/tmp/cuda-12.9 \
-    +ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH=/mlx_devbox/users/jason.wei/playground/rl_distill_megatron_env/.venv/lib/python3.12/site-packages/nvidia/nccl/lib:/mlx_devbox/users/jason.wei/playground/rl_distill_megatron_env/.venv/lib/python3.12/site-packages/nvidia/nvjitlink/lib:/tmp/cuda-12.9/lib64 \
+    +ray_kwargs.ray_init.runtime_env.env_vars.TORCH_CUDA_ARCH_LIST=\"${TORCH_CUDA_ARCH_LIST}\" \
+    +ray_kwargs.ray_init.runtime_env.env_vars.CUDA_HOME="${CUDA_HOME}" \
+    +ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
     +ray_kwargs.ray_init.runtime_env.env_vars.NCCL_SOCKET_IFNAME=lo \
     +ray_kwargs.ray_init.runtime_env.env_vars.NCCL_SOCKET_FAMILY=AF_INET \
     +ray_kwargs.ray_init.runtime_env.env_vars.GLOO_SOCKET_IFNAME=lo \
