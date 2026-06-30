@@ -1,0 +1,20 @@
+build_configs:
+  train-rl-distill:
+    build_context:
+      root: ../../../
+      include_paths:
+        - .
+      dockerfile: rl-distill-scripts/scale_train/st_config/Dockerfile
+      dockerignore: rl-distill-scripts/scale_train/st_config/.dockerignore
+    local:
+      repository: scale_train/shared/training/tmp
+      tag: rl-distill
+    remote:
+      registry: 692474966980.dkr.ecr.us-west-2.amazonaws.com
+      repository: scale_train/shared/training/tmp
+
+interactive_configs:
+  train-rl-distill:
+    use_gpu: True
+    raw_run_params:
+      shm_size: "200G"

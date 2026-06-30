@@ -783,6 +783,33 @@ def get_constant_schedule_with_warmup(
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
+def get_linear_schedule_with_warmup(
+    optimizer: Optimizer,
+    num_warmup_steps: int,
+    num_training_steps: int,
+    min_lr_ratio: float = 0.0,
+    last_epoch: int = -1,
+):
+    """
+    Create a linear LR schedule with a linear warmup phase.
+
+    The LR ramps from 0 to the optimizer's initial LR during warmup, then
+    decays linearly to min_lr_ratio * initial LR at the final training step.
+    """
+
+    min_lr_ratio = 0.0 if min_lr_ratio is None else min_lr_ratio
+    assert min_lr_ratio >= 0 and min_lr_ratio <= 1.0
+
+    def lr_lambda(current_step):
+        if current_step < num_warmup_steps:
+            return float(current_step) / float(max(1.0, num_warmup_steps))
+        progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
+        progress = min(max(progress, 0.0), 1.0)
+        return max(min_lr_ratio, 1.0 - progress * (1.0 - min_lr_ratio))
+
+    return LambdaLR(optimizer, lr_lambda, last_epoch)
+
+
 def prepare_decoder_attention_mask(attention_mask, input_shape, inputs_embeds):
     # create causal mask
     # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]

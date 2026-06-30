@@ -1,5 +1,10 @@
 # DAPO on B200 — Gemma 3 training
 
+For the portable 2-node H100 recipe that resumes RL from the distilled
+Gemma 3 12B checkpoint
+`JWei05/DAPO-Gemma3-12B-PT-TopK128Distill-From-Gemma3-4B-PT-DAPO-17.4k-LR2e6-linear500-1node/step_000500`,
+see [`docs/gemma3_12b_rl_dapo_portable.md`](docs/gemma3_12b_rl_dapo_portable.md).
+
 RL training (DAPO) for Gemma 3 IT models on NVIDIA **B200** GPUs. This directory is a self-contained recipe: environment setup, data prep, model download, and launch scripts.
 
 Upstream DAPO algorithm description: [arXiv:2503.14476](https://arxiv.org/abs/2503.14476). This doc is about **running** it here.

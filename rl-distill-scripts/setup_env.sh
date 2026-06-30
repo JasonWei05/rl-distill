@@ -6,6 +6,7 @@
 #   vllm  0.15.1          (torch 2.9 compatible)
 #   flash-attn 2.8.3      (rebuilt against torch 2.9)
 #   transformers 4.57.6   (vllm 0.15.1 requires this pin; 5.x breaks rope_scaling)
+#   numpy 2.2.6           (required by vLLM/CuPy/OpenCV in this stack)
 #   verl (this repo, editable, no-deps)
 #
 # Run once per fresh node before launching training.
@@ -33,12 +34,26 @@ uv pip install --index-url https://download.pytorch.org/whl/cu128 \
 uv pip install \
     "vllm==0.15.1" \
     "transformers==4.57.6" \
+    "numpy==2.2.6" \
     "ray[default]" \
     "hydra-core" \
     "wandb" \
     "huggingface_hub" \
     "datasets" \
     "pandas" "pyarrow" \
+    "accelerate" \
+    "codetiming" \
+    "dill" \
+    "peft" \
+    "pybind11" \
+    "pylatexenc" \
+    "tensordict>=0.8.0,<=0.10.0,!=0.9.0" \
+    "torchdata" \
+    "packaging>=20.0" \
+    "tensorboard" \
+    "uvicorn" \
+    "fastapi" \
+    "latex2sympy2_extended" \
     "math-verify" \
     "pre-commit"
 
@@ -55,8 +70,9 @@ pre-commit install || true
 echo ""
 echo "=== setup_env.sh done ==="
 echo "Activate with: source ${PROJECT_ROOT}/.venv/bin/activate"
-python3 -c "import torch, vllm, flash_attn, transformers; \
+python3 -c "import torch, vllm, flash_attn, transformers, tensordict; \
 print('torch', torch.__version__, 'cuda', torch.version.cuda); \
 print('vllm', vllm.__version__); \
 print('flash_attn', flash_attn.__version__); \
-print('transformers', transformers.__version__)"
+print('transformers', transformers.__version__); \
+print('tensordict', tensordict.__version__)"

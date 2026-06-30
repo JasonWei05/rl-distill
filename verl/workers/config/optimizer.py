@@ -71,7 +71,7 @@ class VeOmniOptimizerConfig(OptimizerConfig):
         lr_min (float): Minimum learning rate.
         lr_start (float): Starting learning rate for warmup.
         lr_decay_ratio (float): LR decay ratio.
-        lr_scheduler_type (str): LR scheduler type: "constant" or "cosine".
+        lr_scheduler_type (str): LR scheduler type: "constant", "cosine", or "linear".
     """
 
     _mutable_fields = OptimizerConfig._mutable_fields.copy()
@@ -115,12 +115,12 @@ class FSDPOptimizerConfig(OptimizerConfig):
 
     def __post_init__(self):
         if self.warmup_style is not None:
-            assert self.warmup_style in ["constant", "cosine"]
+            assert self.warmup_style in ["constant", "cosine", "linear"]
             warnings.warn(
                 "`warmup_style` is deprecated, use `lr_scheduler_type` instead.", DeprecationWarning, stacklevel=2
             )
             self.lr_scheduler_type = self.warmup_style
-        assert self.lr_scheduler_type in ["constant", "cosine"]
+        assert self.lr_scheduler_type in ["constant", "cosine", "linear"]
         return super().__post_init__()
 
 

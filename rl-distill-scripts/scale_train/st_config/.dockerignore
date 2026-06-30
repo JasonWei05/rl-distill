@@ -1,0 +1,17 @@
+.git
+.venv
+.env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+outputs
+wandb
+checkpoints
+*.log
+*.tmp
+tmp_st_job_configs_*
+eval_results
