@@ -17,6 +17,7 @@ if [ -f "${PROJECT_ROOT}/.venv/bin/activate" ]; then
 fi
 
 export VLLM_USE_V1=1
+export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3}
 
 project_name='DAPO'
 exp_name=${EXP_NAME:-"DAPO-Gemma3-4B-PT-B200-1Node-DAPO17k-20kResp-$(date +%Y%m%d-%H%M)"}
@@ -48,16 +49,17 @@ n_resp_per_prompt=${N_RESP_PER_PROMPT:-16}
 train_prompt_mini_bsz=${TRAIN_PROMPT_MINI_BSZ:-32}
 
 # Ray
-RAY_ADDRESS=${RAY_ADDRESS:-"http://127.0.0.1:8265"}
+RAY_ADDRESS=${RAY_ADDRESS:-"auto"}
 WORKING_DIR=${WORKING_DIR:-"${PWD}"}
 RUNTIME_ENV=${RUNTIME_ENV:-"${WORKING_DIR}/verl/trainer/runtime_env.yaml"}
 NNODES=${NNODES:-1}
+N_GPUS_PER_NODE=${N_GPUS_PER_NODE:-4}
 # Paths
 RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
 MODEL_REPO=${MODEL_REPO:-"google/gemma-3-4b-pt"}
 MODEL_SUBFOLDER=${MODEL_SUBFOLDER:-}
 BASE_MODEL_REPO=${BASE_MODEL_REPO:-"${MODEL_REPO}"}
-MODEL_LOCAL_DIR=${MODEL_LOCAL_DIR:-"${MODEL_REPO}"}
+MODEL_LOCAL_DIR=${MODEL_LOCAL_DIR:-"${RAY_DATA_HOME}/models/gemma-3-4b-pt"}
 PREPARE_MODEL=${PREPARE_MODEL:-0}
 MODEL_PATH=${MODEL_PATH:-}
 CKPTS_DIR=${CKPTS_DIR:-"${RAY_DATA_HOME}/ckpts/${project_name}/${exp_name}"}
@@ -124,7 +126,7 @@ export GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-${NETWORK_INTERFACE_NAME:-lo}}
 
 python3 -m dapo.main_dapo \
     +ray_kwargs.ray_init.address="'${RAY_ADDRESS}'" \
-    +ray_kwargs.ray_init.runtime_env=null \
+    '+ray_kwargs.ray_init.runtime_env={}' \
     data.train_files="${TRAIN_FILE}" \
     data.val_files="${VAL_FILES}" \
     data.prompt_key=prompt \
@@ -195,7 +197,7 @@ python3 -m dapo.main_dapo \
     trainer.logger='["console", "wandb"]' \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \
-    trainer.n_gpus_per_node=8 \
+    trainer.n_gpus_per_node="${N_GPUS_PER_NODE}" \
     trainer.nnodes="${NNODES}" \
     trainer.val_before_train=${val_before_train} \
     trainer.test_freq=${test_freq} \
