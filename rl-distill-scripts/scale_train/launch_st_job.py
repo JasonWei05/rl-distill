@@ -92,6 +92,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cluster", choices=["eks", "gke", "local"], default="eks")
     parser.add_argument("--n-instances", type=int, default=2)
+    parser.add_argument(
+        "--gpus-per-instance",
+        type=int,
+        choices=[1, 2, 4, 8],
+        default=8,
+        help="GPUs per instance; <8 uses the fractional presets (p5.48xlarge:N / a3.megagpu.8g:N)",
+    )
     parser.add_argument("--team", default="egp")
     parser.add_argument("--product", default="train.enterprise_rlvr")
     parser.add_argument("--job-name", default="gemma3-12b-topk128")
@@ -143,6 +150,11 @@ def main() -> None:
     else:
         instance_type = "p5.48xlarge"
         run_env = "remote"
+
+    if args.gpus_per_instance != 8:
+        if args.n_instances != 1:
+            raise SystemExit("fractional-GPU presets are single-instance; use --n-instances 1")
+        instance_type = f"{instance_type}:{args.gpus_per_instance}"
 
     if run_env == "remote":
         try:

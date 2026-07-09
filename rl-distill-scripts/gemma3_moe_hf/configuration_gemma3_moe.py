@@ -22,7 +22,7 @@ class Gemma3MoeConfig(Gemma3TextConfig):
 
     def __init__(
         self,
-        num_experts: int = 2,
+        gemma3_moe_num_experts: int | None = None,
         num_experts_per_tok: int = 1,
         router_pre_softmax: bool = False,
         router_score_function: str = "softmax",
@@ -30,9 +30,18 @@ class Gemma3MoeConfig(Gemma3TextConfig):
         router_dtype: str | None = None,
         **kwargs,
     ):
+        # Earlier exports stored the expert count under the generic MoE keys
+        # `num_experts`/`num_local_experts`. vLLM's Transformers backend treats
+        # any config exposing those keys as a fused-MoE model and swaps the
+        # experts for a FusedMoE module, which cannot represent the per-expert
+        # post-MLP RMSNorm of this architecture. Fold them into a
+        # Gemma3-specific key so vLLM keeps the plain Transformers path.
+        legacy_num_experts = kwargs.pop("num_experts", None)
+        kwargs.pop("num_local_experts", None)
         super().__init__(**kwargs)
-        self.num_experts = num_experts
-        self.num_local_experts = num_experts
+        if gemma3_moe_num_experts is None:
+            gemma3_moe_num_experts = 2 if legacy_num_experts is None else legacy_num_experts
+        self.gemma3_moe_num_experts = int(gemma3_moe_num_experts)
         self.num_experts_per_tok = num_experts_per_tok
         self.router_pre_softmax = router_pre_softmax
         self.router_score_function = router_score_function

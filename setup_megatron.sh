@@ -67,11 +67,15 @@ unset PYTHONPATH
 
 command -v uv >/dev/null 2>&1 || die "uv not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
 command -v nvcc >/dev/null 2>&1 || die "CUDA toolkit nvcc not found. Set CUDA_HOME to a CUDA 12.8+ toolkit."
-command -v nvidia-smi >/dev/null 2>&1 || die "nvidia-smi not found; this setup expects an NVIDIA GPU host."
+# Docker image builds have no GPU; pass SKIP_GPU_CHECK=1 with an explicit
+# TORCH_CUDA_ARCH_LIST instead.
+if [ "${SKIP_GPU_CHECK:-0}" != "1" ]; then
+    command -v nvidia-smi >/dev/null 2>&1 || die "nvidia-smi not found; this setup expects an NVIDIA GPU host (or SKIP_GPU_CHECK=1)."
+fi
 [ -f "$VERL_PATH/pyproject.toml" ] || die "VERL_PATH does not look like a verl checkout: $VERL_PATH"
 
 NVCC_VER="$(nvcc --version | awk -F'release ' '/release/ {print $2}' | awk -F',' '{print $1}')"
-GPU_CAP="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d ' ')"
+GPU_CAP="$(command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d ' ' || echo none)"
 log "preflight: uv=$(uv --version | awk '{print $2}') nvcc=${NVCC_VER:-unknown} gpu_compute_cap=${GPU_CAP:-unknown}"
 log "venv=$VENV_DIR cuda_home=$CUDA_HOME cache=$CACHE_DIR"
 
@@ -99,12 +103,29 @@ uv pip install --python "$VENV_DIR/bin/python" \
     "transformers==$TRANSFORMERS_VERSION" \
     pybind11 \
     ninja \
+    cmake \
     nvidia-mathdx
 
 log "installing Megatron-LM and mbridge"
 uv pip install --python "$VENV_DIR/bin/python" --no-deps \
     "git+https://github.com/NVIDIA/Megatron-LM.git@$MEGATRON_LM_REF" \
     "git+https://github.com/ISEEKYAN/mbridge.git@$MBRIDGE_REF"
+
+# Megatron-Bridge (megatron.bridge) carries the Gemma3 MoE provider/bridge fork
+# used by the MoE RL scripts (verl's use_mbridge=True + vanilla_mbridge=False
+# path). Point MEGATRON_BRIDGE_PATH at the fork checkout; the vendored copy in
+# third_party/ is preferred so container builds work without EFS.
+if [ -z "${MEGATRON_BRIDGE_PATH:-}" ]; then
+    MEGATRON_BRIDGE_PATH="$REPO_ROOT/third_party/Megatron-Bridge"
+fi
+if [ -d "$MEGATRON_BRIDGE_PATH" ]; then
+    log "installing Megatron-Bridge fork from $MEGATRON_BRIDGE_PATH"
+    uv pip install --python "$VENV_DIR/bin/python" --no-deps -e "$MEGATRON_BRIDGE_PATH"
+    # runtime imports of megatron.bridge not covered by --no-deps
+    uv pip install --python "$VENV_DIR/bin/python" nvidia-modelopt
+else
+    log "skipping Megatron-Bridge: no checkout at $MEGATRON_BRIDGE_PATH"
+fi
 
 log "installing RL and verl runtime dependencies"
 ray_spec="ray[default]"
@@ -124,7 +145,9 @@ uv pip install --python "$VENV_DIR/bin/python" \
     hydra-core \
     liger-kernel \
     mathruler \
+    math-verify \
     nvtx \
+    tensorboard \
     pylatexenc \
     pytest-asyncio \
     qwen_vl_utils \
@@ -140,10 +163,15 @@ PY
 
 NCCL_ROOT="${NCCL_ROOT:-$SITE_PACKAGES/nvidia/nccl}"
 NVJITLINK_ROOT="${NVJITLINK_ROOT:-$SITE_PACKAGES/nvidia/nvjitlink}"
+# TransformerEngine's torch extension includes <cudnn.h>; point the toolchain
+# at the pip-installed cuDNN.
+CUDNN_ROOT="${CUDNN_ROOT:-$SITE_PACKAGES/nvidia/cudnn}"
 export NCCL_ROOT
-export CPATH="$NCCL_ROOT/include:${CPATH:-}"
-export LIBRARY_PATH="$NCCL_ROOT/lib:${LIBRARY_PATH:-}"
-export LD_LIBRARY_PATH="$NCCL_ROOT/lib:$NVJITLINK_ROOT/lib:$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+export CUDNN_PATH="$CUDNN_ROOT"
+export CUDNN_HOME="$CUDNN_ROOT"
+export CPATH="$NCCL_ROOT/include:$CUDNN_ROOT/include:${CPATH:-}"
+export LIBRARY_PATH="$NCCL_ROOT/lib:$CUDNN_ROOT/lib:${LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$NCCL_ROOT/lib:$CUDNN_ROOT/lib:$NVJITLINK_ROOT/lib:$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 export TORCH_CUDA_ARCH_LIST MAX_JOBS
 
 if [ "$RUN_HEAVY_BUILDS" != "0" ]; then

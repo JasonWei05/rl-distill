@@ -15,3 +15,5 @@ checkpoints
 *.tmp
 tmp_st_job_configs_*
 eval_results
+.venv-megatron
+third_party/Megatron-Bridge/.git

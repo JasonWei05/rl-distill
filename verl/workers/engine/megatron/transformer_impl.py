@@ -890,6 +890,14 @@ class MegatronEngineWithLMHead(MegatronEngine):
 
         if RouterReplayHelper.is_replay_forward_action(self.tf_config, vp_rank):
             layers_topk_idx = model_inputs["routed_experts"]
+            # An all-zero routing map means the rollout engine never captured
+            # routes (e.g. vLLM's capturer bound to no module) and replay
+            # would silently pin every token to expert 0.
+            if layers_topk_idx.numel() > 0 and not layers_topk_idx.any():
+                raise ValueError(
+                    "routed_experts from the rollout are entirely zero; rollout-side routing "
+                    "capture is not working. Use router_replay.mode=R2 or fix the rollout capture."
+                )
             set_router_replay_data(layers_topk_idx, None, self.tf_config, vp_rank)
 
         if pad_mode == DatasetPadMode.NO_PADDING:

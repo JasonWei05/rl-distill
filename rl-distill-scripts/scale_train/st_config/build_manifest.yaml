@@ -1,4 +1,30 @@
 build_configs:
+  train-rl-distill-megatron-overlay:
+    build_context:
+      root: ../../../
+      include_paths:
+        - .
+      dockerfile: rl-distill-scripts/scale_train/st_config/Dockerfile.megatron-overlay
+      dockerignore: rl-distill-scripts/scale_train/st_config/.dockerignore
+    local:
+      repository: scale_train/shared/training/tmp
+      tag: rl-distill-megatron-overlay
+    remote:
+      registry: 692474966980.dkr.ecr.us-west-2.amazonaws.com
+      repository: scale_train/shared/training/tmp
+  train-rl-distill-megatron:
+    build_context:
+      root: ../../../
+      include_paths:
+        - .
+      dockerfile: rl-distill-scripts/scale_train/st_config/Dockerfile.megatron
+      dockerignore: rl-distill-scripts/scale_train/st_config/.dockerignore
+    local:
+      repository: scale_train/shared/training/tmp
+      tag: rl-distill-megatron
+    remote:
+      registry: 692474966980.dkr.ecr.us-west-2.amazonaws.com
+      repository: scale_train/shared/training/tmp
   train-rl-distill:
     build_context:
       root: ../../../

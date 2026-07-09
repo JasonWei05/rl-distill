@@ -98,6 +98,8 @@ celerybeat-schedule
 # virtualenv
 venv/
 .venv/
+.venv-megatron/
+.venv-*/
 ENV/
 
 # Spyder project settings
@@ -140,7 +142,9 @@ rl-distill-scripts/wandb/
 rl-distill-scripts/data/random_entry_samples/
 dapo/wandb/
 eval_results/
-Megatron-Bridge/
-Megatron-LM/
+# Ignore dev-time checkouts at the repo root only; the intentional vendored
+# copy under third_party/Megatron-Bridge is tracked.
+/Megatron-Bridge/
+/Megatron-LM/
 modelchef/
 nohup.out

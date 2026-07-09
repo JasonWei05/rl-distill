@@ -1,0 +1,7 @@
+# syntax=docker/dockerfile:1.3
+# Thin overlay on the already-built Megatron image: refreshes rl-distill-scripts
+# (run-file PATH fix, lazy R3 capture import in modeling_gemma3_moe.py, etc.)
+# without re-running the ~3h source builds. Base is the ECR-pushed heavy image.
+FROM 692474966980.dkr.ecr.us-west-2.amazonaws.com/scale_train/shared/training/tmp:20260707-223611.9b801c9f-a10b-437d-a844-825d2cec1a49
+
+COPY rl-distill-scripts /workspace/rl-distill/rl-distill-scripts

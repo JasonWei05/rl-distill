@@ -254,10 +254,25 @@ run. The Gemma-specific smoke and full 4B logit identity tests pass.
 
 ## Open Follow-Ups
 
-1. Validate the same logit identity test with `expert_model_parallel_size > 1`.
-2. Run a short train step and confirm aux-loss router gradients are present.
+1. ~~Validate the same logit identity test with `expert_model_parallel_size > 1`.~~
+   Done (2026-07-03): `rl-distill-scripts/logit_parity_gemma3_moe_hf_vs_megatron.py`
+   passes against the real SFT checkpoints for 2E at EP=1/2 and 4E at EP=1/2/4
+   (top-1 agreement 1.0).
+2. ~~Run a short train step and confirm aux-loss router gradients are present.~~
+   Done (2026-07-03): 2-step DAPO smokes (2E TP1/EP2, 4E TP2/EP4) via
+   `rl-distill-scripts/gemma3_4b_pt_moe_megatron_rl_local_smoke.sh` complete
+   with finite grad norms; router replay `R2` verified
+   (`routing replay layers: 34`).
 3. Add a checkpoint conversion script that loads an actual Gemma 3 4B checkpoint,
    instantiates `Gemma3MoEModelProvider4B` or `Gemma3MoEModelProvider4B4E`, and
    saves the upcycled Megatron checkpoint.
 4. Decide whether to keep exact identity routing or switch to pre-softmax routing
    after a warmup period if main-loss router gradients are important.
+5. (Done 2026-07-07) `R3` rollout routing replay now works without a fused-MoE
+   rewrite: `modeling_gemma3_moe.py` feeds vLLM's `RoutedExpertsCapturer`
+   directly via a lazy hook (capture matches the HF router argmax at ~99.5%).
+   A fused-MoE rewrite remains optional for rollout throughput / TP>1 on the
+   MoE block. See `rl-distill-scripts/GEMMA3_MOE_RL_TRAINING.md` §7.
+
+The recreated Megatron-Bridge fork lives at `/mnt/efs/jasonwei/Megatron-Bridge`
+(branch `gemma3-moe`, base `91a15142a`); the original devbox checkout was lost.

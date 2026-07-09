@@ -10,7 +10,18 @@ if [ -f "${PROJECT_ROOT}/.env" ]; then
     set +a
 fi
 
-source "${PROJECT_ROOT}/.venv/bin/activate"
+# Activate the Megatron venv. Prefer setup_megatron.sh's .venv-megatron when
+# present; clusters whose .venv already is the Megatron venv keep working.
+if [ -z "${MEGATRON_VENV:-}" ]; then
+    if [ -d "${PROJECT_ROOT}/.venv-megatron" ]; then
+        MEGATRON_VENV="${PROJECT_ROOT}/.venv-megatron"
+    else
+        MEGATRON_VENV="${PROJECT_ROOT}/.venv"
+    fi
+fi
+unset PYTHONPATH
+unset LD_LIBRARY_PATH
+source "${MEGATRON_VENV}/bin/activate"
 
 export VLLM_USE_V1=1
 export VLLM_DO_NOT_TRACK=1
@@ -181,7 +192,14 @@ rollout_enforce_eager=${ROLLOUT_ENFORCE_EAGER:-True}
 
 # MoE RL specifics.
 MOE_AUX_LOSS_COEFF=${MOE_AUX_LOSS_COEFF:-1e-3}
-ROUTER_REPLAY_MODE=${ROUTER_REPLAY_MODE:-R3}
+# R2 (default) records routes during the actor's own forward pass and replays
+# them in the update — no rollout-engine dependency. R3 (rollout-side capture)
+# is also supported: the custom Gemma3 MoE runs vLLM's plain Transformers path
+# (its per-expert post-MLP RMSNorm can't use FusedMoE, which is all vLLM auto-
+# binds capture to), so modeling_gemma3_moe.py feeds vLLM's RoutedExpertsCapturer
+# directly via a lazy hook. Capture is validated (matches the HF router argmax);
+# R2 stays the default as the simpler, dependency-free choice.
+ROUTER_REPLAY_MODE=${ROUTER_REPLAY_MODE:-R2}
 if [ "${ROUTER_REPLAY_MODE}" != "disabled" ] && [ "${ROUTER_REPLAY_MODE}" != "R2" ] && [ "${ROUTER_REPLAY_MODE}" != "R3" ]; then
     echo "ROUTER_REPLAY_MODE must be disabled, R2, or R3; got ${ROUTER_REPLAY_MODE}" >&2
     exit 2
@@ -223,7 +241,7 @@ if [ -d "${VLLM_NUMBA_NUMPY_PATH}" ]; then
     export PYTHONPATH="${VLLM_NUMBA_NUMPY_PATH}:${PYTHONPATH:-}"
 fi
 
-SITE_PACKAGES="${PROJECT_ROOT}/.venv/lib/python3.12/site-packages"
+SITE_PACKAGES="$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
 NVML_SHIM_DIR=${NVML_SHIM_DIR:-${VERL_EXTRA_LD_LIBRARY_PATH:-/tmp/nvidia-nvml-535}}
 mkdir -p "${NVML_SHIM_DIR}"
 if [ -n "${NVML_LIBRARY_PATH:-}" ] && [ -s "${NVML_LIBRARY_PATH}" ]; then
@@ -248,7 +266,15 @@ export NCCL_HOME="${NCCL_HOME:-${SITE_PACKAGES}/nvidia/nccl}"
 export CUBLAS_HOME="${CUBLAS_HOME:-${SITE_PACKAGES}/nvidia/cublas}"
 export CUDART_HOME="${CUDART_HOME:-${SITE_PACKAGES}/nvidia/cuda_runtime}"
 export NVSHMEM_HOME="${NVSHMEM_HOME:-${SITE_PACKAGES}/nvidia/nvshmem}"
-export CUDA_HOME="${CUDA_HOME:-/tmp/cuda-no-recursion-real}"
+if [ -z "${CUDA_HOME:-}" ]; then
+    for cuda_candidate in /tmp/cuda-no-recursion-real /tmp/cuda-12.9 /usr/local/cuda-12.9 /usr/local/cuda; do
+        if [ -d "${cuda_candidate}" ]; then
+            CUDA_HOME="${cuda_candidate}"
+            break
+        fi
+    done
+fi
+export CUDA_HOME
 export CUDA_PATH="${CUDA_PATH:-${CUDA_HOME}}"
 export CUDA_INC_PATH="${CUDA_INC_PATH:-${CUDA_HOME}/include}"
 export CUDACXX="${CUDACXX:-${CUDA_HOME}/bin/nvcc}"

@@ -44,6 +44,33 @@ from transformers.models.gemma3.modeling_gemma3 import (
 from .configuration_gemma3_moe import Gemma3MoeConfig
 
 
+# vLLM's routed-experts capturer is a process-global singleton with a public
+# capture() API. vLLM's binder only auto-attaches to FusedMoE modules, which
+# this per-expert-normalized architecture cannot use, so the module feeds the
+# capturer directly, making rollout routing replay (verl R3) work on vLLM's
+# plain Transformers backend. The import is resolved lazily at forward time
+# (never at module import) because vLLM inspects trust_remote_code models by
+# importing this file in a subprocess; importing vLLM internals there stalls
+# that inspection. At forward time we are always inside a live vLLM worker
+# where the import is cheap. Outside vLLM the singleton is never created and
+# capture is a no-op.
+_ROUTED_EXPERTS_CAPTURER_CLS = "unresolved"
+
+
+def _get_routed_experts_capturer():
+    global _ROUTED_EXPERTS_CAPTURER_CLS
+    if _ROUTED_EXPERTS_CAPTURER_CLS == "unresolved":
+        try:
+            from vllm.model_executor.layers.fused_moe.routed_experts_capturer import (
+                RoutedExpertsCapturer,
+            )
+
+            _ROUTED_EXPERTS_CAPTURER_CLS = RoutedExpertsCapturer
+        except ImportError:
+            _ROUTED_EXPERTS_CAPTURER_CLS = None
+    return _ROUTED_EXPERTS_CAPTURER_CLS
+
+
 class Gemma3MoeExpert(nn.Module):
     def __init__(self, config: Gemma3MoeConfig):
         super().__init__()
@@ -60,15 +87,16 @@ class Gemma3MoeExpert(nn.Module):
 
 
 class Gemma3MoeMLP(nn.Module):
-    def __init__(self, config: Gemma3MoeConfig):
+    def __init__(self, config: Gemma3MoeConfig, layer_idx: Optional[int] = None):
         super().__init__()
-        self.num_experts = config.num_experts
+        self.layer_idx = layer_idx
+        self.num_experts = config.gemma3_moe_num_experts
         self.num_experts_per_tok = config.num_experts_per_tok
         self.router_pre_softmax = config.router_pre_softmax
         self.router_score_function = config.router_score_function
         self.router_dtype = config.router_dtype
-        self.router = nn.Linear(config.hidden_size, config.num_experts, bias=False)
-        self.experts = nn.ModuleList([Gemma3MoeExpert(config) for _ in range(config.num_experts)])
+        self.router = nn.Linear(config.hidden_size, self.num_experts, bias=False)
+        self.experts = nn.ModuleList([Gemma3MoeExpert(config) for _ in range(self.num_experts)])
 
         if self.num_experts_per_tok != 1:
             raise ValueError("Gemma3MoeMLP currently supports top-1 routing only.")
@@ -99,6 +127,13 @@ class Gemma3MoeMLP(nn.Module):
             selected_experts = torch.argmax(router_logits, dim=-1, keepdim=True)
             route_weights = torch.ones(flat_states.shape[0], dtype=flat_states.dtype, device=flat_states.device)
 
+        if self.layer_idx is not None:
+            capturer_cls = _get_routed_experts_capturer()
+            if capturer_cls is not None:
+                capturer = capturer_cls.get_instance()
+                if capturer is not None and capturer._device_buffer is not None:
+                    capturer.capture(self.layer_idx, selected_experts)
+
         selected_experts = selected_experts.squeeze(-1)
         output = torch.empty_like(flat_states)
         for expert_idx, expert in enumerate(self.experts):
@@ -119,7 +154,7 @@ class Gemma3MoeDecoderLayer(nn.Module):
         self.layer_idx = layer_idx
         self.attention_type = config.layer_types[layer_idx]
         self.self_attn = Gemma3Attention(config=config, layer_idx=layer_idx)
-        self.mlp = Gemma3MoeMLP(config)
+        self.mlp = Gemma3MoeMLP(config, layer_idx=layer_idx)
         self.input_layernorm = Gemma3RMSNorm(self.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = Gemma3RMSNorm(self.hidden_size, eps=config.rms_norm_eps)
         self.pre_feedforward_layernorm = Gemma3RMSNorm(self.hidden_size, eps=config.rms_norm_eps)
@@ -312,7 +347,7 @@ class Gemma3MoeModel(Gemma3MoePreTrainedModel):
 
 class Gemma3MoeForCausalLM(Gemma3MoePreTrainedModel, GenerationMixin):
     config_class = Gemma3MoeConfig
-    _tied_weights_keys = ["lm_head.weight"]
+    _tied_weights_keys = {"lm_head.weight": "model.embed_tokens.weight"}
     config: Gemma3MoeConfig
     base_model_prefix = "model"
 
@@ -322,6 +357,16 @@ class Gemma3MoeForCausalLM(Gemma3MoePreTrainedModel, GenerationMixin):
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.post_init()
+
+    def tie_weights(self, missing_keys=None, recompute_mapping=True):
+        # These exports never serialize lm_head.weight and the architecture
+        # always ties it to the embeddings. Transformers 5.x excludes tied
+        # targets from missing_keys during from_pretrained, which makes the
+        # stock tie_weights believe both sides exist in the checkpoint and
+        # skip tying, leaving lm_head.weight on the meta device. Tie
+        # unconditionally instead.
+        self.all_tied_weights_keys = self.get_expanded_tied_weights_keys(all_submodels=False)
+        return super().tie_weights(missing_keys=None, recompute_mapping=True)
 
     def get_input_embeddings(self):
         return self.model.embed_tokens
