@@ -103,6 +103,7 @@ class Gemma3MoeBridge(MegatronModelBridge):
         provider.moe_grouped_gemm = False
         provider.moe_token_dispatcher_type = "alltoall"
         provider.moe_permute_fusion = True
+        provider.gemma3_moe_canonical_dense_init = bool(getattr(hf_config, "gemma3_moe_canonical_dense_init", False))
 
         return provider
 
@@ -136,6 +137,9 @@ class Gemma3MoeBridge(MegatronModelBridge):
         hf_config["router_pre_softmax"] = provider.moe_router_pre_softmax
         hf_config["router_score_function"] = provider.moe_router_score_function
         hf_config["router_aux_loss_coef"] = provider.moe_aux_loss_coeff
+        hf_config["gemma3_moe_canonical_dense_init"] = bool(
+            getattr(provider, "gemma3_moe_canonical_dense_init", False)
+        )
 
         return hf_config
 

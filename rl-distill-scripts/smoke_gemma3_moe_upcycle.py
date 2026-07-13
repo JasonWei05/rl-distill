@@ -76,7 +76,9 @@ def _tiny_provider(*, moe: bool) -> Gemma3ModelProvider:
         provider.moe_grouped_gemm = False
         provider.moe_router_load_balancing_type = "aux_loss"
         provider.moe_aux_loss_coeff = 1e-3
-        provider.moe_router_pre_softmax = True
+        # Top-1 must apply softmax after selecting the expert. Softmax over one
+        # selected logit is exactly 1, so duplicated experts are not scaled.
+        provider.moe_router_pre_softmax = False
         provider.moe_token_dispatcher_type = "alltoall"
         provider.transformer_layer_spec = gemma3_moe_layer_spec
     provider.finalize()

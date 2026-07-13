@@ -417,6 +417,165 @@ class TERowParallelLinearTorchRMSNorm(TERowParallelLinear):
         return self.post_layernorm(output), bias
 
 
+class Gemma3MoETransformerLayer(TransformerLayer):
+    """Gemma3 MoE layer with an opt-in dense-equivalent initialization path.
+
+    Normal MoE execution must use a standalone pre-MLP norm and sequential
+    experts: the router needs normalized activations before dispatch and TE
+    cannot place its fused post-MLP RMSNorm inside ``SequentialMLP``.  That is
+    mathematically equivalent to the dense block, but it is not numerically
+    identical in bf16.  In particular, it changes both the fused norm/GEMM
+    graph and the GEMM batch geometry.
+
+    ``gemma3_moe_canonical_dense_init`` is intentionally a correctness-only
+    initialization mode.  It computes the same dense MLP graph as the dense
+    Gemma3 provider from the raw residual stream, while still running the MoE
+    router so R2/R3 replay and the router auxiliary loss are exercised.  The
+    dense MLP's pre/post norms alias the canonical expert state; its TP-shaped
+    FC tensors are derived from that expert with autograd links.  The helper
+    itself has no registered state, so it adds no checkpoint or optimizer
+    parameters.
+
+    This mode must be disabled before normal sparse-MoE training: the first
+    EP-local expert is the canonical dense copy and the branch deliberately
+    bypasses dispatch.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.gemma3_moe_canonical_dense_init = bool(getattr(self.config, "gemma3_moe_canonical_dense_init", False))
+        if not self.gemma3_moe_canonical_dense_init:
+            return
+
+        if not isinstance(self.mlp, MoELayer):
+            raise TypeError("Gemma3 canonical dense-init path requires an MoELayer")
+        if not isinstance(self.mlp.experts, SequentialMLP):
+            raise TypeError("Gemma3 canonical dense-init path requires SequentialMLP experts")
+        if not self.mlp.experts.local_experts:
+            raise RuntimeError("Gemma3 canonical dense-init path requires a local expert")
+
+        # Build the exact dense MCore MLP kernel graph off-module.  Using
+        # ``object.__setattr__`` keeps this helper out of state_dict()/the
+        # optimizer; the existing MoE parameters remain authoritative.
+        canonical_mlp = MLP(
+            self.config,
+            MLPSubmodules(
+                linear_fc1=TELayerNormColumnParallelLinear,
+                linear_fc2=TERowParallelLinearLayerNorm,
+            ),
+            tp_group=self.pg_collection.tp,
+        )
+        expert = self.mlp.experts.local_experts[0]
+        canonical_mlp.linear_fc1.layer_norm_weight = self.pre_mlp_layernorm.weight
+        canonical_mlp.linear_fc2.post_layernorm.weight = expert.linear_fc2.post_layernorm.weight
+        object.__setattr__(self, "_canonical_dense_mlp", canonical_mlp)
+        # Bridge loads modify the expert tensors in-place after construction.
+        # Bind TP tensors lazily (or whenever their source versions change) so
+        # no stale autograd tensor survives the first forward after loading.
+        self._canonical_dense_mlp_source_versions = None
+
+    def _canonical_dense_source_versions(self):
+        expert = self.mlp.experts.local_experts[0]
+        return (expert.linear_fc1.weight._version, expert.linear_fc2.weight._version)
+
+    def refresh_canonical_dense_mlp_weights(self) -> None:
+        """Bind dense TP tensors to differentiable pieces of one local expert.
+
+        With EP>1 and ETP=1, SequentialMLP experts are full-width replicas
+        while dense Gemma MLPs shard FC1 on dim 0 and FC2 on dim 1 across TP.
+        FC1's fused layout needs special handling: its dense shard is
+        ``[gate_shard; up_shard]``, not a contiguous chunk of the full
+        ``[gate; up]`` expert tensor.  The derived tensors retain autograd
+        links to the authoritative expert parameters and give the unregistered
+        helper exactly the dense kernel shapes.
+        """
+        if not self.gemma3_moe_canonical_dense_init:
+            return
+
+        canonical_mlp = self._canonical_dense_mlp
+        expert = self.mlp.experts.local_experts[0]
+        tp_size = canonical_mlp.linear_fc1.tp_size
+        tp_rank = canonical_mlp.linear_fc1.tp_rank
+        # This method may be reached under inference_mode during a rollout.
+        # Explicitly create normal autograd tensors so a subsequent training
+        # forward still propagates gradients to the expert tensors.
+        with torch.inference_mode(False):
+            gate_weight, up_weight = expert.linear_fc1.weight.chunk(2, dim=0)
+            fc1_weight = torch.cat(
+                (
+                    gate_weight.chunk(tp_size, dim=0)[tp_rank],
+                    up_weight.chunk(tp_size, dim=0)[tp_rank],
+                ),
+                dim=0,
+            )
+            # TE's row-parallel path may cache a transposed representation.
+            # Give it an independent contiguous tensor rather than a strided
+            # view into a full expert; ``clone`` still backpropagates to the
+            # expert parameter through CloneBackward.
+            fc2_weight = expert.linear_fc2.weight.chunk(tp_size, dim=1)[tp_rank].clone()
+        if fc1_weight.shape != canonical_mlp.linear_fc1.weight.shape:
+            raise RuntimeError(
+                "Gemma3 canonical dense-init FC1 TP slice has the wrong shape: "
+                f"{tuple(fc1_weight.shape)} != "
+                f"{tuple(canonical_mlp.linear_fc1.weight.shape)}"
+            )
+        if fc2_weight.shape != canonical_mlp.linear_fc2.weight.shape:
+            raise RuntimeError(
+                "Gemma3 canonical dense-init FC2 TP slice has the wrong shape: "
+                f"{tuple(fc2_weight.shape)} != "
+                f"{tuple(canonical_mlp.linear_fc2.weight.shape)}"
+            )
+
+        # These helpers are deliberately unregistered.  A normal ``Module``
+        # assignment only accepts ``Parameter`` objects and would detach the
+        # derived tensor; bypass registration so TE reads it directly.
+        # Clearing the original helper allocation avoids a
+        # second, unused full MLP in GPU memory.
+        canonical_mlp.linear_fc1._parameters["weight"] = None
+        object.__setattr__(canonical_mlp.linear_fc1, "weight", fc1_weight)
+        canonical_mlp.linear_fc2._parameters["weight"] = None
+        object.__setattr__(canonical_mlp.linear_fc2, "weight", fc2_weight)
+        self._canonical_dense_mlp_source_versions = self._canonical_dense_source_versions()
+
+    def _forward_mlp(self, hidden_states, inference_context=None, padding_mask=None):
+        if not self.gemma3_moe_canonical_dense_init:
+            return super()._forward_mlp(hidden_states, inference_context, padding_mask)
+
+        # Differentiable TP slices carry an autograd graph. Rebuild them for
+        # every grad-enabled forward so gradient accumulation never reuses a
+        # graph that an earlier microbatch already freed. In inference, cache
+        # the slices until bridge loading or an optimizer step changes the
+        # authoritative expert tensors.
+        if torch.is_grad_enabled() or (
+            self._canonical_dense_mlp_source_versions != self._canonical_dense_source_versions()
+        ):
+            self.refresh_canonical_dense_mlp_weights()
+
+        # ``hidden_states`` is the raw residual stream expected by the dense
+        # fused LayerNormLinear.  Compute normalized activations separately for
+        # the router only; this exactly preserves route replay and aux-loss
+        # accounting without changing the canonical MLP output.
+        residual = hidden_states
+        router_input = self._forward_pre_mlp_layernorm(hidden_states)
+        router_padding_mask = padding_mask.transpose(0, 1).bool() if padding_mask is not None else None
+        router_probs, _ = self.mlp.route(router_input, router_padding_mask)
+
+        canonical_mlp = self._canonical_dense_mlp
+        # The helper is deliberately not a registered child module, so mirror
+        # the enclosing layer's training state explicitly.
+        canonical_mlp.train(self.training)
+        mlp_output, mlp_bias = canonical_mlp(hidden_states)
+
+        if self.training and torch.is_grad_enabled():
+            # Top-1 post-softmax routing has no policy-gradient path, but the
+            # router's aux loss is attached to ``router_probs``.  A zero-valued
+            # connection retains that auxiliary gradient without perturbing
+            # the forward activation.
+            mlp_output = mlp_output + router_probs.sum().to(mlp_output.dtype) * 0.0
+
+        return self._forward_post_mlp((mlp_output, mlp_bias), residual)
+
+
 def gemma3_moe_layer_spec(config) -> ModuleSpec:
     """Gemma3 MoE layer spec for dense-to-MoE upcycled models.
 
@@ -432,7 +591,7 @@ def gemma3_moe_layer_spec(config) -> ModuleSpec:
       represent the per-expert output norm.
     """
     return ModuleSpec(
-        module=TransformerLayer,
+        module=Gemma3MoETransformerLayer,
         submodules=TransformerLayerSubmodules(
             self_attention=ModuleSpec(
                 module=Gemma3SelfAttention,
@@ -488,8 +647,11 @@ class Gemma3MoEModelProvider(Gemma3ModelProvider):
     Every dense MLP is replaced by a top-1 MoE layer whose experts are
     full-size copies of the dense MLP (including the per-expert post-MLP
     RMSNorm). ``moe_router_pre_softmax=False`` with top-1 makes the combine
-    weight exactly 1.0, so a freshly upcycled model reproduces the dense
-    logits; the router then trains through the aux load-balancing loss.
+    weight exactly 1.0, so a freshly upcycled model is mathematically
+    dense-equivalent. Normal bf16 sparse dispatch is not bit-exact because
+    it changes norm/GEMM execution geometry; use
+    ``gemma3_moe_canonical_dense_init`` for the strict initialization gate.
+    The router then trains through the aux load-balancing loss.
     """
 
     transformer_layer_spec: Union[ModuleSpec, Callable[["Gemma3ModelProvider"], ModuleSpec]] = field(
@@ -504,6 +666,9 @@ class Gemma3MoEModelProvider(Gemma3ModelProvider):
     moe_grouped_gemm: bool = False  # SequentialMLP: experts carry a post-MLP norm
     moe_token_dispatcher_type: str = "alltoall"
     moe_permute_fusion: bool = True
+    # Exact dense-equivalent activation path for one-time correctness gates.
+    # Do not enable this for normal sparse-MoE training.
+    gemma3_moe_canonical_dense_init: bool = False
 
 
 @dataclass

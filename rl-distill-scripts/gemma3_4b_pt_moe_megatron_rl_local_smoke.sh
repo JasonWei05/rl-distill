@@ -5,8 +5,8 @@
 # update -> weight resync -> second rollout) with tiny batches on a subset of
 # local GPUs, leaving every other GPU untouched.
 #
-#   NUM_EXPERTS=2 SMOKE_GPUS=4,6 bash gemma3_4b_pt_moe_megatron_rl_local_smoke.sh
-#   NUM_EXPERTS=4 SMOKE_GPUS=4,6 bash gemma3_4b_pt_moe_megatron_rl_local_smoke.sh
+#   NUM_EXPERTS=2 SMOKE_GPUS=0,1 UPCYCLED_MOE_DIR=/checkpoints/moe-2e \
+#     bash gemma3_4b_pt_moe_megatron_rl_local_smoke.sh
 #
 # Extra hydra overrides may be appended.
 set -euo pipefail
@@ -14,7 +14,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 NUM_EXPERTS=${NUM_EXPERTS:-2}
-SMOKE_GPUS=${SMOKE_GPUS:-4,6}
+SMOKE_GPUS=${SMOKE_GPUS:-0,1}
 SMOKE_STEPS=${SMOKE_STEPS:-2}
 
 # Refuse to run on GPUs that other jobs are using.
@@ -48,23 +48,15 @@ export ACTOR_EP=${ACTOR_EP:-${default_ep}}
 export REF_TP=${REF_TP:-${ACTOR_TP}}
 export REF_EP=${REF_EP:-${ACTOR_EP}}
 
-# Pre-downloaded pinned snapshots (matching the 2e/4e wrapper revisions).
-if [ -z "${HF_MOE_LOCAL_DIR:-}" ]; then
-    case "${NUM_EXPERTS}" in
-    2) HF_MOE_LOCAL_DIR="/tmp/hf-gemma3-moe-rl-cache/models--JWei05--gemma3-4b-pt-moe-2e-top1-sft-16k/snapshots/952a11b802b63ef091f20ec2dfe08eb66376794c" ;;
-    4) HF_MOE_LOCAL_DIR="/tmp/hf-gemma3-moe-rl-cache/models--JWei05--gemma3-4b-pt-moe-4e-top1-sft-16k/snapshots/cd87f6e541b1bc0fba8caef218c55601fbb0c533" ;;
-    esac
-fi
-if [ -d "${HF_MOE_LOCAL_DIR}" ]; then
+# Require a deliberate checkpoint selection; never fall back to the old SFT
+# snapshots when validating a fresh dense upcycle.
+if [ -z "${MODEL_PATH:-}" ] && [ -z "${HF_MOE_LOCAL_DIR:-}" ]; then
+    HF_MOE_LOCAL_DIR="${UPCYCLED_MOE_DIR:-/tmp/gemma3-4b-pt-moe-${NUM_EXPERTS}e-upcycled}"
+    if [ ! -f "${HF_MOE_LOCAL_DIR}/config.json" ]; then
+        echo "Missing fresh upcycle at ${HF_MOE_LOCAL_DIR}; set UPCYCLED_MOE_DIR or HF_MOE_LOCAL_DIR." >&2
+        exit 2
+    fi
     export HF_MOE_LOCAL_DIR
-else
-    # Fall back to the launcher's snapshot download, pinned to the same
-    # revisions the 2e/4e wrappers use.
-    unset HF_MOE_LOCAL_DIR
-    case "${NUM_EXPERTS}" in
-    2) export HF_MOE_REVISION="${HF_MOE_REVISION:-952a11b802b63ef091f20ec2dfe08eb66376794c}" ;;
-    4) export HF_MOE_REVISION="${HF_MOE_REVISION:-cd87f6e541b1bc0fba8caef218c55601fbb0c533}" ;;
-    esac
 fi
 
 export TRAIN_FILE=${TRAIN_FILE:-"${HOME}/verl/data/dapo_17k_train.parquet"}
@@ -83,7 +75,10 @@ export OVERLONG_BUFFER_LEN=${OVERLONG_BUFFER_LEN:-128}
 export TEST_FREQ=${TEST_FREQ:--1}
 export SAVE_FREQ=${SAVE_FREQ:--1}
 export RESUME_MODE=${RESUME_MODE:-disable}
-export ROUTER_REPLAY_MODE=${ROUTER_REPLAY_MODE:-disabled}
+export ACTOR_LR_WARMUP_STEPS=${ACTOR_LR_WARMUP_STEPS:-0}
+export ROUTER_REPLAY_MODE=${ROUTER_REPLAY_MODE:-R2}
+export ROLLOUT_MODEL_IMPL=${ROLLOUT_MODEL_IMPL:-native}
+export ROLLOUT_ATTENTION_BACKEND=${ROLLOUT_ATTENTION_BACKEND:-TRITON_ATTN}
 export ROLLOUT_GPU_MEMORY_UTILIZATION=${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.7}
 export REWARD_NUM_WORKERS=${REWARD_NUM_WORKERS:-2}
 export AGENT_LOOP_NUM_WORKERS=${AGENT_LOOP_NUM_WORKERS:-2}
@@ -92,7 +87,6 @@ export EXP_NAME=${EXP_NAME:-"moe-${NUM_EXPERTS}e-smoke-$(date +%Y%m%d-%H%M)"}
 
 exec bash "${SCRIPT_DIR}/gemma3_4b_pt_moe_megatron_rl_20k.sh" \
     trainer.total_training_steps="${SMOKE_STEPS}" \
-    actor_rollout_ref.actor.optim.lr_warmup_steps=1 \
     'trainer.logger=["console"]' \
     +ray_kwargs.ray_init._temp_dir=/tmp/ray_megatron_moe_smoke \
     +ray_kwargs.ray_init.include_dashboard=False \

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 export NUM_EXPERTS=4
+export HF_MOE_REPO="${HF_MOE_REPO:-JWei05/gemma3-4b-pt-moe-4e-top1-sft-16k}"
 export HF_MOE_REVISION="${HF_MOE_REVISION:-cd87f6e541b1bc0fba8caef218c55601fbb0c533}"
 export ACTOR_TP="${ACTOR_TP:-2}"
 export ACTOR_EP="${ACTOR_EP:-4}"

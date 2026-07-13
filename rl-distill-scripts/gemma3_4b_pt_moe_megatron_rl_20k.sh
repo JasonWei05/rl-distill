@@ -77,6 +77,7 @@ gen_prompt_bsz=${GEN_PROMPT_BSZ:-${train_prompt_bsz}}
 n_resp_per_prompt=${N_RESP_PER_PROMPT:-16}
 train_prompt_mini_bsz=${TRAIN_PROMPT_MINI_BSZ:-32}
 test_freq=${TEST_FREQ:-2}
+val_before_train=${VAL_BEFORE_TRAIN:-False}
 reward_num_workers=${REWARD_NUM_WORKERS:-8}
 agent_loop_num_workers=${AGENT_LOOP_NUM_WORKERS:-8}
 
@@ -85,11 +86,11 @@ RAY_ADDRESS=${RAY_ADDRESS:-auto}
 NNODES=${NNODES:-2}
 GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 
-# Paths. By default this pulls the uploaded MoE SFT checkpoint from HF. The repo
-# root is the custom HF/vLLM MoE model. The uploaded dist_ckpt also contains
-# optimizer/extra training state, so RL actor/ref loading defaults to HF weights.
+# Paths. Set MODEL_PATH/HF_MOE_LOCAL_DIR for a local conversion, or explicitly
+# set HF_MOE_REPO for a Hub checkpoint. There is deliberately no implicit model
+# fallback: accidentally training an old SFT checkpoint is not an upcycling run.
 RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
-HF_MOE_REPO=${HF_MOE_REPO:-"JWei05/gemma3-4b-pt-moe-${NUM_EXPERTS}e-top1-sft-16k"}
+HF_MOE_REPO=${HF_MOE_REPO:-}
 HF_MOE_REVISION=${HF_MOE_REVISION:-main}
 HF_MOE_CACHE_DIR=${HF_MOE_CACHE_DIR:-"/tmp/hf-gemma3-moe-rl-cache"}
 HF_MOE_LOCAL_DIR=${HF_MOE_LOCAL_DIR:-}
@@ -97,11 +98,12 @@ MODEL_PATH=${MODEL_PATH:-}
 DIST_CKPT_PATH=${DIST_CKPT_PATH:-}
 USE_DIST_CHECKPOINTING=${USE_DIST_CHECKPOINTING:-False}
 CKPTS_DIR=${CKPTS_DIR:-"/tmp/verl/ckpts/${project_name}/${exp_name}"}
-HF_PUSH_REPO=${HF_PUSH_REPO:-"JWei05/dapo-gemma3-4b-pt-moe-${NUM_EXPERTS}e-megatron-rl"}
+HF_PUSH_REPO=${HF_PUSH_REPO:-}
 HF_PUSH_ENABLE=${HF_PUSH_ENABLE:-False}
 HF_PUSH_PRIVATE=${HF_PUSH_PRIVATE:-False}
 HF_PUSH_DELETE_LOCAL_AFTER=${HF_PUSH_DELETE_LOCAL_AFTER:-False}
 HF_PUSH_MAX_TO_KEEP=${HF_PUSH_MAX_TO_KEEP:-10}
+HF_PUSH_FREQ=${HF_PUSH_FREQ:-${SAVE_FREQ:-20}}
 TRAIN_FILE=${TRAIN_FILE:-"${RAY_DATA_HOME}/data/dapo_openmath2_mix_train.parquet"}
 if [ -n "${VAL_FILE:-}" ]; then
     VAL_FILES="['${VAL_FILE}']"
@@ -109,10 +111,11 @@ else
     VAL_FILES=${VAL_FILES:-"['${RAY_DATA_HOME}/data/dapo_openmath2_mix_val_compat.parquet','${RAY_DATA_HOME}/data/math__aime2024_repeated_32x_960_compat.parquet','${RAY_DATA_HOME}/data/math__aime2025_repeated_32x_960_compat.parquet','${RAY_DATA_HOME}/data/math__aime2026_repeated_32x_960_compat.parquet','${RAY_DATA_HOME}/data/math__math_500_repeated_2x_1000_compat.parquet','${RAY_DATA_HOME}/data/math__olympiadbench_repeated_2x_compat.parquet','${RAY_DATA_HOME}/data/math__minervamath_repeated_4x_compat.parquet','${RAY_DATA_HOME}/data/math__gsm8k_test_compat.parquet']"}
 fi
 
-if [ -z "${MODEL_PATH}" ] || [ -z "${DIST_CKPT_PATH}" ]; then
+HF_SNAPSHOT_DIR=""
+if [ -z "${MODEL_PATH}" ]; then
     if [ -n "${HF_MOE_LOCAL_DIR}" ]; then
         HF_SNAPSHOT_DIR="${HF_MOE_LOCAL_DIR}"
-    else
+    elif [ -n "${HF_MOE_REPO}" ]; then
         HF_SNAPSHOT_DIR="$(python3 - <<PY
 from huggingface_hub import snapshot_download
 
@@ -139,9 +142,15 @@ print(snapshot_download(
 ))
 PY
 )"
+    else
+        echo "Set MODEL_PATH, HF_MOE_LOCAL_DIR, or HF_MOE_REPO to a converted Gemma3-MoE checkpoint." >&2
+        echo "See rl-distill-scripts/GEMMA3_MOE_RL_TRAINING.md for the dense upcycling command." >&2
+        exit 2
     fi
-    MODEL_PATH=${MODEL_PATH:-"${HF_SNAPSHOT_DIR}"}
-    DIST_CKPT_PATH=${DIST_CKPT_PATH:-"${HF_SNAPSHOT_DIR}/global_step_250/dist_ckpt"}
+    MODEL_PATH="${HF_SNAPSHOT_DIR}"
+fi
+if [ -z "${DIST_CKPT_PATH}" ] && [ -n "${HF_SNAPSHOT_DIR}" ] && [ -d "${HF_SNAPSHOT_DIR}/global_step_250/dist_ckpt" ]; then
+    DIST_CKPT_PATH="${HF_SNAPSHOT_DIR}/global_step_250/dist_ckpt"
 fi
 
 if [ ! -f "${MODEL_PATH}/config.json" ]; then
@@ -157,9 +166,73 @@ install -m 0644 "${PROJECT_ROOT}/rl-distill-scripts/gemma3_moe_hf/configuration_
 install -m 0644 "${PROJECT_ROOT}/rl-distill-scripts/gemma3_moe_hf/modeling_gemma3_moe.py" \
     "${MODEL_PATH}/modeling_gemma3_moe.py"
 
+# Fail before allocating GPUs if a checkpoint violates the upcycling
+# invariants or if a canonical test view is about to be trained.
+python3 - "${MODEL_PATH}" "${NUM_EXPERTS}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+model_path = Path(sys.argv[1])
+expected_experts = int(sys.argv[2])
+with (model_path / "config.json").open() as handle:
+    config = json.load(handle)
+
+architectures = config.get("architectures", [])
+if "Gemma3MoeForCausalLM" not in architectures:
+    raise SystemExit(f"Expected Gemma3MoeForCausalLM in architectures; got {architectures}")
+actual_experts = config.get("gemma3_moe_num_experts", config.get("num_experts"))
+if int(actual_experts) != expected_experts:
+    raise SystemExit(f"Checkpoint has {actual_experts} experts, launcher requested {expected_experts}")
+if int(config.get("num_experts_per_tok", 1)) != 1:
+    raise SystemExit("Only top-1 Gemma3 MoE checkpoints are supported")
+if config.get("router_pre_softmax", False) is not False:
+    raise SystemExit("router_pre_softmax must be false for dense-equivalent top-1 upcycling")
+canonical_checkpoint = config.get("gemma3_moe_canonical_dense_init", False)
+if canonical_checkpoint is not False:
+    raise SystemExit(
+        "This is a canonical correctness-only checkpoint. "
+        "Use the normal sparse output for Gate D and training; the canonical view is for Gates A-C."
+    )
+print(f"Gemma3-MoE preflight: experts={actual_experts} topk=1 canonical_dense_init=False")
+PY
+
 if [ "${USE_DIST_CHECKPOINTING}" = "True" ] && [ -z "${DIST_CKPT_PATH}" ]; then
-    echo "Set DIST_CKPT_PATH to the MoE SFT global_step_250/dist_ckpt directory before launching." >&2
+    echo "Set DIST_CKPT_PATH when USE_DIST_CHECKPOINTING=True." >&2
     exit 2
+fi
+if [ "${HF_PUSH_ENABLE}" = "True" ] && [ -z "${HF_PUSH_REPO}" ]; then
+    echo "Set HF_PUSH_REPO when HF_PUSH_ENABLE=True." >&2
+    exit 2
+fi
+if [ "${HF_PUSH_ENABLE}" = "True" ]; then
+    python3 - <<'PY'
+from huggingface_hub import get_token
+
+if not get_token():
+    raise SystemExit(
+        "HF_PUSH_ENABLE=True but no Hugging Face token is available. "
+        "Set HF_TOKEN in .env or run `hf auth login` before launching."
+    )
+PY
+fi
+save_freq=${SAVE_FREQ:-20}
+for frequency_name in test_freq save_freq HF_PUSH_FREQ; do
+    frequency_value=${!frequency_name}
+    if ! [[ "${frequency_value}" =~ ^-?[0-9]+$ ]]; then
+        echo "${frequency_name} must be an integer; got ${frequency_value}" >&2
+        exit 2
+    fi
+done
+if [ "${HF_PUSH_ENABLE}" = "True" ]; then
+    if [ "${save_freq}" -le 0 ]; then
+        echo "HF uploads occur after local saves, so SAVE_FREQ must be positive when HF push is enabled." >&2
+        exit 2
+    fi
+    if [ "${HF_PUSH_FREQ}" -gt 0 ] && [ $((HF_PUSH_FREQ % save_freq)) -ne 0 ]; then
+        echo "Warning: HF_PUSH_FREQ=${HF_PUSH_FREQ} is not a multiple of SAVE_FREQ=${save_freq}." >&2
+        echo "Uploads only run on local-save steps, so the effective cadence will differ." >&2
+    fi
 fi
 
 # Algorithm
@@ -167,6 +240,11 @@ temperature=1.0
 top_p=1.0
 top_k=-1
 val_top_p=0.7
+actor_lr_warmup_steps=${ACTOR_LR_WARMUP_STEPS:-20}
+if ! [[ "${actor_lr_warmup_steps}" =~ ^[0-9]+$ ]]; then
+    echo "ACTOR_LR_WARMUP_STEPS must be a non-negative integer; got ${actor_lr_warmup_steps}" >&2
+    exit 2
+fi
 
 # Performance related parameters
 sp_size=${SP_SIZE:-1}
@@ -183,7 +261,34 @@ rollout_gpu_memory_utilization=${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.80}
 rollout_block_size=${ROLLOUT_BLOCK_SIZE:-32}
 rollout_free_cache_engine=${ROLLOUT_FREE_CACHE_ENGINE:-True}
 rollout_max_num_batched_tokens=${ROLLOUT_MAX_NUM_BATCHED_TOKENS:-$((max_prompt_length + max_response_length))}
-rollout_attention_backend=${ROLLOUT_ATTENTION_BACKEND:-}
+# Use the registered native Gemma3-MoE implementation by default.  The generic
+# Transformers backend was the source of the 19k non-terminating rollout; it
+# is retained only as an explicit debugging fallback.  Triton is pinned by
+# default so dense and MoE native Gemma3 use the same attention path.
+rollout_model_impl=${ROLLOUT_MODEL_IMPL:-native}
+case "${rollout_model_impl}" in
+    auto|native|transformers) ;;
+    *)
+        echo "ROLLOUT_MODEL_IMPL must be auto, native, or transformers; got ${rollout_model_impl}" >&2
+        exit 2
+        ;;
+esac
+if [ "${rollout_model_impl}" = "native" ]; then
+    python3 - <<'PY'
+from vllm import ModelRegistry
+from vllm.plugins import load_general_plugins
+
+load_general_plugins()
+architecture = "Gemma3MoeForCausalLM"
+if architecture not in ModelRegistry.get_supported_archs():
+    raise SystemExit(
+        "The native vLLM Gemma3-MoE plugin is not installed. "
+        "Reinstall this checkout with: uv pip install --python .venv-megatron/bin/python -e ."
+    )
+print("Native vLLM Gemma3-MoE plugin registered")
+PY
+fi
+rollout_attention_backend=${ROLLOUT_ATTENTION_BACKEND:-TRITON_ATTN}
 rollout_attention_backend_args=()
 if [ -n "${rollout_attention_backend}" ]; then
     rollout_attention_backend_args+=(+actor_rollout_ref.rollout.engine_kwargs.vllm.attention_backend="${rollout_attention_backend}")
@@ -192,16 +297,17 @@ rollout_enforce_eager=${ROLLOUT_ENFORCE_EAGER:-True}
 
 # MoE RL specifics.
 MOE_AUX_LOSS_COEFF=${MOE_AUX_LOSS_COEFF:-1e-3}
-# R2 (default) records routes during the actor's own forward pass and replays
-# them in the update — no rollout-engine dependency. R3 (rollout-side capture)
-# is also supported: the custom Gemma3 MoE runs vLLM's plain Transformers path
-# (its per-expert post-MLP RMSNorm can't use FusedMoE, which is all vLLM auto-
-# binds capture to), so modeling_gemma3_moe.py feeds vLLM's RoutedExpertsCapturer
-# directly via a lazy hook. Capture is validated (matches the HF router argmax);
-# R2 stays the default as the simpler, dependency-free choice.
+# R2 records routes during the actor's old-log-prob pass and replays them in
+# the update. R3 capture exists in the native model, but the colocated verl
+# handoff has not passed the full correctness gate; keep it behind an explicit
+# experimental opt-in.
 ROUTER_REPLAY_MODE=${ROUTER_REPLAY_MODE:-R2}
 if [ "${ROUTER_REPLAY_MODE}" != "disabled" ] && [ "${ROUTER_REPLAY_MODE}" != "R2" ] && [ "${ROUTER_REPLAY_MODE}" != "R3" ]; then
     echo "ROUTER_REPLAY_MODE must be disabled, R2, or R3; got ${ROUTER_REPLAY_MODE}" >&2
+    exit 2
+fi
+if [ "${ROUTER_REPLAY_MODE}" = "R3" ] && [ "${ALLOW_EXPERIMENTAL_R3:-False}" != "True" ]; then
+    echo "R3 is experimental for Gemma3-MoE. Use R2, or set ALLOW_EXPERIMENTAL_R3=True explicitly." >&2
     exit 2
 fi
 [ "${ROUTER_REPLAY_MODE}" = "R3" ] && ENABLE_ROLLOUT_ROUTING_REPLAY=True || ENABLE_ROLLOUT_ROUTING_REPLAY=False
@@ -359,7 +465,7 @@ python3 -m dapo.main_dapo \
     actor_rollout_ref.model.custom_chat_template="@${GEMMA3_CHAT_TEMPLATE_FILE}" \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.optim.lr=1e-6 \
-    actor_rollout_ref.actor.optim.lr_warmup_steps=20 \
+    actor_rollout_ref.actor.optim.lr_warmup_steps=${actor_lr_warmup_steps} \
     actor_rollout_ref.actor.optim.weight_decay=0.1 \
     +actor_rollout_ref.actor.optim.override_optimizer_config.adam_beta1=0.9 \
     +actor_rollout_ref.actor.optim.override_optimizer_config.adam_beta2=0.999 \
@@ -400,7 +506,7 @@ python3 -m dapo.main_dapo \
     actor_rollout_ref.rollout.load_format=safetensors \
     actor_rollout_ref.rollout.enforce_eager=${rollout_enforce_eager} \
     actor_rollout_ref.rollout.free_cache_engine=${rollout_free_cache_engine} \
-    +actor_rollout_ref.rollout.engine_kwargs.vllm.model_impl=transformers \
+    +actor_rollout_ref.rollout.engine_kwargs.vllm.model_impl=${rollout_model_impl} \
     +actor_rollout_ref.rollout.engine_kwargs.vllm.block_size=${rollout_block_size} \
     "${rollout_attention_backend_args[@]}" \
     actor_rollout_ref.rollout.enable_chunked_prefill=${enable_chunked_prefill} \
@@ -444,15 +550,16 @@ python3 -m dapo.main_dapo \
     trainer.experiment_name="${exp_name}" \
     trainer.n_gpus_per_node=${GPUS_PER_NODE} \
     trainer.nnodes="${NNODES}" \
-    trainer.val_before_train=False \
+    trainer.val_before_train=${val_before_train} \
     trainer.test_freq=${test_freq} \
-    trainer.save_freq=${SAVE_FREQ:-20} \
+    trainer.save_freq=${save_freq} \
     trainer.max_actor_ckpt_to_keep=${MAX_ACTOR_CKPT_TO_KEEP:-2} \
     +trainer.hf_push.enable=${HF_PUSH_ENABLE} \
     +trainer.hf_push.repo_id="${HF_PUSH_REPO}" \
     +trainer.hf_push.private=${HF_PUSH_PRIVATE} \
     +trainer.hf_push.delete_local_after=${HF_PUSH_DELETE_LOCAL_AFTER} \
     +trainer.hf_push.max_to_keep=${HF_PUSH_MAX_TO_KEEP} \
+    +trainer.hf_push.freq=${HF_PUSH_FREQ} \
     'actor_rollout_ref.actor.checkpoint.save_contents=[model,optimizer,extra,hf_model]' \
     'actor_rollout_ref.actor.checkpoint.load_contents=[model,optimizer,extra]' \
     trainer.total_epochs=100 \

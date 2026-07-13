@@ -1,5 +1,11 @@
 # DAPO on B200 — Gemma 3 training
 
+For Gemma 3 4B dense-to-MoE conversion, exact layerwise validation, native
+vLLM rollout, and Megatron RL, use
+[`GEMMA3_MOE_RL_TRAINING.md`](GEMMA3_MOE_RL_TRAINING.md). That workflow uses
+the separate `.venv-megatron` stack; the FSDP environment below is not the MoE
+actor environment.
+
 For the portable 2-node H100 recipe that resumes RL from the distilled
 Gemma 3 12B checkpoint
 `JWei05/DAPO-Gemma3-12B-PT-TopK128Distill-From-Gemma3-4B-PT-DAPO-17.4k-LR2e6-linear500-1node/step_000500`,

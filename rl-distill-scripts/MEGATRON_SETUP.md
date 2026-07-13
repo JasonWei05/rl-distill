@@ -104,39 +104,30 @@ a remote worker command.
 
 ## Gemma3 MoE (upcycled) RL
 
-The MoE RL scripts (`gemma3_4b_pt_moe_{2e,4e}_megatron_rl_20k.sh`) additionally
-require the **Megatron-Bridge fork** with the Gemma3 MoE provider/bridge
-(`gemma3_moe_layer_spec`, `Gemma3MoeBridge`, top-1 validation relaxation, and
-core_v0.16.0 compat shims). `setup_megatron.sh` installs it editable from
-`MEGATRON_BRIDGE_PATH` (default `/mnt/efs/jasonwei/Megatron-Bridge`, branch
-`gemma3-moe`).
+The MoE path additionally uses the Gemma3 provider/bridge in the vendored
+`third_party/Megatron-Bridge`. `setup_megatron.sh` installs that checkout
+editable by default; override it with `MEGATRON_BRIDGE_PATH` only when testing
+another compatible fork.
 
-Validated on 8x H100 (2026-07-03) with `CUDA_HOME=/usr/local/cuda-12.9`,
-`TORCH_CUDA_ARCH_LIST=9.0`:
+Fresh dense upcycling, exact layerwise validation, native vLLM rollout, the
+8xH100 launcher, checkpoint uploads, and resume commands are documented in
+[`GEMMA3_MOE_RL_TRAINING.md`](GEMMA3_MOE_RL_TRAINING.md). The critical runtime
+defaults are:
 
-- HF-vs-Megatron logit parity on the real SFT checkpoints: 2E at EP=1/2 and
-  4E at EP=1/2/4 — top-1 agreement 1.0 (`logit_parity_gemma3_moe_hf_vs_megatron.py`).
-- vLLM 0.18 standalone generation for 2E and 4E via the Transformers backend.
-- 2-step DAPO round trips (rollout → update → weight resync → rollout) via
-  `gemma3_4b_pt_moe_megatron_rl_local_smoke.sh` for 2E (TP1/EP2, replay
-  disabled and R2) and 4E (TP2/EP4).
+```text
+ROLLOUT_MODEL_IMPL=native
+ROLLOUT_ATTENTION_BACKEND=TRITON_ATTN
+ROUTER_REPLAY_MODE=R2
+```
 
-Notes:
+The generic vLLM Transformers backend is diagnostic-only. R3 capture exists
+but its colocated handoff remains experimental; use R2 for normal runs. A
+guardrail raises on an all-zero replay map rather than silently routing every
+token to expert 0.
 
-- `ROUTER_REPLAY_MODE` defaults to `R2` (trainer-side record/replay, no
-  rollout dependency). `R3` (rollout-side capture) is also supported: vLLM only
-  auto-binds capture to `FusedMoE` modules, which this model can't use, so
-  `modeling_gemma3_moe.py` feeds vLLM's `RoutedExpertsCapturer` directly via a
-  lazy hook (capture validated against the HF router argmax). A guardrail in
-  `verl/workers/engine/megatron/transformer_impl.py` raises if the replayed
-  routing map is all-zero, so the old silent-expert-0 failure can't recur.
-- The HF config stores the expert count as `gemma3_moe_num_experts`
-  (legacy `num_experts` still read) so vLLM's fused-MoE auto-detection stays
-  off; the fused path cannot represent the per-expert post-MLP RMSNorm.
-- If setup runs behind Scale's CodeArtifact, use `UV_NO_CONFIG=1
-  PIP_INDEX_URL=https://pypi.org/simple` (the pip.conf token expires) and
-  note TransformerEngine needs the pip cuDNN include path (handled in
-  `setup_megatron.sh`).
+If setup runs behind a private package mirror with an expired token, use
+`UV_NO_CONFIG=1 PIP_INDEX_URL=https://pypi.org/simple`. TransformerEngine also
+needs the pip cuDNN include path, which `setup_megatron.sh` configures.
 
 ## Common errors → fixes (history)
 

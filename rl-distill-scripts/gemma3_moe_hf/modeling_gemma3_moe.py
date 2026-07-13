@@ -43,12 +43,12 @@ from transformers.models.gemma3.modeling_gemma3 import (
 
 from .configuration_gemma3_moe import Gemma3MoeConfig
 
-
 # vLLM's routed-experts capturer is a process-global singleton with a public
 # capture() API. vLLM's binder only auto-attaches to FusedMoE modules, which
 # this per-expert-normalized architecture cannot use, so the module feeds the
-# capturer directly, making rollout routing replay (verl R3) work on vLLM's
-# plain Transformers backend. The import is resolved lazily at forward time
+# capturer directly when the experimental rollout routing replay path is
+# enabled on vLLM's plain Transformers backend. The import is resolved lazily
+# at forward time
 # (never at module import) because vLLM inspects trust_remote_code models by
 # importing this file in a subprocess; importing vLLM internals there stalls
 # that inspection. At forward time we are always inside a live vLLM worker
@@ -95,6 +95,7 @@ class Gemma3MoeMLP(nn.Module):
         self.router_pre_softmax = config.router_pre_softmax
         self.router_score_function = config.router_score_function
         self.router_dtype = config.router_dtype
+        self.canonical_dense_init = bool(getattr(config, "gemma3_moe_canonical_dense_init", False))
         self.router = nn.Linear(config.hidden_size, self.num_experts, bias=False)
         self.experts = nn.ModuleList([Gemma3MoeExpert(config) for _ in range(self.num_experts)])
 
@@ -133,6 +134,15 @@ class Gemma3MoeMLP(nn.Module):
                 capturer = capturer_cls.get_instance()
                 if capturer is not None and capturer._device_buffer is not None:
                     capturer.capture(self.layer_idx, selected_experts)
+
+        if self.canonical_dense_init:
+            # Correctness-only initialization path: experts are exact copies,
+            # so routing changes neither the mathematical output nor which
+            # weights it should use.  Running one canonical expert on the
+            # *full* batch retains the dense GEMM geometry and is bit-exact
+            # with the original dense MLP, while the router above still emits
+            # the real routes for replay/diagnostics.
+            return self.experts[0](flat_states).reshape(original_shape)
 
         selected_experts = selected_experts.squeeze(-1)
         output = torch.empty_like(flat_states)
@@ -285,6 +295,7 @@ class Gemma3MoeModel(Gemma3MoePreTrainedModel):
                 "attention_mask": attention_mask,
                 "past_key_values": past_key_values,
                 "position_ids": position_ids,
+                "cache_position": cache_position,
             }
             try:
                 causal_mask_mapping = {
@@ -293,7 +304,6 @@ class Gemma3MoeModel(Gemma3MoePreTrainedModel):
                 }
             except TypeError:
                 mask_kwargs["input_embeds"] = mask_kwargs.pop("inputs_embeds")
-                mask_kwargs["cache_position"] = cache_position
                 causal_mask_mapping = {
                     "full_attention": create_causal_mask(**mask_kwargs),
                     "sliding_attention": create_sliding_window_causal_mask(**mask_kwargs),
