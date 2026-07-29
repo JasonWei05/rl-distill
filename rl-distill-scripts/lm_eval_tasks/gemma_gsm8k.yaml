@@ -1,0 +1,27 @@
+tag:
+  - gemma_unified_math
+task: gemma_gsm8k
+dataset_path: openai/gsm8k
+dataset_name: main
+test_split: test
+output_type: generate_until
+process_docs: !function gemma_unified_math_utils.process_docs_gsm8k
+doc_to_text: !function gemma_unified_math_utils.doc_to_text
+doc_to_target: !function gemma_unified_math_utils.doc_to_target
+process_results: !function gemma_unified_math_utils.process_results
+fewshot_config:
+  sampler: first_n
+  samples: !function gemma_unified_math_utils.list_fewshot_samples
+num_fewshot: 12
+generation_kwargs:
+  until:
+    - "<end_of_turn>"
+  do_sample: false
+  temperature: 0.0
+  max_gen_toks: 1024
+metric_list:
+  - metric: math_verify
+    aggregation: mean
+    higher_is_better: true
+metadata:
+  version: 1.0

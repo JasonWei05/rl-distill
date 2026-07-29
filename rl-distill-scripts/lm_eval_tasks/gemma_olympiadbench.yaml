@@ -1,0 +1,5 @@
+include: _gemma_verl_base.yaml
+task: gemma_olympiadbench
+dataset_kwargs:
+  data_files:
+    test: /mnt/efs/jasonwei/verl/data/math__olympiadbench.parquet

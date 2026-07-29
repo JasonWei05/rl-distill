@@ -1,0 +1,5 @@
+include: _gemma_verl_base.yaml
+task: gemma_aime2024
+dataset_kwargs:
+  data_files:
+    test: /mnt/efs/jasonwei/verl/data/math__aime2024_30.parquet
