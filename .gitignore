@@ -148,3 +148,8 @@ eval_results/
 /Megatron-LM/
 modelchef/
 nohup.out
+
+# rl-distill local analysis artifacts (wandb table exports, investigation dumps, pod logs)
+artifacts/
+# generated figures (make_plots.py regenerates them from wandb)
+plots/*.png
