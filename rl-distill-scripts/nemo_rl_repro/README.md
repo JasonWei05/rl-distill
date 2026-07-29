@@ -24,6 +24,23 @@ verl reference data: wandb `rl-distill/DAPO` run `recbw9dcxso` (recovery of `bw9
 | `../scale_train/run_nemorl_gemma4_e2b_repro.sh` | Pod run file (works on both images; see below) |
 | `../scale_train/st_config/Dockerfile.nemorl` | Baked image (`train-rl-distill-nemorl` build config) |
 
+## Prebuilt image (pull instead of building)
+
+The baked image is in Scale's ECR under a stable tag (launch-generated tags in the same
+repo are ephemeral/overwritten — use this one):
+
+```bash
+aws ecr get-login-password --region us-west-2 | \
+  docker login --username AWS --password-stdin 692474966980.dkr.ecr.us-west-2.amazonaws.com
+docker pull 692474966980.dkr.ecr.us-west-2.amazonaws.com/scale_train/shared/training/tmp:rl-distill-nemorl-cu130-20260729
+# digest sha256:370c4cd9e8185f82d08439aabba7349d56c223c1eb1edb32ad451f40130ddcc2 (78.9GB)
+```
+
+Needs AWS creds for account 692474966980 (us-west-2). External registries (GHCR/Docker
+Hub) are not an option without restructuring the Dockerfile: the venv layers are 38.4GB
+and 19.9GB, past their ~10GB layer caps. Worst case, `Dockerfile.nemorl` rebuilds it
+from scratch in ~1h (H100-arch only, no GPU needed at build time).
+
 ## Prereqs
 
 ```bash
