@@ -27,6 +27,7 @@ mkdir -p "${HF_HOME}"
 
 NODE_ID="${1:-0}"          # 0 or 1
 GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
+GPU_OFFSET="${GPU_OFFSET:-0}"   # first physical GPU index to use (e.g. 2 to skip GPUs 0,1)
 TP="${TP:-2}"
 DP="${DP:-1}"
 INSTANCE_GPUS=$((TP * DP))
@@ -61,7 +62,7 @@ echo "=== Node ${NODE_ID}: launching ${SHARDS_PER_NODE} shards (TP=${TP}, DP=${D
 PIDS=()
 for LOCAL_SHARD in $(seq 0 $((SHARDS_PER_NODE - 1))); do
     SHARD_ID=$((NODE_ID * SHARDS_PER_NODE + LOCAL_SHARD))
-    GPU_START=$((LOCAL_SHARD * INSTANCE_GPUS))
+    GPU_START=$((GPU_OFFSET + LOCAL_SHARD * INSTANCE_GPUS))
     GPU_END=$((GPU_START + INSTANCE_GPUS - 1))
     GPUS=$(seq -s, ${GPU_START} ${GPU_END})
 

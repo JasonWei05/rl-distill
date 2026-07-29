@@ -85,10 +85,12 @@ def main():
     df = df.iloc[start:end]
     print(f"Shard {args.shard_id}/{args.num_shards}: prompts [{start}:{end}] ({len(df)} prompts)")
 
-    # Extract prompt text
+    # Extract prompt text. `prompt` is a chat-message sequence (Python list OR numpy
+    # ndarray of dicts, depending on how the parquet was written) -> take the last
+    # message's content; fall back to str() for a plain-text prompt column.
     prompts = []
     for prompt_col in df["prompt"]:
-        if isinstance(prompt_col, list):
+        if hasattr(prompt_col, "__len__") and len(prompt_col) and isinstance(prompt_col[-1], dict):
             prompts.append(prompt_col[-1]["content"])
         else:
             prompts.append(str(prompt_col))
@@ -120,16 +122,18 @@ def main():
     if args.chat_template:
         tokenizer.chat_template = Path(args.chat_template).read_text()
 
-    # Build chat prompts — repeat each prompt N times for N responses
-    chat_prompts = []
+    # Build prompts as TOKEN IDS (not strings) so vLLM conditions on exactly the tokens we
+    # captured. Encode with add_special_tokens=False: the chat template already emits the single
+    # bos_token, so this matches verl RL training (rl_dataset.py uses add_special_tokens=False);
+    # passing the string to vLLM would double the BOS.
+    prompt_requests = []
     prompt_indices = []
-    prompt_token_ids_by_local_idx = []
     for idx, text in enumerate(prompts):
         messages = [{"role": "user", "content": text}]
         formatted = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-        prompt_token_ids_by_local_idx.append(tokenizer.encode(formatted, add_special_tokens=False))
+        ids = tokenizer.encode(formatted, add_special_tokens=False)
         for _ in range(args.n):
-            chat_prompts.append(formatted)
+            prompt_requests.append({"prompt_token_ids": ids})
             prompt_indices.append(idx)
 
     dp_rank = 0
@@ -137,10 +141,10 @@ def main():
         global_rank = int(os.environ["RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
         dp_rank = global_rank // (world_size // args.dp)
-        keep = [i for i in range(len(chat_prompts)) if i % args.dp == dp_rank]
-        chat_prompts = [chat_prompts[i] for i in keep]
+        keep = [i for i in range(len(prompt_requests)) if i % args.dp == dp_rank]
+        prompt_requests = [prompt_requests[i] for i in keep]
         prompt_indices = [prompt_indices[i] for i in keep]
-        print(f"External DP rank {dp_rank}/{args.dp}: kept {len(chat_prompts)} local requests")
+        print(f"External DP rank {dp_rank}/{args.dp}: kept {len(prompt_requests)} local requests")
 
     sampling_params = SamplingParams(
         max_tokens=args.max_tokens,
@@ -154,9 +158,9 @@ def main():
         logprobs=1,
     )
 
-    print(f"Generating {len(chat_prompts)} responses ({len(prompts)} prompts x {args.n})...")
+    print(f"Generating {len(prompt_requests)} responses ({len(prompts)} prompts x {args.n})...")
     print(f"Teacher: {args.teacher_model} @ {args.revision}, TP={args.tp}, DP={args.dp}")
-    outputs = llm.generate(chat_prompts, sampling_params)
+    outputs = llm.generate(prompt_requests, sampling_params)
 
     records = []
     skipped = 0
@@ -173,8 +177,11 @@ def main():
             f"log_probs length {len(log_probs)} != token_ids length {len(token_ids)}"
         )
 
-        prompt_token_ids = prompt_token_ids_by_local_idx[local_idx]
-        full_token_ids = list(prompt_token_ids) + token_ids
+        # Use vLLM's own prompt_token_ids — the exact tokens the model conditioned on
+        # (re-encoding the formatted string can diverge, e.g. BOS handling). Needed for
+        # exact SFT reconstruction: input_ids = prompt_token_ids + response_token_ids.
+        prompt_token_ids = list(output.prompt_token_ids)
+        full_token_ids = prompt_token_ids + token_ids
         response_mask = [0] * len(prompt_token_ids) + [1] * len(token_ids)
 
         records.append(
@@ -183,6 +190,10 @@ def main():
                     {"role": "user", "content": prompts[local_idx]},
                     {"role": "assistant", "content": completion.text},
                 ],
+                "prompt_text": prompts[local_idx],
+                "response_text": completion.text,
+                "prompt_token_ids": prompt_token_ids,
+                "response_token_ids": token_ids,
                 "input_ids": full_token_ids,
                 "response_mask": response_mask,
                 "teacher_log_probs": log_probs,
