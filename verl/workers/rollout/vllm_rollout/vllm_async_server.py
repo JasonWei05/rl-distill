@@ -596,6 +596,21 @@ class vLLMHttpServer:
         # Disabling vLLM-side detokenization avoids tokenizer prefix-stream
         # failures on long, high-temperature Gemma PT rollouts.
         sampling_params.setdefault("detokenize", False)
+        # rl-distill fork: extra stop strings via env (comma-separated). Gemma-4 base needs this with
+        # our gemma-3-syntax few-shot template: gemma-4 has NO <end_of_turn> token (its delimiters are
+        # <|turn>/<turn|>) and its generation_config eos is only <eos>, so it emits the literal TEXT
+        # "<end_of_turn>" and never stops -> 20k-token rambles, multi-\boxed responses, strict reward
+        # exactly 0 (observed: step-0 val 0.0 across 3200 samples on run z63vu5yf). Stop-string
+        # matching requires vLLM-side detokenization, so re-enable it when stops are set (safe here:
+        # stopped rollouts are short, avoiding the long-rollout detokenizer failures noted above).
+        _extra_stop = os.environ.get("VERL_ROLLOUT_EXTRA_STOP")
+        if _extra_stop:
+            _stops = [s for s in _extra_stop.split(",") if s]
+            _prev_stop = sampling_params.get("stop")
+            if isinstance(_prev_stop, str):  # vLLM accepts str | list[str]; don't splinter a str
+                _prev_stop = [_prev_stop]
+            sampling_params["stop"] = list(_prev_stop or []) + _stops
+            sampling_params["detokenize"] = True
         sampling_params = SamplingParams(max_tokens=max_tokens, **sampling_params)
         prompt_ids = qwen2_5_vl_dedup_image_tokens(prompt_ids, self.model_config.processor)
         multi_modal_data = {}

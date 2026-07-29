@@ -383,6 +383,33 @@ class FSDPEngine(BaseEngine):
                 fused_kernels_backend=fused_kernels_backend,
             )
 
+            # rl-distill fork: disable final-logit softcapping inside the model's forward and
+            # re-apply it fused in prepare_model_outputs instead. Applied in-model (gemma-4:
+            # logits/cap -> tanh -> *cap), it materializes 2-3 extra full-vocab tensors per
+            # forward and tanh retains its 10.8GB output for backward at 22k tokens x 262k
+            # vocab — the direct cause of update-phase OOM. The modeling code reads the config
+            # attribute at every forward, so nulling it here is a clean runtime switch; rollout
+            # (vLLM) reads the untouched checkpoint config and is unaffected.
+            _text_cfg = getattr(module.config, "text_config", module.config)
+            self._logit_softcap = getattr(_text_cfg, "final_logit_softcapping", None)
+            # only the non-rmpad branch of prepare_model_outputs re-applies the cap, so leave
+            # rmpad-capable models (which never hit this memory wall) on stock behavior.
+            if self._logit_softcap is not None and not self.use_remove_padding:
+                # in-model fused log_probs (use_fused_kernels) would compute from the now-uncapped
+                # logits and bypass the re-application below — fail loud, not silently wrong.
+                assert not use_fused_kernels, (
+                    "rl-distill softcap move is incompatible with use_fused_kernels "
+                    "(in-model log_probs would skip final_logit_softcapping)"
+                )
+                self._logit_softcap = float(self._logit_softcap)
+                _text_cfg.final_logit_softcapping = None
+                # stash the true value for the checkpoint manager, which must save configs
+                # with stock semantics (fsdp_checkpoint_manager.save_checkpoint restores it)
+                module._rl_distill_true_softcap = self._logit_softcap
+                logger.info(f"[rl-distill] moved final_logit_softcapping={self._logit_softcap} out of model forward")
+            else:
+                self._logit_softcap = None
+
             # some parameters may not in torch_dtype
             module.to(torch_dtype)
 
@@ -1223,10 +1250,65 @@ class FSDPEngineWithLMHead(FSDPEngine):
                 logits = output.logits  # (bsz, response_length, vocab_size)
                 temperature = output_args["temperature"]  # (bsz,)
                 temperature = temperature.unsqueeze(-1).unsqueeze(-1)
-                logits.div_(temperature.clamp(min=1e-8).to(logits.dtype))
+                unit_temperature = bool(torch.all(temperature == 1.0))
+
+                # rl-distill fork: re-apply the final-logit softcapping that build_model moved
+                # out of the model forward (see there for why). Semantics must match stock HF:
+                # softcap first, then temperature. Three regimes:
+                #   - no-grad passes: chunked in-place, ~1GB transient;
+                #   - grad + (entropy in loss or temp != 1): materialize once, like stock HF;
+                #   - grad, logprobs-only (the update pass): defer into the fused chunked
+                #     logprobs function — zero extra full-vocab tensors.
+                fused_softcap = None
+                softcap = self._logit_softcap
+                if softcap is not None:
+                    _rows = verl_F._ChunkedLogprobsFromLogits.CHUNK_ROWS
+                    if not torch.is_grad_enabled():
+                        flat = logits.view(-1, logits.shape[-1])
+                        for i in range(0, flat.shape[0], _rows):
+                            c = flat[i : i + _rows]
+                            c.copy_((torch.tanh(c.float() / softcap) * softcap).to(c.dtype))
+                    elif calculate_entropy or not unit_temperature:
+                        # WARNING: this regime caps at logits dtype (bf16 quotient before tanh),
+                        # ~1 ulp off the fp32-compute-then-round regimes above/below — PPO ratios
+                        # at unchanged weights are no longer exactly 1 when it mixes with the
+                        # no-grad pass. Only reachable with entropy-in-loss or temperature != 1.
+                        warnings.warn(
+                            "[rl-distill] softcap regime 2 (grad + entropy/temperature): capped "
+                            "logits are computed at model dtype; cross-pass PPO-ratio parity is "
+                            "degraded (~1 bf16 ulp). Use temperature=1.0 and entropy_coeff=0 for "
+                            "exact parity.",
+                            stacklevel=2,
+                        )
+                        logits = torch.tanh(logits / softcap) * softcap
+                    else:
+                        fused_softcap = softcap
+
+                # rl-distill fork: skip the division when every temperature is 1.0 — DivBackward
+                # otherwise allocates a full-vocab gradient (~10.8GB at 22k tokens x gemma-4's
+                # 262k vocab) in the update pass for a mathematical no-op.
+                if not unit_temperature:
+                    logits.div_(temperature.clamp(min=1e-8).to(logits.dtype))
 
                 if calculate_entropy:
-                    if not self.engine_config.entropy_checkpointing:
+                    # rl-distill fork: honor entropy_from_logits_with_chunking here too — this
+                    # non-rmpad branch otherwise materializes a monolithic fp32 copy of the full
+                    # (bsz, seqlen, vocab) logits inside entropy_from_logits (~26-40GB at a 24k-token
+                    # micro-batch x gemma-4's 262k vocab -> CUDA OOM at train step 1). Chunking is
+                    # additionally wrapped in activation checkpointing when configured: without it,
+                    # a grad-enabled pass retains every chunk's fp32 softmax output (~21.5GB total).
+                    if self.engine_config.entropy_from_logits_with_chunking:
+
+                        def _chunked_entropy(_l):
+                            return verl_F.entropy_from_logits_with_chunking(_l.reshape(-1, _l.shape[-1])).view(
+                                _l.shape[:-1]
+                            )
+
+                        if self.engine_config.entropy_checkpointing and torch.is_grad_enabled():
+                            entropy = torch.utils.checkpoint.checkpoint(_chunked_entropy, logits)
+                        else:
+                            entropy = _chunked_entropy(logits)
+                    elif not self.engine_config.entropy_checkpointing:
                         entropy = verl_F.entropy_from_logits(logits)
                     else:
                         entropy = torch.utils.checkpoint.checkpoint(verl_F.entropy_from_logits, logits)
@@ -1235,10 +1317,32 @@ class FSDPEngineWithLMHead(FSDPEngine):
                     cu_seqlens = input_ids.offsets()
                     seq_lengths = cu_seqlens.diff()
                     starts = torch.zeros_like(seq_lengths, dtype=torch.int64)
-                    logits = torch.nested.narrow(logits, 1, starts, seq_lengths, layout=torch.jagged)
-                    logits_rmpad = torch.cat([t for t in logits.unbind()])
                     input_ids_rmpad_rolled = output_args["input_ids_rmpad_rolled"]
-                    log_probs = logprobs_from_logits(logits=logits_rmpad, labels=input_ids_rmpad_rolled)
+                    # rl-distill fork: compute log-probs directly on the padded (bsz, seqlen, vocab)
+                    # logits instead of packing them via narrow+unbind+cat. The cat duplicated the
+                    # logits in forward (+10.6GB at 22k tokens x 262k vocab) and its backward
+                    # materialized a second padded base-gradient of the same size — together the
+                    # difference between fitting and OOM on max-length samples. Padding rows are
+                    # scored against label 0 and discarded by the narrow below. In-place gradient
+                    # (grad written into the logits buffer) is safe exactly when nothing else reads
+                    # the logits values in backward — the same not-calculate_entropy rule as the
+                    # rmpad branch above.
+                    padded_labels = torch.zeros(
+                        logits.shape[:-1], dtype=input_ids_rmpad_rolled.dtype, device=logits.device
+                    )
+                    offsets = cu_seqlens.tolist()
+                    for i in range(len(offsets) - 1):
+                        padded_labels[i, : offsets[i + 1] - offsets[i]] = input_ids_rmpad_rolled[
+                            offsets[i] : offsets[i + 1]
+                        ]
+                    log_probs = logprobs_from_logits(
+                        logits=logits.reshape(-1, logits.shape[-1]),
+                        labels=padded_labels.reshape(-1),
+                        inplace_backward=not calculate_entropy,
+                        softcap=fused_softcap,
+                    ).view(logits.shape[:-1])
+                    log_probs = torch.nested.narrow(log_probs, 1, starts, seq_lengths, layout=torch.jagged)
+                    log_probs = torch.cat([t for t in log_probs.unbind()])
                     # (bsz, j1), for each sample, length of each sample: [real_prompt_length + real_response_length]
                     log_probs = torch.nested.nested_tensor_from_jagged(log_probs, cu_seqlens)
                     if calculate_entropy:
@@ -1336,8 +1440,14 @@ class FSDPEngineWithLMHead(FSDPEngine):
                 loss = torch.tensor(1.0, device=device_name)
                 metrics = {}
 
+            # rl-distill fork: detach the returned tensors. The caller accumulates these metas
+            # across micro-batches; a graph-attached tensor here (e.g. entropy, which the loss
+            # does not traverse when entropy_coeff=0) pins its whole autograd subgraph — at
+            # gemma-4's 262k vocab that is tens of GB retained across the accumulation loop.
             output = {
-                "model_output": model_output,
+                "model_output": {
+                    k: (v.detach() if isinstance(v, torch.Tensor) else v) for k, v in model_output.items()
+                },
                 "loss": loss.detach().item(),
                 "metrics": metrics,
             }

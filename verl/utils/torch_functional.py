@@ -69,7 +69,7 @@ def gather_from_labels(data: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
     return output
 
 
-def logprobs_from_logits(logits, labels, inplace_backward=True):
+def logprobs_from_logits(logits, labels, inplace_backward=True, softcap=None):
     """
     Compute per-token log-probabilities for the given labels.
 
@@ -82,22 +82,114 @@ def logprobs_from_logits(logits, labels, inplace_backward=True):
         logits (Tensor): Model outputs of shape (..., vocab_size).
         labels (LongTensor): True class indices of shape matching logits[..., :-1].
         inplace_backward (bool): If True and Flash-Attn is available, perform backward in-place.
+        softcap (float | None): rl-distill fork — gemma-style final-logit softcapping fused into
+            the chunked fallback path (flash-attn/NPU fast paths require softcap=None). Note the
+            chunked fallback returns fp32 (the previous v2 fallback returned the input dtype).
 
     Returns:
         Tensor: Log-probabilities of the target labels, shape logits.shape[:-1].
     """
-    if FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE:
+    if FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE and softcap is None:
         batch_dim = logits.shape[:-1]
         last_dim = logits.shape[-1]
         logits = logits.reshape(-1, last_dim)
         labels = labels.reshape(-1)
         output = logprobs_from_logits_flash_attn(logits, labels, inplace_backward=inplace_backward)
         output = output.view(*batch_dim)
-    elif NPU_CROSS_ENTROPY_LOSS_AVAILABLE:
+    elif NPU_CROSS_ENTROPY_LOSS_AVAILABLE and softcap is None:
         output = logprobs_from_logits_torch_npu(logits, labels)
     else:
-        output = logprobs_from_logits_v2(logits, labels)
+        # rl-distill fork: chunked logprobs instead of logprobs_from_logits_v2 or F.cross_entropy.
+        # Both alternatives materialize a full-vocab fp32 tensor at gemma-4's 262k vocab:
+        #   - v2's per-row log_softmax loop retains every row's full-vocab output in the autograd
+        #     graph during grad-enabled passes (update phase OOM),
+        #   - F.cross_entropy is on autocast's fp32 cast-list, so under the bf16 autocast context
+        #     it upcasts the whole [tokens, vocab] logits to an fp32 copy in ONE allocation
+        #     (21.5 GiB for a 22k-token sample — observed killing both forward-only old-logprob
+        #     and update passes on the gemma-4 ScaleTrain runs).
+        # _ChunkedLogprobsFromLogits does fp32 math in fixed-size row chunks (~1 GiB transient)
+        # and recomputes softmax in backward, retaining only the already-live input logits.
+        # Only venvs WITHOUT flash-attn hit this branch, so gemma-3 paths are unaffected.
+        batch_dim = logits.shape[:-1]
+        last_dim = logits.shape[-1]
+        output = _ChunkedLogprobsFromLogits.apply(
+            logits.reshape(-1, last_dim), labels.reshape(-1), inplace_backward, softcap
+        )
+        output = output.view(*batch_dim)
     return output
+
+
+class _ChunkedLogprobsFromLogits(torch.autograd.Function):
+    """Label log-probs (= -CE) with bounded memory at huge vocab sizes.
+
+    Forward: per-chunk fp32 upcast -> gather(label) - logsumexp. Peak transient is one
+    fp32 [CHUNK_ROWS, vocab] chunk instead of the full [tokens, vocab] fp32 copy that
+    F.cross_entropy makes under autocast. Backward: recomputes softmax per chunk
+    (d logp_label / d logits = onehot - softmax), so nothing full-vocab is saved for
+    backward beyond the input logits themselves, which the surrounding graph keeps
+    alive anyway. Numerics match fp32 F.cross_entropy (same upcast-then-reduce math).
+    """
+
+    CHUNK_ROWS = 1024
+
+    @staticmethod
+    def forward(ctx, logits, labels, inplace_backward=True, softcap=None):
+        # softcap: gemma-style final-logit softcapping, y = cap * tanh(x / cap), fused per chunk.
+        # The model's own softcapping must be disabled by the caller — applied in-model it
+        # materializes 2-3 extra full-vocab tensors per forward and tanh retains its output for
+        # backward (~21.5 GiB per 22k-token micro-batch at 262k vocab).
+        output = torch.empty(logits.shape[0], dtype=torch.float32, device=logits.device)
+        for i in range(0, logits.shape[0], _ChunkedLogprobsFromLogits.CHUNK_ROWS):
+            chunk = logits[i : i + _ChunkedLogprobsFromLogits.CHUNK_ROWS].float()
+            if softcap is not None:
+                # round capped values to the logits dtype before the logsumexp: stock semantics
+                # cap INSIDE the model, so both the no-grad old-logprob pass (which caps in-place
+                # at bf16) and this fused update path see identically-rounded capped logits and
+                # PPO ratios are exactly 1 at unchanged weights. Without the rounding the two
+                # passes disagree by up to ~0.06 logprob per token (pure numerics noise).
+                chunk = torch.tanh(chunk / softcap).mul_(softcap).to(logits.dtype).float()
+            chunk_labels = labels[i : i + _ChunkedLogprobsFromLogits.CHUNK_ROWS]
+            gathered = torch.gather(chunk, -1, chunk_labels.unsqueeze(-1)).squeeze(-1)
+            output[i : i + _ChunkedLogprobsFromLogits.CHUNK_ROWS] = gathered - torch.logsumexp(chunk, dim=-1)
+        ctx.save_for_backward(logits, labels)
+        ctx.inplace_backward = inplace_backward
+        ctx.softcap = softcap
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # inplace_backward=True: the gradient is written INTO the saved logits tensor chunk by
+        # chunk instead of allocating a second full-vocab buffer (10.8 GiB at 22k tokens × 262k
+        # vocab — the exact allocation that OOMed the update pass). Safe when no other backward
+        # node reads the logits' values (linear backward needs input+weight, temperature-div
+        # backward is value-free) — callers must pass inplace_backward=False when e.g. a
+        # checkpointed entropy recompute will re-read the logits. Same contract as flash-attn's
+        # cross_entropy_loss(inplace_backward=True), verl's default on the rmpad path.
+        logits, labels = ctx.saved_tensors
+        softcap = ctx.softcap
+        grad_logits = logits if ctx.inplace_backward else torch.empty_like(logits)
+        for i in range(0, logits.shape[0], _ChunkedLogprobsFromLogits.CHUNK_ROWS):
+            chunk = grad_logits[i : i + _ChunkedLogprobsFromLogits.CHUNK_ROWS]
+            xc = logits[i : i + _ChunkedLogprobsFromLogits.CHUNK_ROWS].float()
+            if softcap is not None:
+                tanh_xc = torch.tanh(xc / softcap)
+                # round capped logits to the input dtype exactly like the forward does, so the
+                # backward softmax is the gradient of the function the forward actually computed
+                probs = torch.softmax((tanh_xc * softcap).to(logits.dtype).float(), dim=-1)
+            else:
+                tanh_xc = None
+                probs = torch.softmax(xc, dim=-1)
+            grad_chunk = grad_output[i : i + _ChunkedLogprobsFromLogits.CHUNK_ROWS].unsqueeze(-1)
+            probs.mul_(-grad_chunk)  # -grad * softmax  (grad wrt softcapped logits y)
+            probs.scatter_add_(
+                -1,
+                labels[i : i + _ChunkedLogprobsFromLogits.CHUNK_ROWS].unsqueeze(-1),
+                grad_chunk.to(torch.float32),
+            )  # + grad * onehot
+            if softcap is not None:
+                probs.mul_(1.0 - tanh_xc.square_())  # chain rule: dy/dx = 1 - tanh^2(x / cap)
+            chunk.copy_(probs.to(logits.dtype))
+        return grad_logits, None, None, None
 
 
 def logprobs_from_logits_flash_attn(

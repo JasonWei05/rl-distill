@@ -196,6 +196,19 @@ class Worker(WorkerHelper):
         self._rank = rank
         self._world_size = world_size
 
+        # rl-distill fork: isolate per-rank JIT caches. The trainer propagates a single
+        # TRITON_CACHE_DIR/TORCHINDUCTOR_CACHE_DIR to every worker (ray_trainer worker_env), so N
+        # colocated ranks JIT-compile into the same directory concurrently at vLLM engine init —
+        # a cache-corruption race that can kill workers natively (observed on 8-rank gemma-4 p5
+        # runs: silent SIGSEGV-class deaths in 1-2 ranks, the rest hang on NCCL until the watchdog).
+        # Suffixing the rank keeps caches warm per-process while removing cross-rank writes.
+        # (idempotent: WorkerDict runs this __init__ once for itself and once per inner role
+        # class — without the basename check colocated workers would nest rank0/rank0)
+        for _cache_key in ("TRITON_CACHE_DIR", "TORCHINDUCTOR_CACHE_DIR"):
+            _cache_base = os.environ.get(_cache_key)
+            if _cache_base and os.path.basename(_cache_base) != f"rank{rank}":
+                os.environ[_cache_key] = os.path.join(_cache_base, f"rank{rank}")
+
         master_addr = os.environ["MASTER_ADDR"]
         master_port = os.environ["MASTER_PORT"]
 

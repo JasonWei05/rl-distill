@@ -468,6 +468,36 @@ def fsdp2_load_full_state_dict(model: torch.nn.Module, full_state: dict, device_
         # use torch 2.7.0 copy from verl/third_party/torch/distributed/checkpoint
         from verl.third_party.torch.distributed.checkpoint.state_dict import StateDictOptions, set_model_state_dict
 
+    # rl-distill fork: NCCL-free local load. verl's engine path builds `full_state` from
+    # module.state_dict() AFTER loading the HF checkpoint on EVERY rank, so the rank-0 broadcast
+    # below is redundant — and for Gemma-4 it deadlocks: the broadcast stream desyncs by a constant
+    # +8 collectives on rank 0 (checkpoint/model key mismatch), leaving unmatched NCCL broadcasts
+    # enqueued; every rank then wedges in the next device sync (empty_cache) until the 30-min NCCL
+    # watchdog kills the job (py-spy stacks: all ranks active in aggressive_empty_cache).
+    # With identical full_state everywhere, load locally with zero collectives instead: keep this
+    # rank's loaded weights/buffers (no to_empty wipe; non-persistent buffers like rotary inv_freq
+    # stay valid, so the manual buffer broadcast is unnecessary too).
+    if os.environ.get("VERL_FSDP2_LOCAL_LOAD", "0") == "1":
+        # SAFETY: local load assumes every rank materialized REAL weights (verl only skips the
+        # meta-tensor init context for tie_word_embeddings models — see
+        # get_init_weight_context_manager). For a non-tied model, ranks != 0 hold meta/empty
+        # weights and skipping the broadcast would silently shard garbage into the model
+        # (symptoms: nonsense rollouts, 100-1000x grad norms). Fail loudly instead.
+        _tied = getattr(getattr(model, "config", None), "tie_word_embeddings", None)
+        assert _tied is True, (
+            "VERL_FSDP2_LOCAL_LOAD=1 requires tie_word_embeddings=True (all ranks must have "
+            "materialized real weights); this model is untied — use the default broadcast load."
+        )
+        model = model.to(device=get_device_id(), non_blocking=True)
+        cpu_offload = cpu_offload is not None
+        options = StateDictOptions(full_state_dict=True, cpu_offload=cpu_offload, broadcast_from_rank0=False)
+        set_model_state_dict(model, full_state, options=options)
+        if cpu_offload:
+            model.to("cpu", non_blocking=True)
+            for buf in model.buffers():
+                buf.data = buf.data.to(get_device_id())
+        return
+
     # To broadcast, it needs to be instantiated in the GPU.
     if dist.get_rank() == 0:
         model = model.to(device=get_device_id(), non_blocking=True)

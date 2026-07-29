@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import json
 import logging
 import os
@@ -260,6 +261,15 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             hf_config_tokenizer_path = os.path.join(local_path, "huggingface")
             local_mkdir_safe(hf_config_tokenizer_path)
             model_config = unwrap_model.config
+            # rl-distill fork: the gemma-4 engine moves final_logit_softcapping out of the model
+            # forward by nulling it on the live config (transformer_impl.build_model stashes the
+            # true value on the module). Restore it in SAVED configs so snapshots load with stock
+            # semantics everywhere else (vLLM evals, resumes, HF pushes) — without this every
+            # huggingface/ snapshot silently ships a cap-less model config.
+            _true_softcap = getattr(unwrap_model, "_rl_distill_true_softcap", None)
+            if _true_softcap is not None:
+                model_config = copy.deepcopy(model_config)
+                getattr(model_config, "text_config", model_config).final_logit_softcapping = _true_softcap
             generation_config = None
             if unwrap_model.can_generate() and hasattr(model_config, "name_or_path") and model_config.name_or_path:
                 try:

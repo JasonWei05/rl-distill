@@ -27,7 +27,25 @@ def _get_attention_functions() -> tuple[Callable, Callable, Callable, Callable]:
     if is_torch_npu_available(check_device=False):
         from verl.utils.npu_flash_attn_utils import index_first_axis, pad_input, rearrange, unpad_input
     else:
-        from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
+        try:
+            from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
+        except ModuleNotFoundError:
+            # rl-distill fork: pure-torch fallback for venvs without flash-attn (e.g. the gemma-4
+            # cu129 stack). transformers vendors drop-in equivalents for _pad_input/_unpad_input
+            # (same params; _unpad_input returns the same 5-tuple as flash_attn>=2.7). These are
+            # used for pad-layout conversion only (the actual attention runs sdpa), so the
+            # flash-attn kernels themselves are not needed.
+            from einops import rearrange
+            from transformers.modeling_flash_attention_utils import _pad_input as pad_input
+            from transformers.modeling_flash_attention_utils import _unpad_input as unpad_input
+
+            def index_first_axis(tensor, indices):
+                # flash_attn.bert_padding semantics: index axis 0 of a PRE-FLATTENED (total, ...)
+                # tensor. transformers' _index_first_axis is NOT a drop-in — it reshapes dims 0-1
+                # itself, silently gathering wrong rows for already-flat inputs (all verl call
+                # sites pass pre-flattened tensors). Plain advanced indexing matches semantics
+                # and autograd.
+                return tensor[indices]
 
     _index_first_axis, _pad_input, _rearrange, _unpad_input = index_first_axis, pad_input, rearrange, unpad_input
 
