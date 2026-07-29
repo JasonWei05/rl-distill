@@ -174,6 +174,31 @@ class RayDAPOTrainer(RayPPOTrainer):
 
         return batch
 
+    def _log_train_generations_to_wandb(self, batch):
+        """Upload a random sample of this step's train rollouts to wandb (fork addition).
+
+        Mirrors the val-generations logging but as a FRESH per-step table (one row per trace)
+        under 'train/generations', so it doesn't accumulate/re-upload a growing table every step.
+        Gated on trainer.log_train_generations (N traces); no-op if 0 or wandb isn't active.
+        """
+        n = int(self.config.trainer.get("log_train_generations", 0) or 0)
+        if n <= 0 or "wandb" not in self.config.trainer.logger:
+            return
+        import numpy as np
+        import wandb
+
+        if wandb.run is None:
+            return
+        inputs = self.tokenizer.batch_decode(batch.batch["prompts"], skip_special_tokens=True)
+        outputs = self.tokenizer.batch_decode(batch.batch["responses"], skip_special_tokens=True)
+        scores = batch.batch["token_level_scores"].sum(-1).cpu().tolist()
+        rng = np.random.RandomState(self.global_steps)  # vary the sample each step
+        idx = rng.permutation(len(inputs))[:n]
+        table = wandb.Table(columns=["step", "input", "output", "score"])
+        for i in idx:
+            table.add_data(self.global_steps, inputs[i], outputs[i], scores[i])
+        wandb.log({"train/generations": table}, step=self.global_steps)
+
     def fit(self):
         """
         The training loop of PPO.
@@ -491,6 +516,9 @@ class RayDAPOTrainer(RayPPOTrainer):
                     rollout_data_dir = self.config.trainer.get("rollout_data_dir", None)
                     if rollout_data_dir:
                         self._log_rollout_data(batch, reward_extra_infos_dict, timing_raw, rollout_data_dir)
+
+                    # Upload a random sample of this step's train rollouts to wandb (fork addition)
+                    self._log_train_generations_to_wandb(batch)
 
                 # validate
                 if self.config.trainer.test_freq > 0 and (
