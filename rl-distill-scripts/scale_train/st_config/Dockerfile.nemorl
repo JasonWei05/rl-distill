@@ -1,0 +1,108 @@
+# syntax=docker/dockerfile:1.3
+# NeMo-RL environment BAKED IN, so pods skip the ~60-min in-pod toolchain + venv build
+# that run_nemorl_gemma4_e2b_repro.sh otherwise performs. Every setup step in that
+# script is an idempotent guard (nvcc/cudnn.h/cmake presence, uv sync no-op, worker
+# venvs reused via venvs.py's existing-venv early return), so the same run script
+# works on both this image (fast path) and the plain train-rl-distill image (slow path).
+#
+# Layer order is deliberate: everything heavy depends only on third_party/nemo-rl,
+# which is a pinned vendored checkout — the whole-repo COPY is the last layer, so
+# routine repo edits rebuild nothing but that final COPY.
+FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONFAULTHANDLER=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_INDEX_URL=https://pypi.org/simple
+ENV UV_INDEX_URL=https://pypi.org/simple
+ENV DD_SERVICE=rl-distill
+
+# Base tools (superset of the verl image's block) + python3 (data-prep/gate helpers)
+# + InfiniBand verbs headers (deep-ep builds inside the worker venvs).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    build-essential \
+    ca-certificates \
+    curl \
+    git \
+    iproute2 \
+    libnuma-dev \
+    openssh-client \
+    procps \
+    python3 \
+    sudo \
+    wget \
+    libibverbs-dev \
+    librdmacm-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# CUDA 13.0 toolchain + forward-compat (cu130 wheels on the R570 p5 fleet) + cuDNN 9
+# dev headers (TransformerEngine compiles against cudnn.h). Mirrors the run script's
+# install blocks. apt lists are KEPT so the script's re-install guards are instant no-ops.
+RUN curl -fsSLO https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb \
+    && dpkg -i cuda-keyring_1.1-1_all.deb \
+    && apt-get update \
+    && apt-get install -y cuda-toolkit-13-0 cuda-compat-13-0 cudnn9-cuda-13 libcudnn9-dev-cuda-13
+
+# cmake via Kitware tarball (same as nemo-rl's docker/Dockerfile; TE needs >= 3.21)
+RUN CMAKE_VERSION=4.0.3 && ARCH=$(uname -m) \
+    && curl --retry 3 --retry-delay 2 -fsSL -o /tmp/cmake.tgz \
+        "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-${ARCH}.tar.gz" \
+    && tar -xzf /tmp/cmake.tgz -C /tmp \
+    && cp -r /tmp/cmake-${CMAKE_VERSION}-linux-${ARCH}/bin/* /usr/local/bin/ \
+    && cp -r /tmp/cmake-${CMAKE_VERSION}-linux-${ARCH}/share/* /usr/local/share/ \
+    && rm -rf /tmp/cmake* \
+    && cmake --version
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:/usr/local/cuda-13.0/bin:${PATH}"
+ENV CUDA_HOME=/usr/local/cuda-13.0
+ENV CUDA_PATH=/usr/local/cuda-13.0
+
+# Build-env knobs identical to the run script: H100-only arches (sm90), CUDA 13's
+# relocated CCCL headers on the include path (deep-ep includes <cuda/std/...>).
+ENV NVTE_BUILD_MAX_JOBS=8
+ENV NVTE_BUILD_THREADS_PER_JOB=2
+ENV NVTE_FRAMEWORK=pytorch
+ENV NVTE_CUDA_ARCHS=90
+ENV TORCH_CUDA_ARCH_LIST=9.0
+ENV CPATH=/usr/local/cuda-13.0/include/cccl
+ENV CPLUS_INCLUDE_PATH=/usr/local/cuda-13.0/include/cccl
+ENV UV_HTTP_TIMEOUT=300
+
+# nemo-rl source only — pinned vendored checkout, so this and the heavy layers below
+# stay cached across launches.
+COPY third_party/nemo-rl /workspace/rl-distill/third_party/nemo-rl
+WORKDIR /workspace/rl-distill/third_party/nemo-rl
+
+# Driver venv: their locked cu130 stack; TransformerEngine source build (~25 min).
+# deep-ep is skipped here exactly like the run script — it belongs to the worker
+# venvs (the vllm extra pulls it there, with the IB headers above).
+RUN uv sync --locked --extra automodel --no-install-package deep-ep
+
+# Prefetch the two worker venvs the repro run uses (vLLM generation + automodel
+# policy). NCCL headers come from the driver venv's pip nvidia-nccl — the same wiring
+# as the run script's NCCL_HEADERS_OK block. venvs.py's runtime _env_builder
+# early-returns on existing venvs, so pods reuse these untouched.
+ENV NEMO_RL_VENV_DIR=/opt/ray_venvs
+# libcuda.so stubs: deep-ep links the driver API, absent in a GPU-less build container
+# (link-time only — the real libcuda comes from the node's driver at runtime).
+RUN NCCL_DIR=$(ls -d /workspace/rl-distill/third_party/nemo-rl/.venv/lib/python3.*/site-packages/nvidia/nccl | head -1) \
+    && export CPATH="${NCCL_DIR}/include:${CPATH}" \
+        CPLUS_INCLUDE_PATH="${NCCL_DIR}/include:${CPLUS_INCLUDE_PATH}" \
+        LIBRARY_PATH="${NCCL_DIR}/lib:/usr/local/cuda-13.0/lib64/stubs" \
+        NCCL_INCLUDE_DIR="${NCCL_DIR}/include" \
+        NCCL_LIB_DIR="${NCCL_DIR}/lib" \
+    && uv run --no-sync python nemo_rl/utils/prefetch_venvs.py \
+        VllmGenerationWorker DTensorPolicyWorkerV2 2>&1 | tee /tmp/prefetch.log \
+    && grep -q "Prefetched: 2" /tmp/prefetch.log \
+    && ! grep -q "^  Failed:" /tmp/prefetch.log
+
+# Sanity: the driver venv imports torch (no CUDA init — no GPU at build time).
+RUN uv run --no-sync python -c "import torch; print('BAKE_OK torch', torch.__version__)"
+
+# Full repo last — the only layer that changes launch-to-launch. The context has no
+# third_party/nemo-rl/.venv (dockerignored), so the venv baked above is preserved.
+COPY . /workspace/rl-distill
+WORKDIR /workspace/rl-distill
+ENV PYTHONPATH=/workspace/rl-distill

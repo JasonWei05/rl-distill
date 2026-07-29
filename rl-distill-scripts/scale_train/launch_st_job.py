@@ -120,6 +120,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # scale-train's ECR build/push uses botocore, which errors with NoRegionError unless a region
+    # is on the env (the default AWS profile here has no region). The ECR registry is us-west-2.
+    os.environ.setdefault("AWS_DEFAULT_REGION", "us-west-2")
+    os.environ.setdefault("AWS_REGION", "us-west-2")
+
     here = Path(__file__).resolve().parent
     build_manifest = (here / args.build_manifest_path).resolve()
     env_build_values = (here / args.env_build_values_path).resolve()
