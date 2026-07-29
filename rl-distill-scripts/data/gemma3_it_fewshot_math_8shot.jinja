@@ -1,0 +1,66 @@
+{{ bos_token }}{% raw %}<start_of_turn>user
+Find the domain of the expression $\frac{\sqrt{x-2}}{\sqrt{5-x}}$.<end_of_turn>
+<start_of_turn>model
+The expressions inside each square root must be non-negative. So $x-2\ge 0$, giving $x\ge 2$, and $5-x\ge 0$, giving $x\le 5$. The denominator cannot be zero, so $5-x>0$, i.e. $x<5$. Therefore the domain is $[2,5)$. The final answer is $\boxed{[2,5)}$.<end_of_turn>
+<start_of_turn>user
+There are 15 trees in the grove. Grove workers will plant trees in the grove today. After they are done, there will be 21 trees. How many trees did the grove workers plant today?<end_of_turn>
+<start_of_turn>model
+There were 15 trees originally and 21 after planting, so the workers planted $21 - 15 = 6$ trees. The final answer is $\boxed{6}$.<end_of_turn>
+<start_of_turn>user
+If there are 3 cars in the parking lot and 2 more cars arrive, how many cars are in the parking lot?<end_of_turn>
+<start_of_turn>model
+There are 3 cars originally and 2 more arrive, so there are $3 + 2 = 5$ cars. The final answer is $\boxed{5}$.<end_of_turn>
+<start_of_turn>user
+If $\det \mathbf{A} = 2$ and $\det \mathbf{B} = 12,$ then find $\det (\mathbf{A} \mathbf{B}).$<end_of_turn>
+<start_of_turn>model
+We have $\det(\mathbf{A}\mathbf{B}) = (\det \mathbf{A})(\det \mathbf{B}) = (2)(12) = 24$. The final answer is $\boxed{24}$.<end_of_turn>
+<start_of_turn>user
+Leah had 32 chocolates and her sister had 42. If they ate 35, how many pieces do they have left in total?<end_of_turn>
+<start_of_turn>model
+Together they had $32 + 42 = 74$ chocolates. After eating 35 they have $74 - 35 = 39$ left. The final answer is $\boxed{39}$.<end_of_turn>
+<start_of_turn>user
+Jason had 20 lollipops. He gave Denny some lollipops. Now Jason has 12 lollipops. How many lollipops did Jason give to Denny?<end_of_turn>
+<start_of_turn>model
+Jason went from 20 to 12 lollipops, so he gave away $20 - 12 = 8$. The final answer is $\boxed{8}$.<end_of_turn>
+<start_of_turn>user
+Terrell usually lifts two 20-pound weights 12 times. If he uses two 15-pound weights instead, how many times must Terrell lift them in order to lift the same total weight?<end_of_turn>
+<start_of_turn>model
+Lifting two 20-pound weights 12 times gives $2\cdot 12\cdot 20 = 480$ pounds. With two 15-pound weights lifted $n$ times that is $2\cdot 15\cdot n = 30n$ pounds. Setting $30n = 480$ gives $n = 16$. The final answer is $\boxed{16}$.<end_of_turn>
+<start_of_turn>user
+Shawn has five toys. For Christmas, he got two toys each from his mom and dad. How many toys does he have now?<end_of_turn>
+<start_of_turn>model
+He started with 5 toys and got $2 + 2 = 4$ more, so he now has $5 + 4 = 9$. The final answer is $\boxed{9}$.<end_of_turn>
+{% endraw %}{%- if messages[0]['role'] == 'system' -%}
+    {%- if messages[0]['content'] is string -%}
+        {%- set first_user_prefix = messages[0]['content'] + '\n\n' -%}
+    {%- else -%}
+        {%- set first_user_prefix = messages[0]['content'][0]['text'] + '\n\n' -%}
+    {%- endif -%}
+    {%- set loop_messages = messages[1:] -%}
+{%- else -%}
+    {%- set first_user_prefix = "" -%}
+    {%- set loop_messages = messages -%}
+{%- endif -%}
+{%- for message in loop_messages -%}
+    {%- if (message['role'] == 'assistant') -%}
+        {%- set role = "model" -%}
+    {%- else -%}
+        {%- set role = message['role'] -%}
+    {%- endif -%}
+    {{ '<start_of_turn>' + role + '\n' + (first_user_prefix if loop.first else "") }}
+    {%- if message['content'] is string -%}
+        {{ message['content'] | trim }}
+    {%- elif message['content'] is iterable -%}
+        {%- for item in message['content'] -%}
+            {%- if item['type'] == 'text' -%}
+                {{ item['text'] | trim }}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- else -%}
+        {{ raise_exception("Invalid content type") }}
+    {%- endif -%}
+    {{ '<end_of_turn>\n' }}
+{%- endfor -%}
+{%- if add_generation_prompt -%}
+    {{'<start_of_turn>model\n'}}
+{%- endif -%}
