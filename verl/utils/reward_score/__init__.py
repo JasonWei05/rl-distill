@@ -57,13 +57,15 @@ def default_compute_score(
         # from . import math_verify
         # res = math_verify.compute_score(solution_str, ground_truth)
     elif (
-        data_source in ["math_dapo", "math", "math_dapo_reasoning", "math500", "olympiadbench", "minervamath", "gsm8k"]
+        data_source
+        in ["math_dapo", "math", "math_dapo_reasoning", "math500", "olympiadbench", "minervamath", "gsm8k", "beyondaime"]
         or data_source.startswith("aime")
     ):
         from . import math_verify
 
         score = math_verify.compute_score(solution_str, ground_truth)
-        res = {"score": score, "acc": score > 0.5}
+        # "pred" (extracted boxed answer) enables maj@k majority-vote validation metrics.
+        res = {"score": score, "acc": score > 0.5, "pred": math_verify.extract_prediction(solution_str)}
     elif data_source in [
         "numina_aops_forum",
         "numina_synthetic_math",

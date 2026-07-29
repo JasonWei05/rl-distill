@@ -135,6 +135,32 @@ def _extract_fast_boxed_answer(model_output: str) -> str | None:
     return boxed
 
 
+def _all_boxed_contents(model_output: str) -> list[str]:
+    """Return the contents of every \\boxed{}/\\fbox{} (balanced braces) in order.
+
+    Used for STRICT scoring: score only a single boxed answer, so bare-LaTeX echoes
+    (no box) and multi-box hedging get no credit.
+    """
+    outs = []
+    for m in _BOXED_COMMAND_PATTERN.finditer(model_output):
+        start = m.end()
+        if start >= len(model_output) or model_output[start] != "{":
+            continue
+        depth = 0
+        end = None
+        for i in range(start, min(len(model_output), start + 1024)):
+            if model_output[i] == "{":
+                depth += 1
+            elif model_output[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end is not None:
+            outs.append(model_output[start + 1 : end].strip())
+    return outs
+
+
 def _has_plausible_boxed_answer(model_output: str) -> bool:
     return _extract_fast_boxed_answer(model_output) is not None
 
@@ -154,6 +180,40 @@ def _is_plausible_ground_truth(ground_truth: str) -> bool:
         return False
     words = [word.lower() for word in re.findall(r"[A-Za-z]{2,}", content)]
     return not any(word not in _ALLOWED_MATH_WORDS for word in words)
+
+
+def extract_prediction(model_output: str) -> str:
+    """Extract the model's final \\boxed{} answer content for maj@k majority voting.
+
+    General extractor (last boxed span, balanced braces) — unlike _extract_fast_boxed_answer
+    this does not reject valid answers, so identical answers vote together. '' if none.
+    """
+    matches = list(_BOXED_COMMAND_PATTERN.finditer(model_output))
+    if not matches:
+        return ""
+    start = matches[-1].end()
+    if start >= len(model_output):
+        return ""
+    if model_output[start] == "{":
+        depth = 0
+        end = None
+        for i in range(start, min(len(model_output), start + 1024)):
+            if model_output[i] == "{":
+                depth += 1
+            elif model_output[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end is None:
+            return ""
+        content = model_output[start + 1 : end].strip()
+    else:
+        end = start
+        while end < len(model_output) and not model_output[end].isspace() and model_output[end] not in "$\n\r":
+            end += 1
+        content = model_output[start:end].strip()
+    return content[:256]
 
 
 def _verify_in_subprocess(ground_truth_boxed: str, model_output: str) -> float:
@@ -179,6 +239,15 @@ def compute_score(model_output: str, ground_truth: str, timeout_score: float = 0
     max_chars = int(os.getenv("VERL_MATH_VERIFY_MAX_CHARS", "0"))
     if max_chars > 0 and len(model_output) > max_chars:
         model_output = model_output[-max_chars:]
+    # STRICT boxed-only scoring (default on): require exactly ONE \boxed{} answer and verify only
+    # that box. Kills false positives from (a) bare-LaTeX echoes with no box and (b) multi-box hedging
+    # (the old code parsed the whole output and took max over all extracted candidates). Set
+    # VERL_MATH_VERIFY_STRICT_BOXED=0 to restore the old lenient whole-output extraction.
+    if _env_flag("VERL_MATH_VERIFY_STRICT_BOXED", True):
+        boxes = _all_boxed_contents(model_output)
+        if len(boxes) != 1:
+            return 0.0
+        model_output = "\\boxed{" + boxes[0] + "}"
     if _env_flag("VERL_MATH_VERIFY_FAST_INVALID", False):
         if not _is_plausible_ground_truth(ground_truth):
             return timeout_score
