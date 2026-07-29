@@ -1,0 +1,163 @@
+# NeMo-RL exact replication of our verl DAPO run:
+#   DAPO-gemma4-e2b-pt-DeepScaleR-4of4strict-seed42-8k
+#   (rl-distill-scripts/gemma3_pt_fewshot_math_rl.sh via scale_train/run_gemma4_pt_deepscaler_4of4strict_rl.sh,
+#    MAX_RESPONSE_LENGTH=8192, OVERLONG_BUFFER_LEN=2048)
+#
+# Launch with run_grpo_repro.py (registers the math_strict env before setup).
+#
+# defaults resolves relative to THIS file's directory (nemo_rl config loader,
+# nemo_rl/utils/config.py resolve_path). We inherit the exemplar grpo_math_1B.yaml
+# directly rather than their dapo-gemma4-e2b-it recipe: the loader's `_override_`
+# full-replace marker only works at the top level of a file, so the recipe's
+# transformer_engine FusedAdam kwargs (master_weights, exp_avg_dtype, ...) would
+# MERGE into — and crash — torch.optim.AdamW. The recipe's gemma-4 deltas that we
+# keep (freeze_config, mbs/logprob_batch 1, logprob_chunk 4096, packing off /
+# dynamic batching on, make_sequence_length_divisible_by 1, gpu_memory_utilization
+# 0.5) are encoded explicitly below.
+defaults: ../../../third_party/nemo-rl/examples/configs/grpo_math_1B.yaml
+
+grpo:
+  num_prompts_per_step: 64            # verl data.train_batch_size=64 (prompts)
+  num_generations_per_prompt: 16      # verl rollout.n=16 -> 1024 responses/step
+  # verl trainer.total_epochs=100 (runs until stopped). NOTE: deviates from the
+  # interface study's max_num_epochs=1, which would stop at ~151 steps
+  # (9723 prompts / 64); comparisons vs the verl run focus on steps <= 150 anyway.
+  max_num_epochs: 100
+  normalize_rewards: true             # (r - group_mean) / (std(ddof=1) + 1e-6) == verl grpo norm
+  use_leave_one_out_baseline: false   # group-mean baseline == verl GRPO
+  val_period: 10                      # verl TEST_FREQ=10
+  val_at_start: true                  # verl trainer.val_before_train (step-0 gate)
+  max_val_samples: 3200               # full val parquet: 200 prompts x16 rows
+  val_batch_size: 3200                # single val batch -> validation/accuracy = mean@16
+  seed: 42                            # verl DATA_SEED=42 (different RNG stream; distributional match only)
+  use_dynamic_sampling: false         # verl ENABLE_FILTER_GROUPS=False
+  batch_multiplier: 1
+  overlong_filtering: false           # verl did not zero-mask truncated sequences
+  reward_shaping:                     # verl overlong_buffer_cfg {len 2048, penalty_factor 1.0} @ 8k
+    enabled: true
+    overlong_buffer_length: 2048
+    overlong_buffer_penalty: 1.0
+    max_response_length: 8192         # MUST be explicit: default is ${policy.max_total_sequence_length}=12288,
+                                      # which would silently move the penalty onset from 6144 to 10240
+    stop_properly_penalty_coef: null  # if set it REPLACES DAPO shaping — keep null
+  reward_scaling:
+    enabled: false                    # verl reward is raw 0/1 + overlong penalty
+
+loss_fn:
+  reference_policy_kl_penalty: 0.0    # verl DAPO: no KL term (reference policy auto-skipped)
+  ratio_clip_min: 0.2                 # verl clip_ratio_low
+  ratio_clip_max: 0.28                # verl clip_ratio_high
+  ratio_clip_c: 10                    # verl clip_ratio_c=10.0 (dual-clip)
+  token_level_loss: true              # verl loss_agg_mode=token-mean
+  use_importance_sampling_correction: false   # TIS all off (verl had none)
+  truncated_importance_sampling_type: null
+  truncated_importance_sampling_ratio: null
+  use_kl_in_reward: false
+  # NeMo-RL has no entropy bonus in the loss => verl entropy_coeff=0 matched by construction
+
+checkpointing:
+  enabled: true
+  save_period: 25                     # verl SAVE_FREQ=25
+  keep_top_k: null                    # keep ALL saves — base yaml prunes to top-3 by val:accuracy; verl kept every save
+  # Absolute on purpose: the launcher runs with cwd = third_party/nemo-rl
+  # (uv run --directory), and relative outputs would land inside the vendored
+  # checkout. Override at launch if the node uses local disk (e.g. /tmp/verl).
+  checkpoint_dir: /tmp/verl/ckpts/nemorl-dapo-gemma4-e2b-pt-DeepScaleR-4of4strict-seed42-8k
+
+policy:
+  # gemma-4's per-layer input embedding is a single ~4.7GB bf16 tensor; the default
+  # weight-refit buffer is smaller and stream_weights_via_ipc_zmq asserts. Same class
+  # of fix as verl's rollout.checkpoint_engine.update_weights_bucket_megabytes=8192.
+  refit_buffer_size_gb: 12
+  model_name: google/gemma-4-E2B      # PT base (recipe used -it)
+  tokenizer:
+    name: google/gemma-4-E2B
+    # get_tokenizer() loads *.jinja paths from file and installs the content as
+    # tokenizer.chat_template — same 12-shot template the verl run installs via
+    # actor_rollout_ref.model.custom_chat_template.
+    # NOTE: pod path — on a devbox override with policy.tokenizer.chat_template=<local path>.
+    chat_template: /workspace/rl-distill/rl-distill-scripts/data/gemma3_it_fewshot_math.jinja
+  train_global_batch_size: 512        # verl ppo_mini_batch 32 prompts x16 = 512 -> 2 optim steps / rollout step
+  train_micro_batch_size: 1           # recipe (gemma-4: no rmpad path; 262k-vocab logits)
+  logprob_batch_size: 1               # recipe
+  max_total_sequence_length: 12288    # verl 4096 prompt + 8192 response
+  logprob_chunk_size: 4096            # recipe (262k vocab logprob memory)
+  max_grad_norm: 1.0                  # verl grad_clip=1.0
+  optimizer:
+    name: "torch.optim.AdamW"         # fp32 optim states (recipe's TE FusedAdam kept bf16 moments)
+    kwargs:
+      lr: 1.0e-6                      # verl actor lr
+      weight_decay: 0.1               # verl optim.weight_decay
+      betas: [0.9, 0.999]
+      eps: 1.0e-8
+  scheduler:                          # verl constant-with-warmup(20); LinearLR start_factor cannot be exactly 0
+    - name: "torch.optim.lr_scheduler.LinearLR"
+      kwargs:
+        start_factor: 1.0e-8
+        end_factor: 1.0
+        total_iters: 20
+    - name: "torch.optim.lr_scheduler.ConstantLR"
+      kwargs:
+        factor: 1.0
+        total_iters: 10000000000
+    - milestones: [20]
+  dtensor_cfg:
+    # Their e2b recipe runs 4096 total seq; we run 12288 (verl parity) — without
+    # recompute the training step OOMs on 80GB H100 (71.8GiB PyTorch alloc observed).
+    # Parity-neutral: same gradients, activations recomputed in backward. Their
+    # 26ba4b/31b automodel recipes enable it too.
+    activation_checkpointing: true
+    automodel_kwargs:
+      freeze_config:                  # recipe: E2B multimodal towers stay frozen (verl trains text-only path)
+        freeze_vision_tower: true
+        freeze_audio_tower: true
+        freeze_language_model: false
+  sequence_packing:
+    enabled: false                    # recipe
+  dynamic_batching:
+    enabled: true                     # recipe
+  make_sequence_length_divisible_by: 1
+  generation:
+    max_new_tokens: 8192              # verl max_response_length (8k variant)
+    temperature: 1.0                  # val uses the same sampling params (verl val_kwargs identical)
+    top_p: 1.0
+    top_k: null                       # vllm_worker maps null -> -1 (disabled), same as verl top_k=-1
+    # gemma-4 has no EOT token and the PT tokenizer's <eos> is rarely emitted;
+    # termination comes from these strings (== verl VERL_ROLLOUT_EXTRA_STOP).
+    stop_strings: ["<end_of_turn>", "<start_of_turn>"]
+    vllm_cfg:
+      # FLAG: recipe value, untested at 12288 max_model_len on 1n8g — retune at
+      # launch if KV-cache/refit OOMs (verl ran 0.65 with sleep mode disabled).
+      gpu_memory_utilization: 0.5
+
+data:
+  max_input_seq_length: 4096          # verl max_prompt_length (NeMo masks instead of drops; no-op — max prompt ~2461 tok)
+  shuffle: true
+  train:
+    dataset_name: rl_distill_nemo.deepscaler_dataset.DeepScalerStrictParquet
+    data_path: /tmp/verl/data/deepscaler_4of4strict_rl_train.parquet
+    split_validation_size: 0          # base default is 0.05 — must be 0, val comes from its own parquet
+  validation:
+    dataset_name: rl_distill_nemo.deepscaler_dataset.DeepScalerStrictParquet
+    data_path: /tmp/verl/data/deepscaler_4of4strict_rl_val200_x16.parquet
+  default:
+    prompt_file: null                 # bare question passes through; chat formatting is the tokenizer template
+    system_prompt_file: null
+    processor: math_hf_data_processor
+    env_name: math_strict
+
+env:
+  math_strict:                        # registered by run_grpo_repro.py
+    num_workers: 16
+
+logger:
+  log_dir: /tmp/verl/logs/nemorl-dapo-gemma4-e2b-pt-DeepScaleR-4of4strict-seed42-8k  # absolute — see checkpointing note
+  wandb_enabled: true
+  wandb:
+    project: DAPO
+    entity: rl-distill
+    name: nemorl-dapo-gemma4-e2b-pt-DeepScaleR-4of4strict-seed42-8k
+
+cluster:
+  gpus_per_node: 8
+  num_nodes: 1
