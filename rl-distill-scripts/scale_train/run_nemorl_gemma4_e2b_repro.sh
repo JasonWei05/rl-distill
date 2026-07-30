@@ -185,6 +185,23 @@ if [ -n "${NCCL_DIR}" ]; then
   echo "NCCL_HEADERS_OK ${NCCL_DIR}"
 fi
 
+# --- gemma-4 KV-sharing correctness stack (PROGRESS_LOG 2026-07-30) ---
+# On the locked transformers 5.5.0, activation_checkpointing SILENTLY CORRUPTS
+# gemma-4 E2B/E4B training (KV-shared layers vs grad-mode cache disable;
+# probs_ratio_clamped pins at 0.80 while val looks fine). The repro's
+# sitecustomize.py hard-fails that combination, so this patch step is REQUIRED
+# for any training run. Worker venvs are prefetched first (fast-skip on the
+# baked image, which ships them at /opt/ray_venvs).
+DT_VENV="${NEMO_RL_VENV_DIR}/nemo_rl.models.policy.workers.dtensor_policy_worker_v2.DTensorPolicyWorkerV2"
+if [ ! -x "${DT_VENV}/bin/python" ]; then
+  echo "### prefetching worker venvs (first build ~30-50 min)"
+  "${UVRUN[@]}" python nemo_rl/utils/prefetch_venvs.py VllmGenerationWorker DTensorPolicyWorkerV2 2>&1 | tail -3
+fi
+[ -x "${DT_VENV}/bin/python" ] || { echo "FATAL: DTensor worker venv missing at ${DT_VENV}"; exit 1; }
+echo "WORKER_VENVS_OK"
+DRIVER_VENV="${NEMO}/.venv" NEMO_RL_VENV_DIR="${NEMO_RL_VENV_DIR}" REPRO_DIR="${REPRO_DIR}" \
+  bash "${REPRO_DIR}/local/patch_gemma4_kv_venvs.sh" || { echo "FATAL: gemma-4 KV patch failed"; exit 1; }
+
 echo "### torch/cuda fail-fast"
 "${UVRUN[@]}" python -c "import torch; torch.cuda.init(); print('CUDA_OK torch', torch.__version__, 'cuda', torch.version.cuda, torch.cuda.get_device_name(0))" || { echo "FATAL: torch/cuda init failed"; exit 1; }
 "${UVRUN[@]}" python -c "import math_verify; print('MATH_VERIFY_OK')" || { echo "FATAL: math_verify missing"; exit 1; }

@@ -58,7 +58,9 @@ loss_fn:
 checkpointing:
   enabled: true
   save_period: 25                     # verl SAVE_FREQ=25
-  keep_top_k: null                    # keep ALL saves — base yaml prunes to top-3 by val:accuracy; verl kept every save
+  keep_top_k: 1000000                 # keep ALL saves — base yaml prunes to top-3 by val:accuracy; verl kept every save.
+                                      # Effectively-infinite int, NOT null: CheckpointingConfig types it NotRequired[int],
+                                      # so an explicit null fails MasterConfig pydantic validation at startup.
   # Absolute on purpose: the launcher runs with cwd = third_party/nemo-rl
   # (uv run --directory), and relative outputs would land inside the vendored
   # checkout. Override at launch if the node uses local disk (e.g. /tmp/verl).
@@ -102,13 +104,22 @@ policy:
         total_iters: 10000000000
     - milestones: [20]
   dtensor_cfg:
-    # Their e2b recipe runs 4096 total seq; we run 12288 (verl parity) — without
-    # recompute the training step OOMs on 80GB H100 (71.8GiB PyTorch alloc observed).
-    # Parity-neutral: same gradients, activations recomputed in backward. Their
-    # 26ba4b/31b automodel recipes enable it too.
+    # Required for memory at 12288 seq. *** E4B is a KV-sharing model like E2B
+    # (num_kv_shared_layers > 0), so ALL the 2026-07-30 E2B correctness
+    # preconditions apply verbatim (see the E2B yaml + PROGRESS_LOG): act-ckpt
+    # on the locked transformers 5.5.0 SILENTLY CORRUPTS training; requires
+    # transformers >= 5.5.2 in the policy-worker venv + nemo_rl_repro/
+    # sitecustomize.py (which hard-fails the 5.5.0+act-ckpt combination) +
+    # force_hf below. Gate criterion: step-1 train/probs_ratio ~= 1.0. ***
     activation_checkpointing: true
+    # Gradient-identical; frees static FSDP shards (needed at small GPU counts,
+    # harmless headroom at 8x). Same rationale as the E2B config.
+    cpu_offload: true
     automodel_kwargs:
-      freeze_config:                  # recipe: E2B multimodal towers stay frozen (verl trains text-only path)
+      # Stock HF class: the Automodel custom gemma4 class predates the
+      # transformers 5.5.2 KV-sharing mechanism (shared_kv_states KeyError).
+      force_hf: true
+      freeze_config:                  # recipe: multimodal towers stay frozen (verl trains text-only path)
         freeze_vision_tower: true
         freeze_audio_tower: true
         freeze_language_model: false

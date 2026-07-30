@@ -83,9 +83,15 @@ fast-skips (markers still print). Pod-log marker chain to watch:
 
 ```
 DATA_PREP_OK -> CUDA_COMPAT_OK -> CUDNN_DEV_OK -> CUDA13_TOOLKIT_OK -> CMAKE_OK
-  -> UV_ENV_OK -> CUDNN_HOME_OK/NCCL_HEADERS_OK -> CUDA_OK -> MATH_VERIFY_OK
-  -> GATE_PASS validation/accuracy=X -> (training steps) -> RUN_DONE rc=0
+  -> UV_ENV_OK -> CUDNN_HOME_OK/NCCL_HEADERS_OK -> WORKER_VENVS_OK -> GEMMA4_KV_PATCH_OK
+  -> CUDA_OK -> MATH_VERIFY_OK -> GATE_PASS validation/accuracy=X
+  -> (training steps) -> RUN_DONE rc=0
 ```
+
+`GEMMA4_KV_PATCH_OK` (via `nemo_rl_repro/local/patch_gemma4_kv_venvs.sh`) is the gemma-4
+KV-sharing correctness stack — REQUIRED for training; without it the repro's
+`sitecustomize.py` hard-fails any act-ckpt launch on the locked transformers 5.5.0
+rather than let training silently corrupt (see Gotchas).
 
 **Go/no-go gate**: a `max_num_steps=1` run whose step-0 validation accuracy (full
 3200-sample val, mean@16) must land in **[0.045, 0.075]** — the verl baseline band
@@ -122,15 +128,20 @@ Training at 12288-token parity **requires activation checkpointing** (activation
 plan) — but act-ckpt on the **locked transformers 5.5.0 silently corrupts gemma-4 E2B training**
 (Gotchas below). The full working stack:
 
-1. `uv pip install transformers==5.5.4` into the **driver and DTensor-policy-worker venvs**
-   (within nemo-rl's `<5.6.0` pin; vLLM worker venv untouched). A worker-venv rebuild reverts
-   to the locked 5.5.0 — reapply.
-2. Copy `sitecustomize.py` into the policy-worker venv's `site-packages` (the launcher's
-   PYTHONPATH also carries it, belt and suspenders).
-3. Launch with: `cluster.gpus_per_node=4 policy.dtensor_cfg.cpu_offload=true`
-   `policy.dtensor_cfg.activation_checkpointing=true`
-   `+policy.dtensor_cfg.automodel_kwargs.force_hf=true`
-   `policy.tokenizer.chat_template=<repo>/rl-distill-scripts/data/gemma3_it_fewshot_math.jinja`
+The whole stack is scripted under **`local/`**:
+
+```bash
+bash rl-distill-scripts/nemo_rl_repro/local/build_venv.sh   # driver+worker venvs, transformers
+                                                            # 5.5.4 patch, sitecustomize copy
+bash rl-distill-scripts/nemo_rl_repro/local/run_gate.sh     # 1-step go/no-go (criteria below)
+bash rl-distill-scripts/nemo_rl_repro/local/run_train.sh    # full run (MAX_STEPS caps; RUN_SUFFIX,
+                                                            # GEMMA4_VARIANT=e2b|e4b, GPUS_PER_NODE)
+```
+
+The correctness knobs (act-ckpt + cpu_offload + `automodel_kwargs.force_hf`) live in the
+config yamls; `local/patch_gemma4_kv_venvs.sh` applies the venv-level pieces (transformers
+5.5.4 into driver + policy-worker venvs — a worker-venv rebuild reverts to the locked
+5.5.0, re-run it — plus the `sitecustomize.py` copy).
 
 Verified end-to-end on 4xH100 (gate `4ndtkcry`): step-0 val 0.0600 ∈ [0.045, 0.075], step-1
 `train/probs_ratio = 1.000017`, grad_norm 0.74, ~5.5 min/step. **Gate criterion added by the

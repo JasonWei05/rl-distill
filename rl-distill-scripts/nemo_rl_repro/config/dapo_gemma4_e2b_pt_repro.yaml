@@ -122,13 +122,17 @@ policy:
     #    the now-crashing use_cache workaround (shared_kv_states KeyError) and
     #    (b) forces MixedPrecisionPolicy(cast_forward_inputs=False) so FSDP2
     #    stops container-copying the shared_kv_states dict kwarg between layers.
-    # 3. +policy.dtensor_cfg.automodel_kwargs.force_hf=true at launch — the
-    #    Automodel custom gemma4 class predates 5.5.2's KV-sharing mechanism.
+    # 3. automodel_kwargs.force_hf: true (set below) — the Automodel custom
+    #    gemma4 class predates 5.5.2's KV-sharing mechanism.
     activation_checkpointing: true
     # Frees the static FSDP shards from GPU (gradient-identical; exercised in
     # their grpo-deepscaler recipes). Needed on 4xH100; harmless headroom on 8x.
     cpu_offload: true
     automodel_kwargs:
+      # Stock HF class: the Automodel custom gemma4 class predates the
+      # transformers 5.5.2 KV-sharing mechanism (shared_kv_states KeyError 13
+      # in get_logprobs — precondition 3 above, now config-level).
+      force_hf: true
       freeze_config:                  # recipe: E2B multimodal towers stay frozen (verl trains text-only path)
         freeze_vision_tower: true
         freeze_audio_tower: true
