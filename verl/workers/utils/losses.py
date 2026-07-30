@@ -112,6 +112,56 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
     metrics["actor/pg_loss"] = Metric(value=pg_loss, aggregation=metric_aggregation)
     policy_loss = pg_loss
 
+    # Keep the same on-policy health signals used by NeMo RL. These are
+    # especially useful for catching training-forward corruption: on the first
+    # PPO minibatch, before any optimizer update, both means should be near 1.
+    with torch.no_grad():
+        log_ratio = torch.clamp(log_prob - old_log_prob, min=-20.0, max=20.0)
+        probs_ratio = torch.exp(log_ratio)
+        clip_ratio_low = config.clip_ratio_low if config.clip_ratio_low is not None else config.clip_ratio
+        clip_ratio_high = config.clip_ratio_high if config.clip_ratio_high is not None else config.clip_ratio
+        probs_ratio_clamped = torch.clamp(
+            probs_ratio,
+            min=1.0 - clip_ratio_low,
+            max=1.0 + clip_ratio_high,
+        )
+
+        probs_ratio_mean = agg_loss(
+            loss_mat=probs_ratio,
+            loss_mask=response_mask,
+            loss_agg_mode="token-mean",
+            **config.global_batch_info,
+        )
+        probs_ratio_clamped_mean = agg_loss(
+            loss_mat=probs_ratio_clamped,
+            loss_mask=response_mask,
+            loss_agg_mode="token-mean",
+            **config.global_batch_info,
+        )
+        valid_probs_ratio = probs_ratio[response_mask]
+        valid_probs_ratio_clamped = probs_ratio_clamped[response_mask]
+        if valid_probs_ratio.numel() > 0:
+            probs_ratio_min = valid_probs_ratio.min()
+            probs_ratio_max = valid_probs_ratio.max()
+            probs_ratio_clamped_min = valid_probs_ratio_clamped.min()
+            probs_ratio_clamped_max = valid_probs_ratio_clamped.max()
+        else:
+            probs_ratio_min = float("inf")
+            probs_ratio_max = float("-inf")
+            probs_ratio_clamped_min = float("inf")
+            probs_ratio_clamped_max = float("-inf")
+
+    metrics.update(
+        {
+            "actor/probs_ratio": Metric(value=probs_ratio_mean, aggregation=metric_aggregation),
+            "actor/probs_ratio_clamped": Metric(value=probs_ratio_clamped_mean, aggregation=metric_aggregation),
+            "actor/probs_ratio_min": Metric(value=probs_ratio_min, aggregation=AggregationType.MIN),
+            "actor/probs_ratio_max": Metric(value=probs_ratio_max, aggregation=AggregationType.MAX),
+            "actor/probs_ratio_clamped_min": Metric(value=probs_ratio_clamped_min, aggregation=AggregationType.MIN),
+            "actor/probs_ratio_clamped_max": Metric(value=probs_ratio_clamped_max, aggregation=AggregationType.MAX),
+        }
+    )
+
     # add entropy loss
     if entropy is not None:
         entropy_loss = agg_loss(
