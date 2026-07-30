@@ -16,6 +16,7 @@ verl reference data: wandb `rl-distill/DAPO` run `recbw9dcxso` (recovery of `bw9
 |---|---|
 | `config/dapo_gemma4_e2b_pt_repro.yaml` | Full parity config; every knob comments its verl counterpart |
 | `run_grpo_repro.py` | Wrapper around their `examples/run_grpo.py`: registers the `math_strict` env before setup; `NEMORL_FORCE_LOCAL_RAY=1` shim for shared devboxes |
+| `sitecustomize.py` | Auto-loads in every Ray actor via the launcher's PYTHONPATH: on transformers >= 5.5.2 applies the two gemma-4 KV-sharing fixes (use_cache workaround removal + FSDP2 `cast_forward_inputs=False`); on the locked 5.5.0 it **hard-fails** any act-ckpt launch instead of letting training silently corrupt (see Gotchas) |
 | `rl_distill_nemo/strict_math_env.py` | Verbatim port of the strict boxed-only scorer (`verl/utils/reward_score/math_verify.py`) as a NeMo-RL environment |
 | `rl_distill_nemo/deepscaler_dataset.py` | verl-parquet → NeMo response-dataset adapter |
 | `tests/` | Reward parity (6/6) and tokenization parity (5/5 byte-identical) vs verl |
@@ -56,7 +57,9 @@ zstd -d -c rl-distill-nemorl-env-cu130-20260729.docker.tar.zst | docker load   #
 ## Prereqs
 
 ```bash
-git submodule update --init third_party/nemo-rl   # pinned @ 5f89b3ae
+git submodule update --init --recursive third_party/nemo-rl   # pinned @ 5f89b3ae
+#   --recursive is REQUIRED: nemo-rl's own 3rdparty submodules (Gym/Automodel/...) are uv
+#   workspace members; without them `uv sync` fails with "nemo-gym ... not a workspace member"
 # repo-root .env with HF_TOKEN (gated google/gemma-4-E2B) + WANDB_API_KEY
 # data: bash rl-distill-scripts/data/prepare_deepscaler_4of4strict_rl_data.sh
 #   (downloads the exact train 9,723 / val 200x16 split from JWei05/DeepScaleR-4of4-strict-RL)
@@ -112,6 +115,29 @@ CUDA_VISIBLE_DEVICES=5,6 ... /tmp/nemo-rl-venv/bin/python run_grpo_repro.py \
 Validation/generation works at 2 GPUs; **the training step does not fit** below ~4 clean
 H100s (fp32 AdamW states; see PROGRESS_LOG). Use ScaleTrain for training.
 
+### 4xH100 training recipe (verified 2026-07-30; see PROGRESS_LOG for the forensics)
+
+Training at 12288-token parity **requires activation checkpointing** (activations alone are
+~75 GiB without recompute; TP=2 is not an escape — E2B's forward breaks under the dtensor TP
+plan) — but act-ckpt on the **locked transformers 5.5.0 silently corrupts gemma-4 E2B training**
+(Gotchas below). The full working stack:
+
+1. `uv pip install transformers==5.5.4` into the **driver and DTensor-policy-worker venvs**
+   (within nemo-rl's `<5.6.0` pin; vLLM worker venv untouched). A worker-venv rebuild reverts
+   to the locked 5.5.0 — reapply.
+2. Copy `sitecustomize.py` into the policy-worker venv's `site-packages` (the launcher's
+   PYTHONPATH also carries it, belt and suspenders).
+3. Launch with: `cluster.gpus_per_node=4 policy.dtensor_cfg.cpu_offload=true`
+   `policy.dtensor_cfg.activation_checkpointing=true`
+   `+policy.dtensor_cfg.automodel_kwargs.force_hf=true`
+   `policy.tokenizer.chat_template=<repo>/rl-distill-scripts/data/gemma3_it_fewshot_math.jinja`
+
+Verified end-to-end on 4xH100 (gate `4ndtkcry`): step-0 val 0.0600 ∈ [0.045, 0.075], step-1
+`train/probs_ratio = 1.000017`, grad_norm 0.74, ~5.5 min/step. **Gate criterion added by the
+2026-07-30 incident: step-1 `train/probs_ratio` and `train/probs_ratio_clamped` must be ≈ 1.0
+(±0.01). Val accuracy alone is NOT sufficient — the corrupted-training failure mode passes the
+val band while `probs_ratio_clamped` pins at 0.80.**
+
 ## Comparing grad norms
 
 ```bash
@@ -136,3 +162,21 @@ trainable params per optimizer step.
 - gemma-4 has no `<end_of_turn>` token: termination comes from `stop_strings` in the
   config (the model emits the literal text otherwise and never stops).
 - ScaleTrain pods reset PATH in the run shell: never rely on bare `python3` from image ENV.
+- **act-ckpt + transformers 5.5.0 = silently corrupted gemma-4 E2B training** (root-caused
+  2026-07-30). E2B's KV-shared layers need `use_cache=True` in every forward (their PR #2224 /
+  Automodel#1705); HF disables the cache in grad mode under gradient checkpointing, so the
+  TRAINING forward computes garbage logits while the no-grad logprob pass stays correct:
+  `train/probs_ratio_clamped` pins at 0.80, val stays at baseline, nothing crashes.
+  `sitecustomize.py` now hard-fails this combination. **The pod image bakes 5.5.0 — do not
+  launch ScaleTrain runs until the image gets the same transformers bump + sitecustomize.**
+- transformers >= 5.5.2 alone is NOT enough: its new KV-sharing passes anchor K/V by mutating a
+  plain dict kwarg, which FSDP2's default input-cast (`cast_forward_inputs=True`) container-copies
+  at every fully-sharded layer → `shared_kv_states` KeyError. And the Automodel custom gemma4
+  class predates the mechanism entirely. Hence the other two pieces of the recipe:
+  `sitecustomize.py`'s `cast_forward_inputs=False` patch (value-wise a no-op) and
+  `+policy.dtensor_cfg.automodel_kwargs.force_hf=true`.
+- `checkpointing.keep_top_k` must be an int on this pin (`NotRequired[int]`): an explicit
+  `null` fails MasterConfig pydantic validation at startup. The config uses 1000000 = keep all.
+- `policy.logprob_chunk_size` is silently ignored in the training loss path (upstream
+  `LossPostProcessor` never forwards it; the Megatron twin was their #2871/#2872, automodel side
+  unfixed) — memory-only, numerically inert; `cpu_offload=true` covers the 4-GPU shortfall.

@@ -58,7 +58,9 @@ loss_fn:
 checkpointing:
   enabled: true
   save_period: 25                     # verl SAVE_FREQ=25
-  keep_top_k: null                    # keep ALL saves — base yaml prunes to top-3 by val:accuracy; verl kept every save
+  keep_top_k: 1000000                 # keep ALL saves — base yaml prunes to top-3 by val:accuracy; verl kept every save.
+                                      # Effectively-infinite int, NOT null: CheckpointingConfig types it NotRequired[int],
+                                      # so an explicit null fails MasterConfig pydantic validation at startup.
   # Absolute on purpose: the launcher runs with cwd = third_party/nemo-rl
   # (uv run --directory), and relative outputs would land inside the vendored
   # checkout. Override at launch if the node uses local disk (e.g. /tmp/verl).
@@ -102,11 +104,30 @@ policy:
         total_iters: 10000000000
     - milestones: [20]
   dtensor_cfg:
-    # Their e2b recipe runs 4096 total seq; we run 12288 (verl parity) — without
-    # recompute the training step OOMs on 80GB H100 (71.8GiB PyTorch alloc observed).
-    # Parity-neutral: same gradients, activations recomputed in backward. Their
-    # 26ba4b/31b automodel recipes enable it too.
+    # Required for memory at 12288 seq (activations alone are ~75GiB without
+    # recompute — OOMs even with cpu_offload; TP=2 is not an escape, E2B's
+    # forward breaks under the dtensor TP plan: mixed Tensor/DTensor aten.where).
+    #
+    # *** CORRECTNESS PRECONDITIONS (root-caused 2026-07-30, see PROGRESS_LOG;
+    # verified: step-1 probs_ratio 1.000017, grad_norm 0.74, val 0.0600): ***
+    # 1. transformers >= 5.5.2 (we use 5.5.4) in the POLICY WORKER venv — the
+    #    uv.lock pins 5.5.0, where act-ckpt SILENTLY CORRUPTS training: gemma-4
+    #    E2B's KV-shared layers need use_cache=True (PR #2224 / Automodel#1705),
+    #    HF disables the cache in grad mode under gradient checkpointing, and
+    #    the training forward then computes garbage logits (probs_ratio bulk
+    #    <0.8, probs_ratio_clamped pinned at 0.80, flat val) while the no-grad
+    #    logprob pass stays correct.
+    # 2. nemo_rl_repro/sitecustomize.py on PYTHONPATH (the launcher does this)
+    #    + copied into the worker venv site-packages. On >= 5.5.2 it (a) removes
+    #    the now-crashing use_cache workaround (shared_kv_states KeyError) and
+    #    (b) forces MixedPrecisionPolicy(cast_forward_inputs=False) so FSDP2
+    #    stops container-copying the shared_kv_states dict kwarg between layers.
+    # 3. +policy.dtensor_cfg.automodel_kwargs.force_hf=true at launch — the
+    #    Automodel custom gemma4 class predates 5.5.2's KV-sharing mechanism.
     activation_checkpointing: true
+    # Frees the static FSDP shards from GPU (gradient-identical; exercised in
+    # their grpo-deepscaler recipes). Needed on 4xH100; harmless headroom on 8x.
+    cpu_offload: true
     automodel_kwargs:
       freeze_config:                  # recipe: E2B multimodal towers stay frozen (verl trains text-only path)
         freeze_vision_tower: true

@@ -5,6 +5,122 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-07-30 — NeMo-RL repro running LOCALLY on 4×H100 (gate PASSED 0.0591; 2 config/doc fixes)
+
+**Goal.** Stand up the gemma-4 E2B NeMo-RL repro on a local 4×H100 box (192-222-53-241, driver 580 /
+CUDA 13 — no cuda-compat needed) and get the full training run going, per the nemo_rl_repro README.
+
+**Setup (fresh box, ~50 min end-to-end).** sudo apt cuda-toolkit-13-0 + cudnn9/libcudnn9-dev-cuda-13 +
+librdmacm-dev; Kitware cmake 4.0.3; uv 0.12. Driver venv `/tmp/nemo-rl-venv`
+(`UV_PROJECT_ENVIRONMENT=... uv sync --locked --extra automodel --no-install-package deep-ep`, torch
+2.11.0+cu130, TE 2.15.0), worker venvs `/tmp/nemo-rl-worker-venvs`, HF cache `/tmp/hf-home` (E2B
+prefetched), data via `prepare_deepscaler_4of4strict_rl_data.sh` → `/tmp/verl/data`. Launch wrappers
+on the box: `/tmp/nemo-rl-local/{env.sh,build_venv.sh,run_gate.sh,run_train.sh}`. CPU gates re-passed
+here: strict reward 6/6, tokenization 5/5 (via the real nemo_rl processor path in the py3.13 venv).
+
+**Fixes (each root-caused).**
+1. README prereq gap: `git submodule update --init third_party/nemo-rl` is not enough — the uv sync
+   dies on `nemo-gym ... not a workspace member`. Nested submodules required: **`--recursive`**
+   (Gym/Automodel/Megatron-Bridge). README updated.
+2. `checkpointing.keep_top_k: null` in the committed repro yaml **fails MasterConfig pydantic
+   validation** on nemo-rl 5f89b3ae (`CheckpointingConfig.keep_top_k` is `NotRequired[int]` — absent
+   OK, explicit null not; the pod gate must have run a pre-commit working copy). Fixed in-config:
+   `keep_top_k: 1000000` (keep-all intent, valid int).
+3. First 4-GPU gate: val PASSED then the train step **OOM'd** (12.0 GiB fp32 alloc, 11.45 free).
+   Root cause chain: at 4 ranks the FSDP shards are 2× the 8-GPU pod run's, and the 12 GiB transient
+   is a **full fp32 [12288, 262144] logits tensor in train()** — upstream nemo-rl bug:
+   `LossPostProcessor.__call__` (`nemo_rl/models/automodel/train.py`) never forwards `chunk_size` to
+   `prepare_loss_input`, so `policy.logprob_chunk_size: 4096` is silently ignored in the training
+   loss path (honored only in the logprob pass). Zero-edit fix: **`policy.dtensor_cfg.cpu_offload=true`**
+   (CLI override in the local wrappers; gradient-identical, exercised in their own grpo-deepscaler
+   recipes) — frees the static shard memory so the transient fits.
+
+**Gate (4 GPUs, full 3200-sample val): PASSED.** step-0 `validation/accuracy = 0.0591` ∈ [0.045,
+0.075] (pod 0.0550, old local 2-GPU 0.0508); reference policy auto-skipped; train step 1 completed:
+loss 0.2581, avg reward 0.0576, mean gen length 194.7 tok, 346 s/step (81% policy_training — the
+cpu_offload tax; generation 41 s).
+
+**Run `ihdn67bj` (36 steps) — KILLED: training was silently corrupted from step 1** (see the
+follow-up entry below). Its val curve (5.91→6.22→6.25→5.78 at 0/10/20/30 vs verl 6.16→6.00→6.78→10.0)
+is a *no-learning* baseline, not a comparison point; step-25 ckpt is garbage-trained (discardable).
+
+---
+
+## 2026-07-30 (later) — ROOT CAUSE: act-ckpt + gemma-4 KV-shared layers = garbage training forward
+
+**Symptom (user-flagged).** `train/probs_ratio` bulk 0.05–0.45 with min 0 / max up to 1.7e6, and
+`train/probs_ratio_clamped` pinned at ~0.80 (the lower PPO clip bound) — deterministic from step 1
+(gate + full run logged identical values), while `gen_kl_error`/`policy_kl_error` ≈ 8e-4 (tiny).
+Since those two metrics compare prev↔generation (NOT curr), and the step-1 train-data dump shows
+prev↔gen agreeing to −0.0008 ± 0.04 nats over 199k tokens, the **training forward (`curr`) was the
+corrupted side** — and the loss consumes the same `ratios` tensor, so training optimized garbage.
+(Step-1 LR is 1e-14 under LinearLR warmup: both mini-batches are at numerically identical weights,
+so real policy movement is excluded.)
+
+**Root cause (proven by offline CPU repro, `/tmp/nemo-rl-local/repro_curr_vs_prev.py`).** gemma-4
+E2B has KV-shared layers (`num_kv_shared_layers > 0`). nemo-rl PR #2224 makes every trainer forward
+request `use_cache=True` because on transformers < 5.5.2 the shared layers otherwise fall back to
+untrained K/V projections (upstream **Automodel#1705** — the exact same bug, root-caused by NVIDIA in
+April). But HF transformers 5.5.0 **force-disables the cache in grad-mode when gradient checkpointing
+is on** (our worker logs: "`use_cache=True` is incompatible with gradient checkpointing. Setting
+`use_cache=False`"). Repro on identical base weights, dumped step-1 sequence: use_cache=False forward
+diverges from the dumped logprob-pass values by **−10.4 nats mean** (98.9% of loss ratios < 0.8, min
+0 — the exact wandb signature); flipping only use_cache=True matches to **−0.0001 ± 0.04** (ratios
+1.0007). So `activation_checkpointing: true` (the 07-29 pod OOM "fix") silently poisons ALL gemma-4
+E2B training on the locked transformers 5.5.0; no pod run ever logged a train step, so it went unseen.
+**The 8-GPU ScaleTrain config/image has the same poison — do not launch pods until fixed there.**
+
+**Fix stack (local, all verified):**
+1. transformers **5.5.0 → 5.5.4** in the driver + DTensor-policy-worker venvs (within nemo-rl's
+   `>=5.5.0,<5.6.0` pin; HF #45312 in ≥5.5.2 dissociates KV sharing from the cache — nemo-rl's own
+   TODO endorses this). Repro on 5.5.4: use_cache=False now matches (−0.0001 ± 0.04); tokenization
+   parity re-passed 5/5. NOTE: a bare worker-venv rebuild reverts to the locked 5.5.0 — reapply.
+2. Act-ckpt must stay ON for memory (without recompute, activations at 12288 seq = 75.1 GiB → OOM
+   even with cpu_offload; measured). Now safe on 5.5.4.
+3. **`nemo_rl_repro/sitecustomize.py` (new adapter file, zero vendored edits):** on ≥ 5.5.2 it
+   disables nemo-rl's `_needs_kv_cache_for_shared_layers` workaround via a lazy meta-path hook
+   (loads in every Ray actor through the PYTHONPATH the launcher already exports; also copied into
+   the worker venv site-packages). Needed because the workaround's use_cache=True path CRASHES on
+   5.5.4 (`modeling_gemma4.py` `shared_kv_states` KeyError 13 in `get_logprobs`); with the patch all
+   passes run use_cache=False, which is now correct.
+4. Also fixed en route: `keep_top_k: null` → int (pydantic), cpu_offload=true (4-rank static memory),
+   and documented the (memory-only, numerically-inert) `LossPostProcessor` chunk_size gap — upstream
+   fixed the Megatron twin in #2871/#2872 but never the automodel side.
+
+**Cross-check vs upstream/PR #2224 (user question).** Our pin (5f89b3ae, 2026-07-27) already contains
+PR #2224 (merged 2026-06-14) + follow-ups (#3297, #3124); config matches every gemma-4 correctness
+knob in their E2B recipe; nothing in `5f89b3ae..origin/main` touches the affected files. NVIDIA's
+recipe never hit this because it runs 4096-token sequences with act-ckpt OFF; their known-good recipe
+also runs TIS on (we deliberately match verl: off).
+
+**Two more landmines found while re-gating on 5.5.2+ (each root-caused, both defused by
+`nemo_rl_repro/sitecustomize.py`, zero vendored edits):**
+- 5.5.4's new KV-sharing passes anchor K/V between layers by MUTATING a plain `shared_kv_states`
+  dict kwarg. **FSDP2's pre-forward input cast (`MixedPrecisionPolicy.cast_forward_inputs=True`
+  default) rebuilds kwargs containers** (`_apply_to_tensors`), so each fully-sharded decoder layer
+  receives a fresh COPY — anchors write into copies, shared layers read empty dicts →
+  `modeling_gemma4.py` KeyError 13 in get_logprobs, with either use_cache mode, custom or stock
+  class. Fix: force `cast_forward_inputs=False` (value-wise a no-op: model/activations already
+  bf16; fp32 output cast gated separately on output_dtype).
+- The Automodel custom gemma4 class predates the 5.5.2 mechanism entirely →
+  `+policy.dtensor_cfg.automodel_kwargs.force_hf=true` (stock HF class; refit/generation validated
+  through the gate). Dead ends tried and documented: TP=2 (E2B forward breaks under the dtensor TP
+  plan: mixed Tensor/DTensor aten.where), act-ckpt off (75.1 GiB activations OOM).
+
+**GATE PASSED end-to-end (run `4ndtkcry`): step-1 `probs_ratio = 1.000017`,
+`probs_ratio_clamped = 1.000017` (was pinned 0.80), ratio min/max 0.795/1.298 (was 0/1.7e6),
+grad_norm 0.74, val 0.0600 ∈ [0.045, 0.075], rc=0.** Full run relaunched as wandb
+`DAPO/nemorl-dapo-gemma4-e2b-pt-DeepScaleR-4of4strict-seed42-8k-local4g-v2` (ckpts/logs
+`/tmp/verl/{ckpts,logs}/...-local4g-v2`). Final local recipe = locked stack + transformers 5.5.4
+(driver + policy-worker venvs; reverts on worker-venv rebuild — reapply) + sitecustomize (both
+patches) + act-ckpt ON + cpu_offload ON + force_hf. verl-comparison caveats unchanged (vLLM venv
+untouched; training math identical). Upstream-worthy reports: Automodel#1705-class bug reachable
+via nemo-rl on the LOCKED stack whenever act-ckpt is on for E2B/E4B; the FSDP2
+cast_forward_inputs dict-copy breaking 5.5.2+ gemma-4 KV sharing; `LossPostProcessor` chunk_size
+gap (automodel twin of #2871).
+
+---
+
 ## 2026-07-29 — NeMo-RL repro on ScaleTrain: parity gate PASSED at scale; baked image; OOM→act-ckpt
 
 **Goal.** Run the 10-step NeMo-RL comparison (`MAX_STEPS=10`) on ScaleTrain to collect cross-framework

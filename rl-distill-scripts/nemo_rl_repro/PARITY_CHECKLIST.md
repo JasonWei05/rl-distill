@@ -84,6 +84,9 @@ Launcher: `run_grpo_repro.py` (registers the `math_strict` env before setup).
 2. Launch with `grpo.max_num_steps=1`:
    - **step-0 `validation/accuracy` ∈ [0.045, 0.075]** (verl baseline 6.16% @ n=3200,
      95% binomial CI ±0.8%) — outside this window = NO-GO, debug prompt/reward path first;
+   - **step-1 `train/probs_ratio` AND `train/probs_ratio_clamped` ≈ 1.0 (±0.01)** — added after
+     the 2026-07-30 incident: a corrupted TRAINING forward (garbage curr_logprobs) passes the
+     val band while `probs_ratio_clamped` pins at 0.80. Val accuracy alone is NOT a valid gate;
    - logs show `Loading chat template from file`, env `math_strict` created, 2 optimizer steps
      per rollout step (`num_global_batches=2`), reference policy auto-skipped;
    - a `val_data_step*.jsonl` sample starts with the 12-shot prefix and ends
