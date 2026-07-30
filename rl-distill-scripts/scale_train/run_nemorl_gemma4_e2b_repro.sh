@@ -15,7 +15,18 @@ if [ -f .env ]; then set -a; source .env; set +a; fi
 
 REPRO_DIR=/workspace/rl-distill/rl-distill-scripts/nemo_rl_repro
 NEMO=/workspace/rl-distill/third_party/nemo-rl
-CONFIG="${REPRO_DIR}/config/dapo_gemma4_e2b_pt_repro.yaml"
+# GEMMA4_VARIANT selects the parity config + gate band: e2b (default) or e4b.
+# Gate bands = verl step-0 val observations +/- margin: E2B 5.03-6.16% -> [0.045, 0.075];
+# E4B 12.06% (8k, 1tyrqscv) and 12.97% (20k) -> [0.10, 0.145].
+GEMMA4_VARIANT="${GEMMA4_VARIANT:-e2b}"
+CONFIG="${REPRO_DIR}/config/dapo_gemma4_${GEMMA4_VARIANT}_pt_repro.yaml"
+[ -f "${CONFIG}" ] || { echo "FATAL: no config for GEMMA4_VARIANT=${GEMMA4_VARIANT}"; exit 1; }
+case "${GEMMA4_VARIANT}" in
+  e4b) GATE_MIN="${GATE_MIN:-0.10}"; GATE_MAX="${GATE_MAX:-0.145}" ;;
+  *)   GATE_MIN="${GATE_MIN:-0.045}"; GATE_MAX="${GATE_MAX:-0.075}" ;;
+esac
+export GATE_MIN GATE_MAX
+RUN_BASENAME="nemorl-dapo-gemma4-${GEMMA4_VARIANT}-pt-DeepScaleR-4of4strict-seed42-8k"
 export NEMO_RL_ROOT="${NEMO}"
 
 # --- data: same prep as the verl runs (parquets referenced by the repro config) ---
@@ -185,7 +196,7 @@ echo "### go/no-go gate (max_num_steps=1, val_at_start)"
     cluster.gpus_per_node="${GPUS_PER_NODE:-8}" \
     grpo.max_num_steps=1 \
     checkpointing.enabled=false \
-    logger.wandb.name='nemorl-dapo-gemma4-e2b-pt-ds4of4strict-s42-8k-GATE' \
+    logger.wandb.name="${RUN_BASENAME}-GATE" \
     2>&1 | tee "${GATE_LOG}"
 gate_run_rc=$?   # pipefail is on -> this is the python's rc, not tee's
 if [ "${gate_run_rc}" -ne 0 ]; then
@@ -193,10 +204,12 @@ if [ "${gate_run_rc}" -ne 0 ]; then
   exit "${gate_run_rc}"
 fi
 "${UVRUN[@]}" python - "$GATE_LOG" <<'PY'
+import os
 import re
 import sys
 
 text = open(sys.argv[1], errors="replace").read()
+lo, hi = float(os.environ["GATE_MIN"]), float(os.environ["GATE_MAX"])
 # their console prints "• Accuracy: 0.0508" in the Validation Results block;
 # wandb-style validation/accuracy appears only when the logger is enabled
 vals = re.findall(r"validation/accuracy[\"':= ]+([0-9.]+)", text) or re.findall(
@@ -206,10 +219,10 @@ if not vals:
     print("GATE_FAIL: no validation/accuracy found in gate log")
     sys.exit(1)
 acc = float(vals[0])
-if 0.045 <= acc <= 0.075:
+if lo <= acc <= hi:
     print(f"GATE_PASS validation/accuracy={acc}")
 else:
-    print(f"GATE_FAIL validation/accuracy={acc} outside [0.045, 0.075] — prompt/reward/sampling parity broken")
+    print(f"GATE_FAIL validation/accuracy={acc} outside [{lo}, {hi}] — prompt/reward/sampling parity broken")
     sys.exit(1)
 PY
 gate_rc=$?
@@ -224,7 +237,7 @@ if [ -n "${MAX_STEPS:-}" ]; then EXTRA_ARGS+=("grpo.max_num_steps=${MAX_STEPS}")
 echo "===== final wandb sync (backfill any uploader failures) ====="
 # NeMo-RL's WandbLogger writes under {logger.log_dir}/wandb, not cwd — point the
 # backfill there or it silently finds nothing.
-NEMORL_LOG_DIR=/tmp/verl/logs/nemorl-dapo-gemma4-e2b-pt-DeepScaleR-4of4strict-seed42-8k
+NEMORL_LOG_DIR="/tmp/verl/logs/${RUN_BASENAME}"
 "${UVRUN[@]}" wandb sync --sync-all "${NEMORL_LOG_DIR}/wandb" 2>&1 | tail -5 || true
 
 echo "RUN_DONE rc=${status}"
