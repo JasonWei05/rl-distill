@@ -48,6 +48,20 @@ Verified both frameworks log the same quantity (pre-clip global L2 per optimizer
 **Status.** Attempt-6 pair queued; monitors on job status + pod logs. Next: gate re-pass → 10 steps →
 run `compare_grad_norms.py` for the cross-framework verdict.
 
+**2026-07-30 UPDATE — first 10 NeMo-RL steps (local 4×H100, run `ihdn67bj`).** Attempt-6 nb pod
+crashed at vLLM init (`expandable_segments` incompatible with vLLM's memory pool — removed; act-ckpt
+is the real OOM fix). Attempt-7 ScaleTrain pair queued for hours (cluster packed); meanwhile local
+4-GPU gates (`m2jrli33` failed step 1, `b9b03y2f` finished: val 0.0591, grad_norm 2.43) proved 4-way
+training fits with activation checkpointing (~346 s/step), and the full run `ihdn67bj` delivered
+steps 1–10. **Result: verl's truncation bimodality does NOT reproduce** — grad norms 1.4–37.7 with
+6/10 steps containing 1–2 truncated responses and zero spikes near verl's 83–3108 regime
+(`compare_grad_norms.py` verdict: "regimes overlap"). Caveats: NeMo logs last-of-2 optimizer-step
+grad norm (verl averaged both); truncated-in-all-wrong-group coincidence may not have occurred yet
+at these truncation rates. ScaleTrain pair cancelled as redundant (jobs d9l8k5hq/d9l8tdpq); the
+local run continues past step 10 to sharpen the test as responses lengthen. Env images published:
+ECR `tmp:rl-distill-nemorl-cu130-20260729` (full) and hf.co/JWei05/nemorl-gemma4-cu130-env
+(env-only, public).
+
 ---
 
 ## 2026-07-28 — NeMo-RL exact-replication adapters for the gemma-4 E2B DAPO run (CPU gates green)
