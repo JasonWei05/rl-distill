@@ -178,6 +178,13 @@ local run continues past step 10 to sharpen the test as responses lengthen. Env 
 ECR `tmp:rl-distill-nemorl-cu130-20260729` (full) and hf.co/JWei05/nemorl-gemma4-cu130-env
 (env-only, public).
 
+> **⚠ RETRACTED (2026-07-30, see the ROOT CAUSE entry above): the bimodality verdict from
+> `ihdn67bj` is INVALID.** That run's training forward was silently corrupted from step 1
+> (act-ckpt × KV-shared layers on transformers 5.5.0 — `train/probs_ratio_clamped` pinned at
+> 0.80), so its grad norms are gradients of a garbage objective, not the DAPO loss. The
+> gate `b9b03y2f` cited here had the same poison in its train step (its VAL number remains
+> valid). The bimodality test restarts from scratch on the fixed run `e1du1oyu` (`-local4g-v2`).
+
 ---
 
 ## 2026-07-28 — NeMo-RL exact-replication adapters for the gemma-4 E2B DAPO run (CPU gates green)
