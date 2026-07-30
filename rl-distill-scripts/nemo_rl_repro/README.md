@@ -41,6 +41,18 @@ Hub) are not an option without restructuring the Dockerfile: the venv layers are
 and 19.9GB, past their ~10GB layer caps. Worst case, `Dockerfile.nemorl` rebuilds it
 from scratch in ~1h (H100-arch only, no GPU needed at build time).
 
+**No-AWS option (public)**: the environment-only variant (`--target env` — everything
+except the private repo COPY layer; only public/redistributable content) is on the HF Hub
+as a `docker save` tarball, downloadable without any auth:
+
+```bash
+huggingface-cli download JWei05/nemorl-gemma4-cu130-env rl-distill-nemorl-env-cu130-20260729.docker.tar.zst --local-dir .
+zstd -d -c rl-distill-nemorl-env-cu130-20260729.docker.tar.zst | docker load   # 29.5GB download
+# materialize the repo around the baked third_party/nemo-rl (do NOT bind-mount over it):
+# cd /workspace/rl-distill && git init && git remote add origin git@github.com:JasonWei05/rl-distill.git \
+#   && git fetch --depth 1 origin main && git checkout -f FETCH_HEAD
+```
+
 ## Prereqs
 
 ```bash

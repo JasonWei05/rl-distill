@@ -8,7 +8,10 @@
 # Layer order is deliberate: everything heavy depends only on third_party/nemo-rl,
 # which is a pinned vendored checkout — the whole-repo COPY is the last layer, so
 # routine repo edits rebuild nothing but that final COPY.
-FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
+# Stage "env" holds only public content (CUDA toolchain, NeMo-RL @pinned commit, venvs)
+# and is publishable; the default final stage adds the private repo COPY on top.
+# Build the public variant with: docker build --target env ...
+FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS env
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONFAULTHANDLER=1
@@ -103,6 +106,7 @@ RUN uv run --no-sync python -c "import torch; print('BAKE_OK torch', torch.__ver
 
 # Full repo last — the only layer that changes launch-to-launch. The context has no
 # third_party/nemo-rl/.venv (dockerignored), so the venv baked above is preserved.
+FROM env AS full
 COPY . /workspace/rl-distill
 WORKDIR /workspace/rl-distill
 ENV PYTHONPATH=/workspace/rl-distill
