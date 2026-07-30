@@ -5,6 +5,40 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-07-30 (fixed run, 100 steps) — verl val-curve parity EXACT; truncation bimodality does NOT reproduce
+
+**Run.** `e1du1oyu` (`nemorl-dapo-gemma4-e2b-pt-DeepScaleR-4of4strict-seed42-8k-local4g-v2`), the
+relaunch on the fixed stack (see ROOT CAUSE entry below), local 4×H100, ~4.5–6 min/step, ckpts at
+25/50/75/100.
+
+**Validation parity vs verl (`recbw9dcxso`) — every PARITY_CHECKLIST milestone matched:**
+
+| step | 0 | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 100 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| nemo (fixed) | 5.91 | 6.47 | 7.28 | 10.78 | 13.50 | 14.22 | 13.56 | 14.97 | 15.28 | 16.69 | **16.78** |
+| verl ref | 6.16 | 6.00 | 6.78 | 10.0 | 12.59 | 14.19 | — | — | — | — | **16.59** |
+
+Step-1 `probs_ratio` 1.000020; grad_norm sane throughout. The corrupted run (`ihdn67bj`) had
+flatlined at 5.78 by step 30 — the fix is what unlocked learning, and the two frameworks now
+agree to within mean@16 noise across the entire curve.
+
+**Bimodality verdict (the repro's purpose), 99 training steps:** NeMo-RL clean steps (n=55)
+grad_norm 0.25–3.81; truncated steps (n=44) 0.44–15.0. Spikes >3 concentrate on truncated steps
+(7 vs 2), so a mild truncation-keyed heavy tail exists — but the regimes **overlap**, vs verl's
+disjoint clean 1.3–6.8 / truncated 83–3108. `compare_grad_norms.py`: "regimes overlap — differs
+from verl". With 44 truncated steps and zero events near verl's regime, on a run with exact val
+parity, the evidence points to verl's extreme bimodality being **framework-specific behavior on
+truncated sequences, not a property of the DAPO algorithm or the data**. Caveats: NeMo logs the
+last of 2 mini-batch grad norms (hides ~half the candidate events, not all 44); vLLM sampler
+numerics differ; distributional comparison only. (Supersedes the retracted `ihdn67bj` verdict —
+same conclusion, but that one was measured on a corrupted objective and inadmissible.)
+
+**Status.** Run continues open-ended past step 100 for curve extension; next verl-side step is
+deciding whether to hunt the verl-only mechanism (e.g. rmpad/padded-path logit handling on at-cap
+sequences) or accept the framework-specific classification.
+
+---
+
 ## 2026-07-30 — NeMo-RL repro running LOCALLY on 4×H100 (gate PASSED 0.0591; 2 config/doc fixes)
 
 **Goal.** Stand up the gemma-4 E2B NeMo-RL repro on a local 4×H100 box (192-222-53-241, driver 580 /
