@@ -57,7 +57,11 @@ loss_fn:
 
 checkpointing:
   enabled: true
-  save_period: 25                     # verl SAVE_FREQ=25
+  # Production replication uploads each finalized consolidated model to HF at
+  # the same cadence. The original verl run used 25; 20 gives an earlier durable
+  # recovery/upload point without changing training math.
+  save_period: 20
+  save_consolidated: true
   keep_top_k: 1000000                 # keep ALL saves — base yaml prunes to top-3 by val:accuracy; verl kept every save.
                                       # Effectively-infinite int, NOT null: CheckpointingConfig types it NotRequired[int],
                                       # so an explicit null fails MasterConfig pydantic validation at startup.
@@ -83,7 +87,10 @@ policy:
   train_micro_batch_size: 1           # recipe (gemma-4: no rmpad path; 262k-vocab logits)
   logprob_batch_size: 1               # recipe
   max_total_sequence_length: 12288    # verl 4096 prompt + 8192 response
-  logprob_chunk_size: 4096            # recipe (262k vocab logprob memory)
+  # The AutoModel training loss rematerializes one chunk at a time in backward.
+  # For local logits this is a batch*sequence token budget: 1024 bounds each
+  # fp32 vocab buffer to 1 GiB even when dynamic batching makes batch_size > 1.
+  logprob_chunk_size: 1024
   max_grad_norm: 1.0                  # verl grad_clip=1.0
   optimizer:
     name: "torch.optim.AdamW"         # fp32 optim states (recipe's TE FusedAdam kept bf16 moments)
