@@ -20,6 +20,21 @@ from verl.utils import tensordict_utils as tu
 from verl.utils.attention_utils import index_first_axis, unpad_input
 
 
+def make_padded_attention_mask(
+    sequence_lengths: torch.Tensor,
+    max_sequence_length: int,
+    dtype: torch.dtype = torch.int32,
+) -> torch.Tensor:
+    """Build a right-padded attention mask from full sequence lengths."""
+    if sequence_lengths.ndim != 1:
+        raise ValueError(f"sequence_lengths must be 1-D, got shape {tuple(sequence_lengths.shape)}")
+    if max_sequence_length < 0:
+        raise ValueError(f"max_sequence_length must be non-negative, got {max_sequence_length}")
+
+    positions = torch.arange(max_sequence_length, device=sequence_lengths.device)
+    return (positions.unsqueeze(0) < sequence_lengths.unsqueeze(1)).to(dtype)
+
+
 def left_right_2_no_padding(data: TensorDict) -> TensorDict:
     """
     Convert TensorDict from left-right padding to no-padding format.

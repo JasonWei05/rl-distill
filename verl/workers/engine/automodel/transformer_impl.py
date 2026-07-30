@@ -47,6 +47,7 @@ from verl.utils.device import get_device_id, get_device_name
 from verl.utils.model import convert_weight_keys, extract_multi_modal_inputs
 from verl.utils.torch_functional import logprobs_from_logits
 from verl.workers.config import AutomodelEngineConfig, AutomodelOptimizerConfig, HFModelConfig
+from verl.workers.utils.padding import make_padded_attention_mask
 
 from ..base import BaseEngine, BaseEngineCtx, EngineRegistry
 from ..utils import enable_full_determinism, postprocess_batch_func, prepare_micro_batches
@@ -535,12 +536,11 @@ class AutomodelEngineWithLMHead(AutomodelEngine):
             if pad_mode == DatasetPadMode.NO_PADDING:
                 input_ids = micro_batch["input_ids"]
                 position_ids = micro_batch["position_ids"]
-                loss_mask = micro_batch["loss_mask"]
 
                 pad_token_id = tu.get_non_tensor_data(data=micro_batch, key="pad_token_id", default=0)
                 batch_size = micro_batch.batch_size[0]
                 seq_len_effective = input_ids.offsets().diff()
-                max_seq_len = max(seq_len_effective)
+                max_seq_len = int(seq_len_effective.max().item())
 
                 input_ids_rmpad_rolled = torch.roll(input_ids.values(), shifts=-1, dims=0)
                 output_args["input_ids_rmpad_rolled"] = input_ids_rmpad_rolled
@@ -559,10 +559,9 @@ class AutomodelEngineWithLMHead(AutomodelEngine):
                         position_ids, padding=0, output_size=(batch_size, max_seq_len)
                     )
 
-                attention_mask_list = [torch.ones_like(t, dtype=torch.int32) for t in loss_mask]
-                attention_mask = torch.nested.as_nested_tensor(attention_mask_list, layout=torch.jagged)
-                attention_mask = torch.nested.to_padded_tensor(
-                    attention_mask, padding=0, output_size=(batch_size, max_seq_len)
+                attention_mask = make_padded_attention_mask(
+                    seq_len_effective.to(device=input_ids.device),
+                    max_sequence_length=max_seq_len,
                 )
 
                 model_inputs = {

@@ -59,6 +59,7 @@ from verl.workers.engine.torchtitan.utils import (
     get_attention_masks,
     iter_per_tensor_params_ep,
 )
+from verl.workers.utils.padding import make_padded_attention_mask
 
 from ..base import BaseEngine, BaseEngineCtx, EngineRegistry
 from ..utils import enable_full_determinism, postprocess_batch_func, prepare_micro_batches
@@ -603,10 +604,10 @@ class TorchTitanEngineWithLMHead(TorchTitanEngine):
                 attn_type=attn_type,
             )
         else:
-            loss_mask = micro_batch["loss_mask"]
             pad_token_id = tu.get_non_tensor_data(data=micro_batch, key="pad_token_id", default=0)
             batch_size = micro_batch.batch_size[0]
-            max_seq_len = max(input_ids.offsets().diff())
+            seq_len_effective = input_ids.offsets().diff()
+            max_seq_len = int(seq_len_effective.max().item())
 
             labels = torch.roll(input_ids.values(), shifts=-1, dims=0)
             input_ids = torch.nested.to_padded_tensor(
@@ -622,10 +623,9 @@ class TorchTitanEngineWithLMHead(TorchTitanEngine):
                     position_ids, padding=0, output_size=(batch_size, max_seq_len)
                 )
 
-            attention_mask_list = [torch.ones_like(t, dtype=torch.int32) for t in loss_mask]
-            attention_mask = torch.nested.as_nested_tensor(attention_mask_list, layout=torch.jagged)
-            attention_mask = torch.nested.to_padded_tensor(
-                attention_mask, padding=0, output_size=(batch_size, max_seq_len)
+            attention_mask = make_padded_attention_mask(
+                seq_len_effective.to(device=input_ids.device),
+                max_sequence_length=max_seq_len,
             )
 
         extra_inputs = {
