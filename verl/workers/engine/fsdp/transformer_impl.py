@@ -86,6 +86,28 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 device_name = get_device_name()
 
 
+def _cast_module_parameters_preserving_buffers(module: torch.nn.Module, dtype: torch.dtype) -> None:
+    """Cast parameters without changing model-created floating-point buffers.
+
+    ``Module.to(dtype)`` casts both parameters and floating-point buffers.  That
+    is unsafe for models such as Gemma 4 whose rotary-frequency buffers are
+    intentionally created in FP32 even when parameters run in BF16.  Save the
+    original buffer objects, let PyTorch perform its normal parameter cast, and
+    then restore the buffers exactly as the model implementation created them.
+    FSDP's mixed-precision policy remains responsible for any explicit buffer
+    policy applied after this point.
+    """
+    floating_buffers = [
+        (submodule, name, buffer)
+        for submodule in module.modules()
+        for name, buffer in submodule._buffers.items()
+        if buffer is not None and (buffer.is_floating_point() or buffer.is_complex())
+    ]
+    module.to(dtype=dtype)
+    for submodule, name, buffer in floating_buffers:
+        submodule._buffers[name] = buffer
+
+
 def _enable_gemma4_cudnn_sdpa(engine):
     """Undo vLLM's process-global cuDNN SDPA disable for Gemma 4 forwards.
 
@@ -522,8 +544,11 @@ class FSDPEngine(BaseEngine):
             else:
                 self._logit_softcap = None
 
-            # some parameters may not in torch_dtype
-            module.to(torch_dtype)
+            # Some parameters may not be in torch_dtype. Do not use a bare
+            # module.to(torch_dtype): Gemma 4 creates rotary-frequency buffers
+            # in FP32, and silently downcasting them changes the first decoder
+            # layer before FSDP mixed precision is even applied.
+            _cast_module_parameters_preserving_buffers(module, torch_dtype)
 
             if self.model_config.enable_gradient_checkpointing:
                 module.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})

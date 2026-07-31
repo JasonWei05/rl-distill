@@ -49,6 +49,7 @@ DEFAULT_DATASET_INDEX = Path("/tmp/verl/datasets/gemma4-e2b-base-topk128-hf-over
 DEFAULT_SOURCE_INDEX = Path(
     "/tmp/verl/datasets/gemma4-e2b-base-topk128-traces-e32aaa02681a-val128-seed42/dataset_index.json"
 )
+DEFAULT_TRAINING_ENGINE_AUDIT_RECEIPT = Path("/tmp/verl/audits/gemma4-e2b-overlay-vs-fsdp2-production.json")
 TEACHER_IDENTITY_SHA256 = "2d48d343709dcae087d6ff2def9f09d2950ca66dc2183a8bee38850c4ddbbb36"
 STUDENT_IDENTITY_SHA256 = "acdc0d2bcb8f676593b5387807da1cd1b84a9e26fa279db4a86f54a211055b2d"
 NUMERICAL_FAILURE_MARKERS = (
@@ -208,7 +209,13 @@ def scan_new_log(path: Path, offset: int) -> tuple[int, list[str]]:
 
 
 def validate_environment(args: argparse.Namespace) -> None:
-    required_paths = [LAUNCHER, args.model_path, args.dataset_index, args.source_dataset_index]
+    required_paths = [
+        LAUNCHER,
+        args.model_path,
+        args.dataset_index,
+        args.source_dataset_index,
+        args.training_engine_audit_receipt,
+    ]
     missing = [str(path) for path in required_paths if not path.exists()]
     if missing:
         raise FileNotFoundError(f"missing required production paths: {missing}")
@@ -238,6 +245,7 @@ def build_child_environment(args: argparse.Namespace, run_id: str) -> dict[str, 
             "MODEL_PATH": str(args.model_path),
             "DATASET_INDEX": str(args.dataset_index),
             "SOURCE_DATASET_INDEX": str(args.source_dataset_index),
+            "TRAINING_ENGINE_AUDIT_RECEIPT": str(args.training_engine_audit_receipt),
             "DISTILL_DIRECTION": "e2b_base_to_e4b",
             "EXPECTED_TEACHER_IDENTITY_SHA256": TEACHER_IDENTITY_SHA256,
             "EXPECTED_STUDENT_IDENTITY_SHA256": STUDENT_IDENTITY_SHA256,
@@ -265,7 +273,7 @@ def build_child_environment(args: argparse.Namespace, run_id: str) -> dict[str, 
             "HF_PUSH_REPO": args.hf_repo,
             "HF_PUSH_PRIVATE": "true",
             "HF_PUSH_MAX_TO_KEEP": "8",
-            "FSDP_PARAM_DTYPE": "fp32",
+            "FSDP_PARAM_DTYPE": "bf16",
             "FSDP_REDUCE_DTYPE": "fp32",
             "FSDP_BUFFER_DTYPE": "fp32",
             "VERL_FAIL_ON_NONFINITE_LOSS": "1",
@@ -293,6 +301,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-path", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--dataset-index", type=Path, default=DEFAULT_DATASET_INDEX)
     parser.add_argument("--source-dataset-index", type=Path, default=DEFAULT_SOURCE_INDEX)
+    parser.add_argument(
+        "--training-engine-audit-receipt",
+        type=Path,
+        default=DEFAULT_TRAINING_ENGINE_AUDIT_RECEIPT,
+    )
     parser.add_argument("--max-steps", type=int, default=750)
     parser.add_argument("--save-freq", type=int, default=250)
     parser.add_argument("--test-freq", type=int, default=10)
@@ -318,6 +331,7 @@ def parse_args() -> argparse.Namespace:
     args.model_path = args.model_path.resolve()
     args.dataset_index = args.dataset_index.resolve()
     args.source_dataset_index = args.source_dataset_index.resolve()
+    args.training_engine_audit_receipt = args.training_engine_audit_receipt.resolve()
     return args
 
 

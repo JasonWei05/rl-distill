@@ -94,6 +94,8 @@ def _write_fake_preflight_python(
         f"schema_version = {schema_version!r}\n"
         "if len(sys.argv) > 1 and sys.argv[1] == '-c':\n"
         "    print(schema_version)\n"
+        "elif len(sys.argv) > 1 and sys.argv[1].endswith('verify_gemma4_fsdp2_training_audit.py'):\n"
+        "    pass\n"
         "else:\n"
         + "    "
         + record_statement.replace("\n", "\n    ").rstrip()
@@ -134,29 +136,29 @@ def test_launcher_uses_preflight_hydra_lists_without_eval(tmp_path: Path) -> Non
     assert "teacher_model.chunk_size=4096" in argv
     assert "data.teacher_topk_validation_tolerance=0.0025" in argv
     assert "data.micro_batch_size_per_gpu=2" in argv
-    assert "+engine.mixed_precision={param_dtype:fp32,reduce_dtype:fp32,buffer_dtype:fp32}" in argv
+    assert "+engine.mixed_precision={param_dtype:bf16,reduce_dtype:fp32,buffer_dtype:fp32}" in argv
 
 
-def test_launcher_rejects_unsafe_gemma4_parameter_views_without_explicit_opt_in(tmp_path: Path) -> None:
+def test_launcher_rejects_non_bf16_gemma4_parameter_views_without_explicit_opt_in(tmp_path: Path) -> None:
     environment, fake_bin = _base_environment(tmp_path)
     fake_python = fake_bin / "preflight-python"
     _write_fake_preflight_python(
         fake_python,
         _preflight_output(["/tmp/train.parquet"], ["/tmp/validation.parquet"]),
     )
-    environment.update({"PYTHON_BIN": str(fake_python), "FSDP_PARAM_DTYPE": "bf16"})
+    environment.update({"PYTHON_BIN": str(fake_python), "FSDP_PARAM_DTYPE": "fp32"})
 
     result = _run_launcher(environment)
 
     assert result.returncode == 2
-    assert "Gemma 4 production requires FSDP_PARAM_DTYPE=fp32" in result.stderr
+    assert "Gemma 4 production requires FSDP_PARAM_DTYPE=bf16" in result.stderr
 
     environment["ALLOW_UNSAFE_GEMMA4_FSDP_PARAM_DTYPE"] = "true"
     result = _run_launcher(environment)
 
     assert result.returncode == 0, result.stderr
     assert (
-        "+engine.mixed_precision={param_dtype:bf16,reduce_dtype:fp32,buffer_dtype:fp32}" in result.stdout.splitlines()
+        "+engine.mixed_precision={param_dtype:fp32,reduce_dtype:fp32,buffer_dtype:fp32}" in result.stdout.splitlines()
     )
 
 
@@ -283,6 +285,7 @@ def test_launcher_routes_overlay_schema_to_strict_overlay_preflight(tmp_path: Pa
     environment, fake_bin = _base_environment(tmp_path)
     source_index = tmp_path / "source-dataset-index.json"
     environment["SOURCE_DATASET_INDEX"] = str(source_index)
+    environment["TRAINING_ENGINE_AUDIT_RECEIPT"] = str(tmp_path / "training-engine-audit.json")
     fake_python = fake_bin / "preflight-python"
     argv_record = tmp_path / "preflight-argv.json"
     _write_fake_preflight_python(
@@ -308,6 +311,7 @@ def test_launcher_routes_overlay_schema_to_strict_overlay_preflight(tmp_path: Pa
 def test_launcher_can_force_overlay_receipt_refresh(tmp_path: Path) -> None:
     environment, fake_bin = _base_environment(tmp_path)
     environment["SOURCE_DATASET_INDEX"] = str(tmp_path / "source-dataset-index.json")
+    environment["TRAINING_ENGINE_AUDIT_RECEIPT"] = str(tmp_path / "training-engine-audit.json")
     environment["REFRESH_PREFLIGHT_RECEIPT"] = "true"
     fake_python = fake_bin / "preflight-python"
     argv_record = tmp_path / "preflight-argv.json"
@@ -339,6 +343,23 @@ def test_launcher_requires_explicit_source_index_for_overlay(tmp_path: Path) -> 
 
     assert result.returncode == 2
     assert "SOURCE_DATASET_INDEX" in result.stderr
+
+
+def test_launcher_requires_training_engine_audit_for_overlay(tmp_path: Path) -> None:
+    environment, fake_bin = _base_environment(tmp_path)
+    environment["SOURCE_DATASET_INDEX"] = str(tmp_path / "source-dataset-index.json")
+    fake_python = fake_bin / "preflight-python"
+    _write_fake_preflight_python(
+        fake_python,
+        _preflight_output(["/tmp/train.parquet"], ["/tmp/validation.parquet"]),
+        schema_version=OVERLAY_SCHEMA_VERSION,
+    )
+    environment["PYTHON_BIN"] = str(fake_python)
+
+    result = _run_launcher(environment)
+
+    assert result.returncode != 0
+    assert "TRAINING_ENGINE_AUDIT_RECEIPT" in result.stderr
 
 
 def test_launcher_rejects_source_index_for_vllm_bundle(tmp_path: Path) -> None:

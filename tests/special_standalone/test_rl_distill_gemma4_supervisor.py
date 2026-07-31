@@ -28,7 +28,7 @@ def test_parse_metric_line_extracts_training_metrics():
     }
 
 
-def test_numerical_anomaly_reason_accepts_verified_fp32_batch():
+def test_numerical_anomaly_reason_accepts_verified_bf16_forward_batch():
     assert (
         supervisor.numerical_anomaly_reason(
             {

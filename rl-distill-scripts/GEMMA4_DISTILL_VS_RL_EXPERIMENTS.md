@@ -4,10 +4,11 @@ Status: canonical design, preparation runbook, and execution ledger. Both comple
 bundles now exist and validate: 48,615 train plus 1,000 validation traces in each direction, with
 exact token IDs, response masks, and stored vLLM top-128 targets. Expanded cross-engine diagnostics
 show that vLLM and an unsharded HF BF16+SDPA training-shaped forward are close but not bit-identical.
-The immutable vLLM bundles remain the generation record; the intended primary training path derives a
-separate, identity-bound unsharded-HF target overlay over the exact stored token sequences. That
-rescore and the E2B-base-to-E4B student run are now authorized, subject to the parity, preflight, and
-one-step smoke gates below. Both immutable vLLM source
+The immutable vLLM bundles remain the generation record; the primary training path uses a complete,
+identity-bound unsharded-HF target overlay over the exact stored token sequences. A real eight-GPU
+FSDP2 train/checkpoint/backward audit now passes only with FP32 stored/master parameters, BF16 FSDP
+forward parameter views, and FP32 reductions/buffers. Production is fail-closed on that exact audit
+receipt before an E2B-base-to-E4B student launch. Both immutable vLLM source
 bundles are now public on Hugging Face at independently verified commits: E2B-base traces at
 `JWei05/gemma4-e2b-base-topk128-traces@e32aaa02681ae83b3d7256b1b155c9084da2f289` and E4B-RL
 step-100 traces at `JWei05/gemma4-e4b-rl100-topk128-traces@2b6e49a0a456ee9d67b16a1dc61785562bee90c9`.
@@ -58,10 +59,9 @@ identity-bound source-bundle preflight, 64-sample math evaluator, and pinned OOD
 An E4B-generated trace has passed the complete path into a real E2B student update.
 
 Preparation is therefore at complete-generation and end-to-end gate status for both directions, not
-experiment status. The source+overlay preflight and launcher routing are implemented and CPU-tested;
-the remaining execution boundary is the separately authorized unsharded-HF overlay rescore and artifact
-review. The later 750-step runs still require decisions about the exact top-k objective, metric
-conventions, model-checkpoint destinations, and fairness axes. The source
+completed-experiment status. The E2B-base overlay, source+overlay preflight, and corrected real FSDP2
+audit are complete; the next execution boundary is a fresh three-step E4B smoke followed by the
+supervised 750-step run. The source
 train file has 9,723 rows but only 9,543 distinct question texts, and seven of the 200 validation
 question texts also occur in train. The bundles deliberately preserve that historical roster for
 exact RL comparability; the overlap hashes and clean-193 evaluation requirement must remain visible
@@ -142,9 +142,9 @@ histories.
 
 ### Repository and framework status
 
-- Repository: `rl-distill`, branch `main`; the pushed preparation baseline is `d3906463`. The final
-  trace-evidence, cross-engine audit, rescorer, and documentation update is reviewed and pushed as a
-  separate preparation-only change; it does not authorize an experiment.
+- Repository: `rl-distill`, branch `main`. The complete source/overlay path and production supervisor
+  are present; the current correction replaces the disproven FP32 FSDP-forward contract with the
+  audited BF16-forward/FP32-master contract and adds a receipt gate tied to exact source hashes.
 - `3ed6f620` fixes the known verl Gemma 4 non-remove-padding attention-mask bug in the FSDP,
   AutoModel, and TorchTitan paths. `tests/workers/utils/test_padding.py` contains a targeted
   regression for the at-cap response case.
@@ -189,10 +189,21 @@ histories.
   while vLLM/HF top-128 overlap was 0.98504 for E2B and 0.97654 for E4B. The calibrated diagnostic
   thresholds pass, but the nonzero log-probability differences rule out treating the engines as
   bit-identical.
-- `data/rescore_gemma4_training_topk.py` now prepares an immutable, one-to-one unsharded-HF target overlay
-  without editing the vLLM source bundle. It binds the source index, shard and manifest hashes,
-  trace-ID sets, exact teacher identity, causal shift, Gemma 4 softcap, BF16+SDPA contract, and native
-  forward parity. This tooling is CPU-tested only; no production rescore has been launched.
+- `data/rescore_gemma4_training_topk.py` produced the complete immutable, one-to-one unsharded-HF
+  target overlay without editing the vLLM source bundle. It binds the source index, shard and manifest
+  hashes, trace-ID sets, exact teacher identity, causal shift, Gemma 4 softcap, BF16+SDPA contract, and
+  native forward parity.
+- The first production FSDP2 audit used FP32 parameter views and failed: top-128 overlap `0.98552`,
+  weighted log-probability drift `0.018099`, sampled-token drift p95 `0.09245`, and gradient norm
+  `1.9186`. Isolation ruled out train/eval mode, activation checkpointing, projection path, sharding,
+  and overlay corruption.
+- The full 16-trace/511-position audit with FP32 stored/master parameters, BF16 FSDP forward views,
+  FP32 reductions/buffers, SDPA, activation checkpointing, and backward passed: ordered top-128 exact
+  `1.0`, weighted drift `0.00016798`, sampled-token p95 `0.000864`, support L1 `0.0001662`, and gradient
+  norm `1.1535`.
+- A separate engine bug was found while isolating precision: a bare `module.to(bfloat16)` downcasts
+  Gemma 4's model-created FP32 rotary-frequency buffers. The FSDP loader now casts parameters while
+  preserving those buffers exactly, with a focused regression test.
 - Deterministic trace-contract failures now return a distinct generator status, and the supervisor
   refuses identical-seed retries for that status instead of looping on an unrecoverable row.
 - The validation loader retains a final partial batch only when exact distillation coverage is
@@ -235,7 +246,8 @@ histories.
 | Complete E2B-base-to-E4B source bundle | pass locally | 49,615 rows, 8,257,057 response tokens; index `d170166abad89588880f5c0a9eac43006f9a32bbe27cec28d7eb97c65288dbcc` |
 | Expanded E2B vLLM-versus-unsharded-HF diagnostic | pass calibrated thresholds | 32 traces / 1,870 positions; native projection max abs 0; top-128 overlap 0.98504; `/tmp/gemma4-e2b-vllm-vs-verl-parity-expanded.json` |
 | Expanded E4B vLLM-versus-unsharded-HF diagnostic | pass calibrated thresholds | 32 traces / 1,975 positions; native projection max abs 0; top-128 overlap 0.97654; `/tmp/gemma4-e4b-vllm-vs-verl-parity-expanded.json` |
-| Unsharded-HF target-overlay rescorer | prepared, not run | focused CPU tests and exact chunked/native fixture parity; production GPU rescore requires separate authorization; real FSDP2 audit remains pending |
+| Unsharded-HF target overlay | pass | complete E2B-base overlay index `124a1b904b60963fb2b1d422107bec593a8ef1053cce34fff40bfb6314d1a16e`; exact source binding and preflight |
+| Real eight-rank FSDP2 overlay audit | pass with corrected precision | 16 traces / 511 positions; exact ordered top-128; weighted drift `0.00016798`; sampled-token p95 `0.000864`; `/tmp/verl/audits/gemma4-e2b-overlay-vs-fsdp2-fp32master-bf16forward-train-full-20260731.json` |
 | Public source-trace publication | pass and independently verified | E2B commit `e32aaa02681ae83b3d7256b1b155c9084da2f289`; E4B commit `2b6e49a0a456ee9d67b16a1dc61785562bee90c9`; 2,485 registered files each; every path/size and content identity verified remotely |
 
 Expanded cross-engine results used to calibrate the committed audit are:
@@ -558,32 +570,36 @@ Unless superseded by an explicit decision below, both directions share:
 | Setting | Value |
 |---|---|
 | Student initialization | base E2B for line 1; base E4B for line 2 |
-| Teacher targets | precomputed unsharded-HF top-128 overlay bound to the immutable vLLM trace bundle; real FSDP2 equivalence still requires an engine audit |
-| Global sequence batch | 64, pending confirmation |
+| Teacher targets | precomputed unsharded-HF top-128 overlay bound to the immutable vLLM trace bundle and a passing exact-contract FSDP2 audit receipt |
+| Global sequence batch | 128 |
 | Optimizer steps | 750 |
 | Shuffle | yes |
 | Optimizer | AdamW |
 | Betas | `(0.9, 0.98)` |
 | Weight decay | `0.1` |
-| Peak learning rate | `5e-6` |
+| Peak learning rate | `2e-6` |
 | Warmup | 100 optimizer steps |
-| Decay | cosine after warmup |
-| Final learning rate | `5e-7` (`0.1` of peak) |
+| Decay | linear after warmup |
+| Final learning rate | `2e-7` (`0.1` of peak) |
 | Validation cadence | every 10 optimizer steps |
 | W&B | required |
 | Checkpoint/HF cadence | steps 250, 500, and 750 |
 | Tokenization | consume stored IDs directly; no re-tokenization |
 | Loss mask | response prediction positions only |
 
-The intended LR interpretation is linear warmup to `5e-6` over the first 100 optimizer steps,
-followed by cosine decay to exactly `5e-7` at step 750. This interpretation is listed for confirmation
-because scheduler endpoints can otherwise differ by one update.
+The schedule is linear warmup to `2e-6` over the first 100 optimizer steps followed by linear decay
+to `2e-7` at step 750.
 
 ### Gemma 4 correctness requirements
 
 - Use the Gemma-4-capable environment from `setup_env_gemma4.sh` or a pinned equivalent.
 - Use `Gemma4TextDecoderLayer`, SDPA, and `use_remove_padding=false` unless a tested replacement is
   introduced.
+- Load/store model and optimizer state in FP32, use BF16 FSDP parameter views for every forward, and
+  keep reductions and model-created buffers in FP32. A bare module-wide dtype cast must not downcast
+  Gemma 4 rotary-frequency buffers.
+- Require a passing real FSDP2 receipt for the exact overlay, repository commit/source hashes, eight-rank
+  world size, train mode, activation checkpointing, compact hidden-state path, and exercised backward.
 - Freeze the vision and audio towers and train the language model unless explicitly changed.
 - Preserve and correctly apply Gemma 4 `final_logit_softcapping` before computing student
   log-probabilities. The new Gemma 4 hidden-state path does this and must remain covered by exact
@@ -1048,11 +1064,10 @@ Evaluation remains similarly held. After D33-D40 are resolved, use `eval_math_pa
 4. **Passed in both directions:** five E2B-base responses and live E4B-RL responses produced exact
    top-128 targets; each direction drove a finite real student update. Separate 8,192-cap live gates
    naturally stopped and fully validated for both teachers.
-5. **Passed for both complete source bundles:** exact IDs/masks, top-k rank/shape/mass, row/config
+5. **Passed for both complete source bundles and the E2B training overlay:** exact IDs/masks, top-k rank/shape/mass, row/config
    provenance, deterministic seeds, all shard hashes, decode checks, exact roster sizes, and the
    explicit seven-question overlap registration. The separate source+overlay preflight and launcher
-   schema routing are implemented and passed their focused combined suite; they have not been run on
-   a complete overlay because no bulk rescore has started.
+   schema routing are implemented and passed against the complete overlay.
 6. **Passed:** objective, mask shift, teacher/student mass, Gemma 4 softcap, activation-checkpointed
    chunks, partial validation coverage, and a full 8,192-response-token FP32-master/BF16-compute
    update with 16,384 active tokens.
@@ -1382,3 +1397,10 @@ defaults are proposals, not silently adopted decisions.
   peak learning rate too high and stopped the run before its first step-250 upload. Restart from the
   immutable E4B base with global batch 128, two epochs capped at 750 steps, 100-step warmup to
   `2e-6`, and linear decay to `2e-7`.
+- **2026-07-31 — First `2e-6` restart stopped after step 3 for numerical investigation.** W&B run
+  `e3170769` has no durable checkpoint and must not be resumed. Its launcher used FP32 FSDP forward
+  parameter views while the overlay came from a BF16 HF forward.
+- **2026-07-31 — FSDP2 precision root cause isolated.** The old FP32-forward audit failed materially;
+  the full BF16-forward/FP32-master train/checkpoint/backward audit passed with exact ordered top-128
+  support and sub-`0.001` sampled-token drift p95. Production now requires that receipt and preserves
+  FP32 Gemma 4 rotary buffers before a fresh smoke and run identity.

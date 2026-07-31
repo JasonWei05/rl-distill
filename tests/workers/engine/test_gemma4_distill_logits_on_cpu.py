@@ -25,6 +25,34 @@ from verl.utils import tensordict_utils as tu
 from verl.utils.dataset.dataset_utils import SFTTensorCollator
 
 
+def test_gemma4_parameter_cast_preserves_fp32_rotary_buffers():
+    from transformers.models.gemma4.configuration_gemma4 import Gemma4TextConfig
+    from transformers.models.gemma4.modeling_gemma4 import Gemma4TextRotaryEmbedding
+
+    from verl.workers.engine.fsdp.transformer_impl import _cast_module_parameters_preserving_buffers
+
+    config = Gemma4TextConfig(
+        hidden_size=16,
+        intermediate_size=32,
+        num_hidden_layers=1,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=4,
+    )
+    module = torch.nn.Module()
+    module.rotary = Gemma4TextRotaryEmbedding(config)
+    module.projection = torch.nn.Linear(16, 16, bias=False)
+    expected_buffers = {name: buffer.clone() for name, buffer in module.named_buffers()}
+
+    _cast_module_parameters_preserving_buffers(module, torch.bfloat16)
+
+    assert {parameter.dtype for parameter in module.parameters()} == {torch.bfloat16}
+    assert expected_buffers
+    for name, buffer in module.named_buffers():
+        assert buffer.dtype == torch.float32
+        torch.testing.assert_close(buffer, expected_buffers[name], rtol=0, atol=0)
+
+
 def test_gemma4_skip_lm_head_returns_only_selected_hidden_states():
     # Importing the FSDP implementation installs the guarded Gemma 4 patch.
     from transformers.models.gemma4.modeling_gemma4 import Gemma4ForConditionalGeneration
