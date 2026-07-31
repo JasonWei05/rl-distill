@@ -43,6 +43,14 @@ paths only. Before treating these targets as numerically identical to verl
 FSDP2 training outputs, run a separately approved one-row audit through the
 actual FSDP2 engine and compare the serialized targets exactly.
 
+The LM-head projection chunk must cover the complete allowed response when
+exact serialized parity is required. On H100, a 256-token chunk produced seven
+one-ULP FP16 log-probability mismatches on the first eligible long trace
+(`max_abs=6.103515625e-05`), while a chunk of 8,192 passed all eight parity
+rows exactly. This is expected from BF16 GEMM shape-dependent rounding. For
+the registered 8,192-token response cap, use `--lm-head-chunk-tokens 8192`
+consistently for `inspect`, `parity`, every `score` worker, and `finalize`.
+
 ## Command template
 
 Set these paths only after the source bundle and exact teacher snapshot have
@@ -63,7 +71,8 @@ Read-only identity/config inspection except for creating `OUTPUT_ROOT` and its
 $PY "$SCRIPT" inspect \
   --source-dataset-index "$SOURCE_INDEX" \
   --model-path "$MODEL_PATH" \
-  --output-root "$OUTPUT_ROOT"
+  --output-root "$OUTPUT_ROOT" \
+  --lm-head-chunk-tokens 8192
 ```
 
 Mandatory native-forward parity gate; this loads the model on one GPU:
@@ -73,6 +82,7 @@ CUDA_VISIBLE_DEVICES=0 $PY "$SCRIPT" parity \
   --source-dataset-index "$SOURCE_INDEX" \
   --model-path "$MODEL_PATH" \
   --output-root "$OUTPUT_ROOT" \
+  --lm-head-chunk-tokens 8192 \
   --parity-rows 8 \
   --parity-max-response-tokens 512
 ```
@@ -84,12 +94,14 @@ CUDA_VISIBLE_DEVICES=0 $PY "$SCRIPT" score \
   --source-dataset-index "$SOURCE_INDEX" \
   --model-path "$MODEL_PATH" \
   --output-root "$OUTPUT_ROOT" \
+  --lm-head-chunk-tokens 8192 \
   --worker-id 0 --num-workers 2
 
 CUDA_VISIBLE_DEVICES=1 $PY "$SCRIPT" score \
   --source-dataset-index "$SOURCE_INDEX" \
   --model-path "$MODEL_PATH" \
   --output-root "$OUTPUT_ROOT" \
+  --lm-head-chunk-tokens 8192 \
   --worker-id 1 --num-workers 2
 ```
 
@@ -99,7 +111,8 @@ Final validation and index creation after every worker exits successfully:
 $PY "$SCRIPT" finalize \
   --source-dataset-index "$SOURCE_INDEX" \
   --model-path "$MODEL_PATH" \
-  --output-root "$OUTPUT_ROOT"
+  --output-root "$OUTPUT_ROOT" \
+  --lm-head-chunk-tokens 8192
 ```
 
 `finalize` does not upload. The strict source+overlay preflight is
@@ -113,8 +126,9 @@ still required before any Hugging Face mutation.
 - Source train and validation indexes are complete and immutable.
 - `MODEL_PATH` identity exactly equals the source teacher identity.
 - Focused CPU tests pass.
-- The parity mode passes exactly on serialized top-k IDs/log probabilities and
-  sampled-token log probabilities, and its receipt validates.
+- The parity mode uses a projection chunk covering the full response and
+  passes exactly on serialized top-k IDs/log probabilities and sampled-token
+  log probabilities; its receipt validates.
 - A separately approved one-row real-FSDP2 audit passes before making any
   FSDP2-equivalence claim.
 - A separately approved 100–500-row benchmark establishes runtime and memory.
