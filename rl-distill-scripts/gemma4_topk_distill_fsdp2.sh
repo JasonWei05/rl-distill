@@ -329,6 +329,7 @@ fi
 export FSDP_PARAM_DTYPE=${FSDP_PARAM_DTYPE:-bf16}
 export FSDP_REDUCE_DTYPE=${FSDP_REDUCE_DTYPE:-fp32}
 export FSDP_BUFFER_DTYPE=${FSDP_BUFFER_DTYPE:-fp32}
+export FSDP_CAST_FORWARD_INPUTS=${FSDP_CAST_FORWARD_INPUTS:-true}
 export ALLOW_UNSAFE_GEMMA4_FSDP_PARAM_DTYPE=${ALLOW_UNSAFE_GEMMA4_FSDP_PARAM_DTYPE:-false}
 case "${FSDP_PARAM_DTYPE}" in
     bf16) ;;
@@ -348,18 +349,41 @@ case "${FSDP_BUFFER_DTYPE}" in
     fp32|bf16|fp16) ;;
     *) echo "FSDP_BUFFER_DTYPE must be fp32, bf16, or fp16" >&2; exit 2 ;;
 esac
+case "${FSDP_CAST_FORWARD_INPUTS,,}" in
+    true|false) ;;
+    *) echo "FSDP_CAST_FORWARD_INPUTS must be true or false" >&2; exit 2 ;;
+esac
+
+# Gemma 4 BF16 cuDNN SDPA has a reproducible backward pathology when two long
+# padded sequences share a microbatch. Keep cuDNN enabled for exact target
+# parity, but isolate a row whenever max_sequence_length * batch_size would
+# exceed the verified 5,120-token ceiling.
+export MAX_PADDED_TOKENS_PER_MICROBATCH=${MAX_PADDED_TOKENS_PER_MICROBATCH:-5120}
+if ! [[ "${MAX_PADDED_TOKENS_PER_MICROBATCH}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "MAX_PADDED_TOKENS_PER_MICROBATCH must be a positive integer" >&2
+    exit 2
+fi
+export VERL_GEMMA4_CUDNN_SDPA=${VERL_GEMMA4_CUDNN_SDPA:-1}
+case "${VERL_GEMMA4_CUDNN_SDPA}" in
+    0|1) ;;
+    *) echo "VERL_GEMMA4_CUDNN_SDPA must be 0 or 1" >&2; exit 2 ;;
+esac
 
 if [ "${DATASET_SCHEMA_VERSION:-}" = "gemma4-hf-bf16-sdpa-topk-overlay-v1" ]; then
     if [ "${MODEL_DTYPE}" != "fp32" ] || [ "${FSDP_PARAM_DTYPE}" != "bf16" ] || \
        [ "${FSDP_REDUCE_DTYPE}" != "fp32" ] || [ "${FSDP_BUFFER_DTYPE}" != "fp32" ] || \
+       [ "${FSDP_CAST_FORWARD_INPUTS,,}" != "true" ] || \
        [ "${ENABLE_GRADIENT_CHECKPOINTING,,}" != "true" ] || \
-       [ "${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP}" != "Gemma4TextDecoderLayer" ]; then
-        echo "The audited overlay contract requires MODEL_DTYPE=fp32, BF16 FSDP forward parameters, FP32 reductions/buffers, activation checkpointing, and Gemma4TextDecoderLayer wrapping" >&2
+       [ "${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP}" != "Gemma4TextDecoderLayer" ] || \
+       [ "${MAX_PADDED_TOKENS_PER_MICROBATCH}" != "5120" ] || \
+       [ "${VERL_GEMMA4_CUDNN_SDPA}" != "1" ]; then
+        echo "The audited overlay contract requires MODEL_DTYPE=fp32, BF16 FSDP forward parameters, FP32 reductions/buffers, FSDP input casting, activation checkpointing, Gemma4TextDecoderLayer wrapping, cuDNN SDPA, and a 5120 padded-token microbatch ceiling" >&2
         exit 2
     fi
     "${PYTHON_BIN}" "${PROJECT_ROOT}/rl-distill-scripts/data/verify_gemma4_fsdp2_training_audit.py" \
         --receipt "${TRAINING_ENGINE_AUDIT_RECEIPT}" \
         --dataset-index "${DATASET_INDEX}" \
+        --student-model "${MODEL_PATH}" \
         --expected-world-size "${NPROC_PER_NODE}"
 fi
 
@@ -368,7 +392,7 @@ fi
 # can distinguish numerical corruption from restartable infrastructure loss.
 export VERL_FAIL_ON_NONFINITE_LOSS=${VERL_FAIL_ON_NONFINITE_LOSS:-1}
 export VERL_FAIL_ON_NONFINITE_GRAD=${VERL_FAIL_ON_NONFINITE_GRAD:-1}
-export VERL_MAX_PRECLIP_GRAD_NORM=${VERL_MAX_PRECLIP_GRAD_NORM:-100}
+export VERL_MAX_PRECLIP_GRAD_NORM=${VERL_MAX_PRECLIP_GRAD_NORM:-50}
 if ! [[ "${VERL_MAX_PRECLIP_GRAD_NORM}" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
    [ "${VERL_MAX_PRECLIP_GRAD_NORM}" = "0" ] || \
    [ "${VERL_MAX_PRECLIP_GRAD_NORM}" = "0.0" ]; then
@@ -437,6 +461,7 @@ COMMON_OVERRIDES=(
     data.micro_batch_size_per_gpu="${MICRO_BATCH_SIZE_PER_GPU}"
     data.max_token_len_per_gpu="${MAX_TOKEN_LEN_PER_GPU}"
     data.use_dynamic_bsz=false
+    data.max_padded_tokens_per_microbatch="${MAX_PADDED_TOKENS_PER_MICROBATCH}"
     data.max_length="${MAX_LENGTH}"
     data.truncation=error
     data.use_precomputed_topk=true
@@ -479,7 +504,7 @@ COMMON_OVERRIDES=(
 )
 
 COMMON_OVERRIDES+=(
-    "+engine.mixed_precision={param_dtype:${FSDP_PARAM_DTYPE},reduce_dtype:${FSDP_REDUCE_DTYPE},buffer_dtype:${FSDP_BUFFER_DTYPE}}"
+    "+engine.mixed_precision={param_dtype:${FSDP_PARAM_DTYPE},reduce_dtype:${FSDP_REDUCE_DTYPE},buffer_dtype:${FSDP_BUFFER_DTYPE},cast_forward_inputs:${FSDP_CAST_FORWARD_INPUTS}}"
 )
 
 cd "${PROJECT_ROOT}/rl-distill-scripts"

@@ -27,6 +27,7 @@ data:
   micro_batch_size_per_gpu: 1
   max_token_len_per_gpu: 20480
   use_dynamic_bsz: false
+  max_padded_tokens_per_microbatch: 0
   train_files: ${oc.env:TRAIN_FILE,/home/tiger/verl/data/dapo_gemma3_4b_pt_teacher_v7_independent/train.parquet}
   val_files: ${oc.env:VAL_FILE,/home/tiger/verl/data/dapo_gemma3_4b_pt_teacher_v7_independent/validation.parquet}
   input_ids_key: input_ids

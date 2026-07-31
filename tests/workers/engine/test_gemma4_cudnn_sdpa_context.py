@@ -69,3 +69,24 @@ def test_non_gemma_context_does_not_change_cudnn_sdpa(cudnn_sdpa_state):
         assert cudnn_sdpa_state["enabled"] is False
 
     assert cudnn_sdpa_state["calls"] == []
+
+
+def test_gemma4_context_can_disable_cudnn_sdpa(monkeypatch, cudnn_sdpa_state):
+    cudnn_sdpa_state["enabled"] = True
+    monkeypatch.setenv("VERL_GEMMA4_CUDNN_SDPA", "0")
+    engine = _engine("gemma4_text")
+
+    with transformer_impl.EngineTrainModeCtx(engine, disable_auto_offload=True):
+        assert cudnn_sdpa_state["enabled"] is False
+
+    assert cudnn_sdpa_state["enabled"] is True
+    assert cudnn_sdpa_state["calls"] == [False, True]
+
+
+def test_gemma4_context_rejects_invalid_cudnn_sdpa_override(monkeypatch, cudnn_sdpa_state):
+    monkeypatch.setenv("VERL_GEMMA4_CUDNN_SDPA", "invalid")
+    engine = _engine("gemma4_text")
+
+    with pytest.raises(ValueError, match="must be 0 or 1"):
+        with transformer_impl.EngineTrainModeCtx(engine, disable_auto_offload=True):
+            pass

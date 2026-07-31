@@ -115,8 +115,10 @@ def _enable_gemma4_cudnn_sdpa(engine):
     ``torch.backends.cuda.enable_cudnn_sdp(False)``. ``TrainingWorker`` imports
     vLLM transitively through the checkpoint-engine registry before it builds
     the HF model, so an otherwise identical Gemma 4 FSDP2 forward silently
-    selects a different SDPA backend. Gemma 4's learned residual gates amplify
-    the small BF16 forward difference into severely divergent gradients.
+    selects a different SDPA backend. Production targets were generated with
+    cuDNN SDPA, so changing the backend measurably changes top-k membership and
+    log probabilities. Long padded multi-sequence backward safety is enforced
+    separately by the fixed microbatch padded-token ceiling.
 
     Return the prior state so callers can restore it after the training/eval
     context; colocated vLLM code therefore retains the state it requested.
@@ -132,11 +134,16 @@ def _enable_gemma4_cudnn_sdpa(engine):
     if getattr(text_config, "model_type", None) != "gemma4_text":
         return None
 
+    requested = os.environ.get("VERL_GEMMA4_CUDNN_SDPA", "1")
+    if requested not in {"0", "1"}:
+        raise ValueError("VERL_GEMMA4_CUDNN_SDPA must be 0 or 1")
+
+    target = requested == "1"
     previous = torch.backends.cuda.cudnn_sdp_enabled()
-    if not previous:
-        torch.backends.cuda.enable_cudnn_sdp(True)
+    if previous != target:
+        torch.backends.cuda.enable_cudnn_sdp(target)
         if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
-            logger.info("Restored cuDNN SDPA for Gemma 4 after a process-global backend disable")
+            logger.info("Set cuDNN SDPA=%s for Gemma 4 forward", target)
     return previous
 
 
@@ -647,8 +654,13 @@ class FSDPEngine(BaseEngine):
             # - critic: offload_policy
             # - ref: CPUOffloadPolicy(pin_memory=True)
             assert CPUOffloadPolicy is not None, "PyTorch version >= 2.4 is required for using fully_shard API (FSDP2)"
+            cast_forward_inputs = True
+            if mixed_precision_config is not None:
+                cast_forward_inputs = bool(mixed_precision_config.get("cast_forward_inputs", True))
             mp_policy = MixedPrecisionPolicy(
-                param_dtype=param_dtype, reduce_dtype=reduce_dtype, cast_forward_inputs=True
+                param_dtype=param_dtype,
+                reduce_dtype=reduce_dtype,
+                cast_forward_inputs=cast_forward_inputs,
             )
             offload_policy = None
             if self.engine_config.offload_policy or self.engine_config.forward_only:
@@ -887,7 +899,12 @@ class FSDPEngine(BaseEngine):
 
         ctx = torch.no_grad() if forward_only else nullcontext()
 
-        for micro_batch in micro_batches:
+        per_microbatch_grad_diagnostics = (
+            isinstance(self.module, FSDPModule)
+            and not forward_only
+            and os.environ.get("VERL_FSDP2_GRAD_DIAGNOSTICS_EACH_MICROBATCH", "0") == "1"
+        )
+        for micro_batch_index, micro_batch in enumerate(micro_batches):
             with ctx:
                 loss, meta_info = self.forward_step(micro_batch, loss_function=loss_function, forward_only=forward_only)
 
@@ -902,6 +919,39 @@ class FSDPEngine(BaseEngine):
                         if not local_finite.item():
                             raise FloatingPointError("non-finite training loss detected before backward")
                     loss.backward()
+                    if per_microbatch_grad_diagnostics:
+                        diagnostics = fsdp2_grad_norm_diagnostics(
+                            self.module.named_parameters(),
+                            group=self.get_data_parallel_group(),
+                            top_k=int(os.environ.get("VERL_FSDP2_GRAD_DIAGNOSTICS_TOPK", "10")),
+                        )
+                        if torch.distributed.get_rank() == 0:
+                            print(
+                                "[FSDP2MicrobatchGradDiagnostics] "
+                                f"micro_batch={micro_batch_index + 1}/{len(micro_batches)} "
+                                f"loss={loss.detach().item():.9g} "
+                                f"cumulative_total_norm={diagnostics['total_norm']:.9g} "
+                                f"top={diagnostics['top']}",
+                                flush=True,
+                            )
+                            diagnostics_path = os.environ.get("VERL_FSDP2_MICROBATCH_GRAD_DIAGNOSTICS_PATH")
+                            if diagnostics_path:
+                                payload = {
+                                    "micro_batch": micro_batch_index + 1,
+                                    "micro_batch_count": len(micro_batches),
+                                    "loss": loss.detach().item(),
+                                    "cumulative_total_norm": diagnostics["total_norm"],
+                                    "top": diagnostics["top"],
+                                    "per_parameter": diagnostics["per_parameter"],
+                                }
+                                diagnostics_path = os.path.abspath(diagnostics_path)
+                                diagnostics_parent = os.path.dirname(diagnostics_path)
+                                if diagnostics_parent:
+                                    os.makedirs(diagnostics_parent, exist_ok=True)
+                                mode = "w" if micro_batch_index == 0 else "a"
+                                with open(diagnostics_path, mode, encoding="utf-8") as handle:
+                                    json.dump(payload, handle, sort_keys=True)
+                                    handle.write("\n")
 
             output_lst.append(meta_info)
 

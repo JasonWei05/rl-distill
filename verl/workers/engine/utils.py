@@ -17,11 +17,12 @@ import random
 
 import numpy as np
 import torch
+import torch.distributed as dist
 from tensordict import TensorDict
 
 from verl.utils import tensordict_utils as tu
 from verl.utils.dataset.dataset_utils import DatasetPadMode
-from verl.utils.device import is_npu_available
+from verl.utils.device import get_device_name, is_npu_available
 from verl.utils.py_functional import append_to_dict
 from verl.utils.seqlen_balancing import rearrange_micro_batches, restore_dynamic_batch
 
@@ -90,18 +91,81 @@ def prepare_micro_batches(
         total_data_size = len(data)
         micro_batch_size_per_gpu = data["micro_batch_size_per_gpu"]
         micro_batch_size = force_group_size * micro_batch_size_per_gpu
+        max_padded_tokens = int(
+            tu.get_non_tensor_data(
+                data=data,
+                key="max_padded_tokens_per_microbatch",
+                default=0,
+            )
+        )
+        if max_padded_tokens < 0:
+            raise ValueError("max_padded_tokens_per_microbatch must be non-negative")
+        if max_padded_tokens and force_group_size != 1:
+            raise ValueError("fixed padded-token microbatching currently requires force_group_size=1")
+
+        if max_padded_tokens:
+            input_ids = data.get("input_ids")
+            if not isinstance(input_ids, torch.Tensor):
+                raise TypeError("fixed padded-token microbatching requires tensor input_ids")
+            if input_ids.is_nested:
+                sequence_lengths = input_ids.offsets().diff()
+            else:
+                attention_mask = data.get("attention_mask")
+                if not isinstance(attention_mask, torch.Tensor):
+                    raise TypeError("padded fixed microbatching requires attention_mask")
+                sequence_lengths = attention_mask.sum(dim=-1)
+
+            order = torch.argsort(sequence_lengths, stable=True).cpu().tolist()
+            lengths_cpu = sequence_lengths.cpu().tolist()
+            batch_idx_list = []
+            current = []
+            for sample_index in order:
+                candidate_size = len(current) + 1
+                candidate_padded_tokens = lengths_cpu[sample_index] * candidate_size
+                if current and (candidate_size > micro_batch_size or candidate_padded_tokens > max_padded_tokens):
+                    batch_idx_list.append(current)
+                    current = []
+                # A sequence that exceeds the budget by itself is still a
+                # valid singleton: splitting a sequence is outside this
+                # batching layer, and padding cannot make a singleton larger.
+                current.append(sample_index)
+            if current:
+                batch_idx_list.append(current)
+
+            target_micro_batches = len(batch_idx_list)
+            if dist.is_initialized() and same_micro_num_in_dp and dp_group is not None:
+                target_tensor = torch.tensor([target_micro_batches], device=get_device_name())
+                dist.all_reduce(target_tensor, op=dist.ReduceOp.MAX, group=dp_group)
+                target_micro_batches = int(target_tensor.cpu().item())
+
+            while len(batch_idx_list) < target_micro_batches:
+                split_index = next(
+                    (index for index in range(len(batch_idx_list) - 1, -1, -1) if len(batch_idx_list[index]) > 1),
+                    None,
+                )
+                if split_index is None:
+                    raise RuntimeError(
+                        "cannot equalize fixed padded-token microbatch counts across data-parallel ranks"
+                    )
+                partition = batch_idx_list[split_index]
+                batch_idx_list[split_index : split_index + 1] = [partition[:-1], partition[-1:]]
+
+            micro_batches = [tu.index_select_tensor_dict(data, partition) for partition in batch_idx_list]
+            return micro_batches, batch_idx_list
+
         if allow_uneven_micro_batches:
             assert total_data_size % force_group_size == 0, "partial micro-batches must preserve force_group_size"
             full_micro_batches, remainder = divmod(total_data_size, micro_batch_size)
             split_sizes = [micro_batch_size] * full_micro_batches
             if remainder:
                 split_sizes.append(remainder)
-            micro_batches = tu.split_tensordict(data, split_sizes)
         else:
             assert total_data_size % micro_batch_size == 0, (
                 "data size must be divisible by force_group_size * micro_batch_size_per_gpu"
             )
-            micro_batches = tu.chunk_tensordict(data, total_data_size // micro_batch_size)
+            split_sizes = [micro_batch_size] * (total_data_size // micro_batch_size)
+
+        micro_batches = tu.split_tensordict(data, split_sizes)
         batch_idx_list = None
     return micro_batches, batch_idx_list
 
@@ -115,7 +179,6 @@ def postprocess_batch_func(output_lst, indices, data: TensorDict):
     each losses_reduced contains 1. model_output, 2. loss, 3. metrics.
     """
 
-    use_dynamic_bsz = tu.get_non_tensor_data(data=data, key="use_dynamic_bsz", default=True)
     pad_mode = tu.get_non_tensor_data(data=data, key="pad_mode", default=DatasetPadMode.NO_PADDING)
     assert pad_mode == DatasetPadMode.NO_PADDING, "postprocess_batch_func only support NO_PADDING pad_mode"
 
@@ -146,8 +209,8 @@ def postprocess_batch_func(output_lst, indices, data: TensorDict):
         else:
             raise NotImplementedError(f"pad_mode {pad_mode} not implemented")
 
-        # reverse with dynamic bsz
-        if use_dynamic_bsz:
+        # Both dynamic batching and fixed padded-token batching reorder rows.
+        if indices is not None:
             model_output[key] = restore_dynamic_batch(model_output[key], indices)
 
     # loss

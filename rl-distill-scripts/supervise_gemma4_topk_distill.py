@@ -254,6 +254,7 @@ def build_child_environment(args: argparse.Namespace, run_id: str) -> dict[str, 
             "EXPECTED_TRAIN_SAMPLES_PER_QUESTION": "5",
             "EXPECTED_VALIDATION_SAMPLES_PER_QUESTION": "1",
             "MICRO_BATCH_SIZE_PER_GPU": "2",
+            "MAX_PADDED_TOKENS_PER_MICROBATCH": "5120",
             "FULL_VOCAB_KL_CHUNK_SIZE": "4096",
             "TRAIN_BATCH_SIZE": "128",
             "LR": "2e-6",
@@ -276,6 +277,8 @@ def build_child_environment(args: argparse.Namespace, run_id: str) -> dict[str, 
             "FSDP_PARAM_DTYPE": "bf16",
             "FSDP_REDUCE_DTYPE": "fp32",
             "FSDP_BUFFER_DTYPE": "fp32",
+            "FSDP_CAST_FORWARD_INPUTS": "true",
+            "VERL_GEMMA4_CUDNN_SDPA": "1",
             "VERL_FAIL_ON_NONFINITE_LOSS": "1",
             "VERL_FAIL_ON_NONFINITE_GRAD": "1",
             "VERL_MAX_PRECLIP_GRAD_NORM": str(args.max_grad_norm),
@@ -310,7 +313,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-freq", type=int, default=250)
     parser.add_argument("--test-freq", type=int, default=10)
     parser.add_argument("--max-checkpoints-to-keep", type=int, default=4)
-    parser.add_argument("--max-grad-norm", type=float, default=100.0)
+    parser.add_argument("--max-grad-norm", type=float, default=50.0)
     parser.add_argument("--gpus", type=int, default=8)
     parser.add_argument("--project", default="gemma4-distill-vs-rl")
     parser.add_argument("--entity", default="rl-distill")

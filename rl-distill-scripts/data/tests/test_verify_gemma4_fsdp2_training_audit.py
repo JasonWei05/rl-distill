@@ -18,8 +18,10 @@ import copy
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from torch.utils.data import DistributedSampler
 
 DATA_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DATA_DIR))
@@ -31,7 +33,16 @@ def _write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
-def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
+@pytest.fixture(autouse=True)
+def _stub_student_identity(monkeypatch):
+    monkeypatch.setattr(
+        verifier,
+        "inspect_local_hf_model",
+        lambda _path: SimpleNamespace(model_identity_sha256="e" * 64),
+    )
+
+
+def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
     identity = "a" * 64
     dataset_index = tmp_path / "dataset_index.json"
     index = {
@@ -39,8 +50,11 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
         "dataset_index_sha256": "b" * 64,
         "source_dataset_index_sha256": "c" * 64,
         "target_model_identity": {"model_identity_sha256": identity},
+        "splits": {"train": {"row_count": 48615}},
     }
     _write_json(dataset_index, index)
+    student_model = tmp_path / "student-model"
+    student_model.mkdir()
     source_sha256s = {
         relative: verifier._sha256(verifier.REPO_ROOT / relative) for relative in verifier.REQUIRED_SOURCE_PATHS
     }
@@ -58,6 +72,13 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
             "fsdp_param_dtype": "bf16",
             "fsdp_reduce_dtype": "fp32",
             "fsdp_buffer_dtype": "fp32",
+            "fsdp_cast_forward_inputs": True,
+            "train_seed": 42,
+            "train_batch_size": 128,
+            "micro_batch_size_per_gpu": 2,
+            "max_padded_tokens_per_microbatch": 5120,
+            "kl_chunk_size": 4096,
+            "max_length": 12288,
             "top_k": 128,
         },
         "dataset": {
@@ -73,7 +94,44 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
             "autocast": "bfloat16",
             "attention_implementation": "sdpa",
         },
-        "selection": {"world_size": 8, "trace_count": 16, "position_count": 511},
+        "student_model": {
+            "path": str(student_model),
+            "model_identity_sha256": "e" * 64,
+            "dtype_load": "fp32",
+            "autocast": "bfloat16",
+            "attention_implementation": "sdpa",
+        },
+        "selection": {
+            "world_size": 8,
+            "trace_count": 16,
+            "position_count": 511,
+            "production_first_train_batch": [
+                {
+                    "rank": rank,
+                    "global_indices": list(
+                        DistributedSampler(
+                            range(48615),
+                            num_replicas=8,
+                            rank=rank,
+                            shuffle=True,
+                            seed=42,
+                            drop_last=True,
+                        )
+                    )[:16],
+                    "sequence_lengths": [2000] * 16,
+                    "microbatch_count": 8,
+                    "microbatches": [
+                        {
+                            "indices": [offset, offset + 1],
+                            "sequence_lengths": [2000, 2000],
+                            "padded_tokens": 4000,
+                        }
+                        for offset in range(0, 16, 2)
+                    ],
+                }
+                for rank in range(8)
+            ],
+        },
         "aggregate": {
             "topk_overlap_fraction": {"mean": 1.0},
             "stored_support_weighted_abs_logprob_delta": {"mean": 0.0002},
@@ -90,15 +148,16 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
     }
     receipt = tmp_path / "audit.json"
     _write_json(receipt, report)
-    return receipt, dataset_index, report
+    return receipt, dataset_index, student_model, report
 
 
 def test_verifier_accepts_exact_production_contract(tmp_path: Path) -> None:
-    receipt, dataset_index, _ = _fixture(tmp_path)
+    receipt, dataset_index, student_model, _ = _fixture(tmp_path)
 
     verified = verifier.verify_receipt(
         receipt_path=receipt,
         dataset_index_path=dataset_index,
+        student_model_path=student_model,
         expected_world_size=8,
         verify_repository=False,
     )
@@ -116,11 +175,29 @@ def test_verifier_accepts_exact_production_contract(tmp_path: Path) -> None:
             lambda report: report["aggregate"]["stored_support_weighted_abs_logprob_delta"].update(mean=0.01),
             "weighted logprob drift",
         ),
+        (
+            lambda report: report["selection"]["production_first_train_batch"][0]["global_indices"].__setitem__(0, -1),
+            "sampler indices",
+        ),
+        (
+            lambda report: report["selection"]["production_first_train_batch"][0]["microbatches"][0].update(
+                padded_tokens=6000
+            ),
+            "padded_tokens",
+        ),
+        (
+            lambda report: report["selection"]["production_first_train_batch"][0].update(microbatch_count=9),
+            "microbatch counts differ",
+        ),
+        (
+            lambda report: report["student_model"].update(model_identity_sha256="f" * 64),
+            "student model identity",
+        ),
         (lambda report: report["implementation"].update(dirty=True), "implementation dirty"),
     ],
 )
 def test_verifier_rejects_mismatched_or_weak_receipts(tmp_path: Path, mutator, match: str) -> None:
-    receipt, dataset_index, original = _fixture(tmp_path)
+    receipt, dataset_index, student_model, original = _fixture(tmp_path)
     report = copy.deepcopy(original)
     mutator(report)
     _write_json(receipt, report)
@@ -129,6 +206,7 @@ def test_verifier_rejects_mismatched_or_weak_receipts(tmp_path: Path, mutator, m
         verifier.verify_receipt(
             receipt_path=receipt,
             dataset_index_path=dataset_index,
+            student_model_path=student_model,
             expected_world_size=8,
             verify_repository=False,
         )

@@ -136,7 +136,11 @@ def test_launcher_uses_preflight_hydra_lists_without_eval(tmp_path: Path) -> Non
     assert "teacher_model.chunk_size=4096" in argv
     assert "data.teacher_topk_validation_tolerance=0.0025" in argv
     assert "data.micro_batch_size_per_gpu=2" in argv
-    assert "+engine.mixed_precision={param_dtype:bf16,reduce_dtype:fp32,buffer_dtype:fp32}" in argv
+    assert "data.max_padded_tokens_per_microbatch=5120" in argv
+    assert (
+        "+engine.mixed_precision={param_dtype:bf16,reduce_dtype:fp32,buffer_dtype:fp32,"
+        "cast_forward_inputs:true}" in argv
+    )
 
 
 def test_launcher_rejects_non_bf16_gemma4_parameter_views_without_explicit_opt_in(tmp_path: Path) -> None:
@@ -158,8 +162,32 @@ def test_launcher_rejects_non_bf16_gemma4_parameter_views_without_explicit_opt_i
 
     assert result.returncode == 0, result.stderr
     assert (
-        "+engine.mixed_precision={param_dtype:fp32,reduce_dtype:fp32,buffer_dtype:fp32}" in result.stdout.splitlines()
+        "+engine.mixed_precision={param_dtype:fp32,reduce_dtype:fp32,buffer_dtype:fp32,"
+        "cast_forward_inputs:true}" in result.stdout.splitlines()
     )
+
+
+def test_launcher_rejects_unverified_gemma4_batching_contract(tmp_path: Path) -> None:
+    environment, fake_bin = _base_environment(tmp_path)
+    environment["SOURCE_DATASET_INDEX"] = str(tmp_path / "source-dataset-index.json")
+    environment["TRAINING_ENGINE_AUDIT_RECEIPT"] = str(tmp_path / "training-engine-audit.json")
+    fake_python = fake_bin / "preflight-python"
+    _write_fake_preflight_python(
+        fake_python,
+        _preflight_output(["/tmp/train.parquet"], ["/tmp/validation.parquet"]),
+        schema_version=OVERLAY_SCHEMA_VERSION,
+    )
+    environment.update({"PYTHON_BIN": str(fake_python), "MAX_PADDED_TOKENS_PER_MICROBATCH": "0"})
+
+    result = _run_launcher(environment)
+
+    assert result.returncode == 2
+    assert "must be a positive integer" in result.stderr
+
+    environment["MAX_PADDED_TOKENS_PER_MICROBATCH"] = "6144"
+    result = _run_launcher(environment)
+    assert result.returncode == 2
+    assert "5120 padded-token microbatch ceiling" in result.stderr
 
 
 def test_launcher_rejects_invalid_gradient_gate(tmp_path: Path) -> None:

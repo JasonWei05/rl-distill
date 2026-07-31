@@ -15,17 +15,17 @@
 
 """Audit an unsharded-HF Gemma 4 target overlay with the real verl FSDP2 train forward.
 
-Run this script with ``torchrun``.  Every rank loads the same immutable Gemma 4
-checkpoint through verl's production ``TrainingWorker``, executes selected
-stored sequences in train mode with activation checkpointing and BF16 autocast,
-and compares the resulting top-128 distribution with the FP16 overlay.  The
-signed partial KL is also backpropagated so the audit exercises checkpoint
-recomputation rather than validating only a no-grad/eval path.
+Run this script with ``torchrun``. Every rank loads the same immutable Gemma 4
+checkpoint through verl's production ``TrainingWorker``. The audit first
+compares selected stored sequences with the FP16 overlay, then reconstructs the
+exact seed-42 first production train batch and backpropagates the real
+distillation objective through the configured fixed-microbatch policy.
 """
 
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import math
 import os
@@ -52,14 +52,17 @@ import audit_gemma4_cross_engine_topk as cross_engine  # noqa: E402
 from gemma4_distill_trace_schema import TOPK_WIDTH, atomic_write_json, hash_json, sha256_file  # noqa: E402
 from gemma4_model_identity import inspect_local_hf_model  # noqa: E402
 
-REPORT_VERSION = 1
+REPORT_VERSION = 2
 EXPECTED_SCHEMA = "gemma4-hf-bf16-sdpa-topk-overlay-v1"
 EXPECTED_TARGET_ENGINE = "hf_bf16_sdpa_full_forward"
 AUDITED_SOURCE_PATHS = (
     "rl-distill-scripts/data/audit_gemma4_fsdp2_training_topk.py",
     "rl-distill-scripts/data/audit_gemma4_cross_engine_topk.py",
+    "rl-distill-scripts/data/gemma4_model_identity.py",
     "rl-distill-scripts/full_vocab_kl_loss.py",
+    "verl/utils/dataset/dataset_utils.py",
     "verl/utils/fsdp_utils.py",
+    "verl/workers/engine/utils.py",
     "verl/workers/engine/fsdp/transformer_impl.py",
     "verl/workers/engine_workers.py",
 )
@@ -147,6 +150,13 @@ def select_global_rows(shards: list[dict[str, Any]], count: int) -> list[tuple[P
     indices = np.linspace(0, total_rows - 1, num=count, dtype=np.int64).tolist()
     if len(set(indices)) != count:
         raise FSDP2TopKAuditError("could not select distinct audit rows")
+    return locate_global_rows(shards, indices)
+
+
+def locate_global_rows(shards: list[dict[str, Any]], indices: list[int]) -> list[tuple[Path, int, str]]:
+    total_rows = sum(int(shard["rows"]) for shard in shards)
+    if any(index < 0 or index >= total_rows for index in indices):
+        raise FSDP2TopKAuditError(f"row index outside [0, {total_rows}): {indices}")
     stops = np.cumsum([int(shard["rows"]) for shard in shards]).tolist()
     selected: list[tuple[Path, int, str]] = []
     for global_index in indices:
@@ -178,6 +188,34 @@ def load_rows(selected: list[tuple[Path, int, str]], expected_identity: str) -> 
         row["registered_shard_sha256"] = shard_sha256
         rows.append(row)
     return rows
+
+
+def first_distributed_train_batch_indices(
+    *,
+    dataset_size: int,
+    world_size: int,
+    rank: int,
+    global_batch_size: int,
+    seed: int,
+) -> list[int]:
+    from torch.utils.data import DistributedSampler
+
+    if global_batch_size % world_size != 0:
+        raise FSDP2TopKAuditError("production train batch size must be divisible by world size")
+    local_batch_size = global_batch_size // world_size
+    sampler = DistributedSampler(
+        range(dataset_size),
+        num_replicas=world_size,
+        rank=rank,
+        shuffle=True,
+        seed=seed,
+        drop_last=True,
+    )
+    sampler.set_epoch(0)
+    indices = list(sampler)
+    if len(indices) < local_batch_size:
+        raise FSDP2TopKAuditError("production dataset is smaller than one distributed train batch")
+    return indices[:local_batch_size]
 
 
 def validate_row(row: dict[str, Any]) -> None:
@@ -219,7 +257,13 @@ def repository_provenance() -> dict[str, Any]:
     }
 
 
-def evaluate_gate(aggregate: dict[str, Any], exact: dict[str, Any], grad_norm: float | None, args) -> dict[str, Any]:
+def evaluate_gate(
+    aggregate: dict[str, Any],
+    exact: dict[str, Any],
+    grad_norm: float | None,
+    production_batches: list[dict[str, Any] | None],
+    args,
+) -> dict[str, Any]:
     observations = {
         "top1_tie_safe_mean": float(aggregate["top1_tie_safe"]["mean"]),
         "top10_overlap_fraction_mean": float(aggregate["top10_overlap_fraction"]["mean"]),
@@ -244,13 +288,53 @@ def evaluate_gate(aggregate: dict[str, Any], exact: dict[str, Any], grad_norm: f
         "reference_only_topk_mass_p99": ("<=", args.max_membership_delta_mass_p99),
     }
     if grad_norm is not None:
+        complete_batches = [batch for batch in production_batches if batch is not None]
+        microbatch_counts = [int(batch["microbatch_count"]) for batch in complete_batches]
+        all_global_indices = [index for batch in complete_batches for index in batch["global_indices"]]
+        all_microbatches = [microbatch for batch in complete_batches for microbatch in batch["microbatches"]]
+        multi_sequence_padded_tokens = [
+            int(microbatch["padded_tokens"]) for microbatch in all_microbatches if len(microbatch["indices"]) > 1
+        ]
+        observations.update(
+            {
+                "production_rank_count": float(len(complete_batches)),
+                "production_row_count": float(len(all_global_indices)),
+                "production_unique_row_count": float(len(set(all_global_indices))),
+                "production_microbatch_count_min": float(min(microbatch_counts, default=-1)),
+                "production_microbatch_count_max": float(max(microbatch_counts, default=-1)),
+                "production_max_microbatch_size": float(
+                    max((len(microbatch["indices"]) for microbatch in all_microbatches), default=-1)
+                ),
+                "production_max_multi_sequence_padded_tokens": float(max(multi_sequence_padded_tokens, default=0)),
+            }
+        )
+        requirements.update(
+            {
+                "production_rank_count": ("==", len(production_batches)),
+                "production_row_count": ("==", args.train_batch_size),
+                "production_unique_row_count": ("==", args.train_batch_size),
+                "production_microbatch_count_min": ("==", observations["production_microbatch_count_max"]),
+                "production_max_microbatch_size": ("<=", args.micro_batch_size_per_gpu),
+                "production_max_multi_sequence_padded_tokens": (
+                    "<=",
+                    args.max_padded_tokens_per_microbatch,
+                ),
+            }
+        )
+    if grad_norm is not None:
         observations["backward_grad_norm"] = float(grad_norm)
         requirements["backward_grad_norm"] = ("<=", args.max_grad_norm)
     checks: dict[str, Any] = {}
     failures: list[str] = []
     for name, (operator, threshold) in requirements.items():
         observed = observations[name]
-        passed = math.isfinite(observed) and (observed >= threshold if operator == ">=" else observed <= threshold)
+        passed = math.isfinite(observed) and (
+            observed >= threshold
+            if operator == ">="
+            else observed <= threshold
+            if operator == "<="
+            else observed == threshold
+        )
         checks[name] = {
             "observed": observed,
             "operator": operator,
@@ -267,9 +351,12 @@ def run_distributed_audit(args) -> int:
     import torch.distributed as dist
     from full_vocab_kl_loss import FullVocabKLLoss
 
+    from verl.utils import tensordict_utils as tu
+    from verl.utils.dataset.dataset_utils import DatasetPadMode, SFTTensorCollator
     from verl.utils.distributed import destroy_global_process_group, initialize_global_process_group
     from verl.utils.fsdp_utils import fsdp2_grad_norm_diagnostics
     from verl.workers.config import FSDPEngineConfig, FSDPOptimizerConfig, HFModelConfig
+    from verl.workers.engine.utils import prepare_micro_batches
     from verl.workers.engine_workers import TrainingWorker, TrainingWorkerConfig
 
     initialize_global_process_group()
@@ -277,20 +364,43 @@ def run_distributed_audit(args) -> int:
     world_size = dist.get_world_size()
     try:
         model_path = args.model.resolve(strict=True)
+        student_model_path = args.student_model.resolve(strict=True)
+        student_identity = inspect_local_hf_model(student_model_path)
         index_path = args.dataset_index.resolve(strict=True)
         output_path = args.output.resolve()
         if output_path.exists() and not args.overwrite:
             raise FSDP2TopKAuditError(f"output already exists: {output_path}; pass --overwrite to replace it")
-        if output_path.is_relative_to(model_path) or output_path.is_relative_to(index_path.parent):
+        if (
+            output_path.is_relative_to(model_path)
+            or output_path.is_relative_to(student_model_path)
+            or output_path.is_relative_to(index_path.parent)
+        ):
             raise FSDP2TopKAuditError("audit output must be outside the immutable model and dataset trees")
 
         index, shards = verify_index(index_path, model_path, args.split)
+        train_index, train_shards = verify_index(index_path, model_path, "train")
+        if train_index["dataset_index_sha256"] != index["dataset_index_sha256"]:
+            raise FSDP2TopKAuditError("train and parity selections resolved different overlay identities")
         expected_identity = index["target_model_identity"]["model_identity_sha256"]
         selected = select_global_rows(shards, world_size * args.traces_per_rank)
         local_selection = selected[rank * args.traces_per_rank : (rank + 1) * args.traces_per_rank]
         rows = load_rows(local_selection, expected_identity)
         for row in rows:
             validate_row(row)
+
+        train_total_rows = sum(int(shard["rows"]) for shard in train_shards)
+        local_train_indices = first_distributed_train_batch_indices(
+            dataset_size=train_total_rows,
+            world_size=world_size,
+            rank=rank,
+            global_batch_size=args.train_batch_size,
+            seed=args.train_seed,
+        )
+        local_train_selection = locate_global_rows(train_shards, local_train_indices)
+        train_rows = load_rows(local_train_selection, expected_identity)
+        for global_index, row in zip(local_train_indices, train_rows, strict=True):
+            validate_row(row)
+            row["global_index"] = global_index
 
         os.environ.setdefault("VERL_FSDP2_LOCAL_LOAD", "1")
         if not args.fsdp_wrap:
@@ -301,59 +411,68 @@ def run_distributed_audit(args) -> int:
             fsdp_impl.apply_fsdp2 = lambda _module, _fsdp_kwargs, _engine_config: None
             fsdp_impl.fsdp2_load_full_state_dict = lambda _module, _full_state, _fsdp_mesh, _offload_policy: None
         backward_exercised = args.execution_mode == "train"
-        model_config = HFModelConfig(
-            path=str(model_path),
-            use_remove_padding=False,
-            override_config={"attn_implementation": "sdpa"},
-            enable_gradient_checkpointing=args.gradient_checkpointing,
-        )
-        engine_config = FSDPEngineConfig(
-            forward_only=False,
-            strategy="fsdp2",
-            fsdp_size=-1,
-            model_dtype=args.model_dtype,
-            use_remove_padding=False,
-            use_dynamic_bsz=False,
-            use_torch_compile=False,
-            mixed_precision={
-                "param_dtype": args.fsdp_param_dtype,
-                "reduce_dtype": args.fsdp_reduce_dtype,
-                "buffer_dtype": args.fsdp_buffer_dtype,
-            },
-            wrap_policy={"transformer_layer_cls_to_wrap": ["Gemma4TextDecoderLayer"]},
-        )
-        optimizer_config = FSDPOptimizerConfig(
-            lr=0.0,
-            total_training_steps=1,
-            lr_warmup_steps=0,
-            lr_scheduler_type="constant",
-            clip_grad=1.0,
-        )
-        worker = TrainingWorker(
-            TrainingWorkerConfig(
-                model_type="language_model",
-                model_config=model_config,
-                engine_config=engine_config,
-                optimizer_config=optimizer_config,
-                checkpoint_config=None,
-                profiler_config=None,
+
+        def build_worker(checkpoint_path: Path):
+            model_config = HFModelConfig(
+                path=str(checkpoint_path),
+                use_remove_padding=False,
+                override_config={"attn_implementation": "sdpa"},
+                enable_gradient_checkpointing=args.gradient_checkpointing,
             )
-        )
-        worker.reset()
+            engine_config = FSDPEngineConfig(
+                forward_only=False,
+                strategy="fsdp2",
+                fsdp_size=-1,
+                model_dtype=args.model_dtype,
+                use_remove_padding=False,
+                use_dynamic_bsz=False,
+                use_torch_compile=False,
+                mixed_precision={
+                    "param_dtype": args.fsdp_param_dtype,
+                    "reduce_dtype": args.fsdp_reduce_dtype,
+                    "buffer_dtype": args.fsdp_buffer_dtype,
+                    "cast_forward_inputs": True,
+                },
+                wrap_policy={"transformer_layer_cls_to_wrap": ["Gemma4TextDecoderLayer"]},
+            )
+            optimizer_config = FSDPOptimizerConfig(
+                lr=0.0,
+                total_training_steps=1,
+                lr_warmup_steps=0,
+                lr_scheduler_type="constant",
+                clip_grad=1.0,
+            )
+            built_worker = TrainingWorker(
+                TrainingWorkerConfig(
+                    model_type="language_model",
+                    model_config=model_config,
+                    engine_config=engine_config,
+                    optimizer_config=optimizer_config,
+                    checkpoint_config=None,
+                    profiler_config=None,
+                )
+            )
+            built_worker.reset()
+            return built_worker
+
+        worker = build_worker(model_path)
         engine = worker.engine
         if not args.fsdp_wrap:
             engine.module.to("cuda")
         module = getattr(engine.module, "module", engine.module)
-        helper = FullVocabKLLoss(precomputed_topk=True, top_k=TOPK_WIDTH, chunk_size=4096)
-        if backward_exercised:
-            engine.optimizer_zero_grad()
+        helper = FullVocabKLLoss(
+            precomputed_topk=True,
+            top_k=TOPK_WIDTH,
+            chunk_size=args.kl_chunk_size,
+            checkpoint_student_chunks=True,
+        )
         local_records: list[dict[str, Any]] = []
         local_trace_records: list[dict[str, Any]] = []
+        local_production_batch: dict[str, Any] | None = None
 
         grad_diagnostics = None
         mode_context = engine.train_mode() if backward_exercised else engine.eval_mode()
-        grad_context = torch.enable_grad() if backward_exercised else torch.no_grad()
-        with mode_context, grad_context:
+        with mode_context:
             for row in rows:
                 prompt_length = int(row["prompt_length"])
                 response_length = int(row["response_length"])
@@ -365,7 +484,7 @@ def run_distributed_audit(args) -> int:
                 prediction_indices = torch.tensor(prediction_positions, dtype=torch.long, device="cuda")
                 batch_indices = torch.zeros_like(prediction_indices)
 
-                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                     common_forward_kwargs = {
                         "input_ids": input_ids,
                         "attention_mask": attention_mask,
@@ -427,11 +546,6 @@ def run_distributed_audit(args) -> int:
                     reference_sampled = logits_fp32.gather(-1, sampled_ids.unsqueeze(-1)).squeeze(-1)
                     reference_sampled = reference_sampled - log_denominator.squeeze(-1)
 
-                    if backward_exercised:
-                        teacher_probs = stored_logprobs.exp()
-                        partial_kl = (teacher_probs * (stored_logprobs - reference_on_stored)).sum(dim=-1)
-                        (partial_kl.mean() / len(rows)).backward()
-
                 stored_ids_cpu = stored_ids.detach().cpu().numpy()
                 stored_logprobs_cpu = stored_logprobs.detach().cpu().numpy()
                 reference_top_ids_cpu = reference_top_ids.detach().cpu().numpy()
@@ -489,23 +603,110 @@ def run_distributed_audit(args) -> int:
                 )
                 del raw_output, logits, logits_fp32, log_denominator
 
-            if backward_exercised:
-                # EngineTrainModeCtx clears gradients on exit, so measure the real
-                # post-backward state while the production train context is active.
+        del module, engine, worker
+        gc.collect()
+        torch.cuda.empty_cache()
+        dist.barrier()
+
+        if backward_exercised:
+            student_worker = build_worker(student_model_path)
+            student_engine = student_worker.engine
+            if not args.fsdp_wrap:
+                student_engine.module.to("cuda")
+            student_helper = FullVocabKLLoss(
+                precomputed_topk=True,
+                top_k=TOPK_WIDTH,
+                chunk_size=args.kl_chunk_size,
+                checkpoint_student_chunks=True,
+            )
+            samples = []
+            for row in train_rows:
+                input_ids_cpu = torch.tensor(row["input_ids"], dtype=torch.long)
+                loss_mask_cpu = torch.tensor(row["response_mask"], dtype=torch.long)
+                teacher_ids_cpu = torch.from_numpy(np.asarray(row["teacher_topk_token_ids"], dtype=np.int32)).flatten()
+                teacher_logprobs_cpu = torch.from_numpy(
+                    np.asarray(row["teacher_topk_logprobs"], dtype=np.float16)
+                ).flatten()
+                samples.append(
+                    {
+                        "input_ids": input_ids_cpu,
+                        "position_ids": torch.arange(input_ids_cpu.numel(), dtype=torch.long),
+                        "loss_mask": loss_mask_cpu,
+                        "teacher_topk_token_ids": teacher_ids_cpu,
+                        "teacher_topk_logprobs": teacher_logprobs_cpu,
+                    }
+                )
+
+            collated = SFTTensorCollator(DatasetPadMode.NO_PADDING)(samples)
+            production_data = tu.get_tensordict(
+                tensor_dict=collated,
+                non_tensor_dict={
+                    "use_remove_padding": False,
+                    "use_dynamic_bsz": False,
+                    "max_token_len_per_gpu": args.max_length,
+                    "micro_batch_size_per_gpu": args.micro_batch_size_per_gpu,
+                    "max_padded_tokens_per_microbatch": args.max_padded_tokens_per_microbatch,
+                    "temperature": 1.0,
+                    "global_batch_size": args.train_batch_size,
+                    "pad_mode": DatasetPadMode.NO_PADDING,
+                    "pad_token_id": 0,
+                    "use_logits_processor": True,
+                    "skip_lm_log_probs": True,
+                    "use_hidden_logits_processor": True,
+                },
+            )
+            tu.assign_non_tensor(production_data, sp_size=1)
+            audit_micro_batches, audit_indices = prepare_micro_batches(
+                data=production_data,
+                dp_group=student_engine.get_data_parallel_group(),
+                same_micro_num_in_dp=True,
+            )
+            sequence_lengths = production_data["input_ids"].offsets().diff().tolist()
+            microbatch_layout = []
+            for partition in audit_indices:
+                lengths = [int(sequence_lengths[index]) for index in partition]
+                microbatch_layout.append(
+                    {
+                        "indices": partition,
+                        "sequence_lengths": lengths,
+                        "padded_tokens": max(lengths) * len(lengths),
+                    }
+                )
+            local_production_batch = {
+                "rank": rank,
+                "global_indices": local_train_indices,
+                "trace_ids": [row["trace_id"] for row in train_rows],
+                "sequence_lengths": sequence_lengths,
+                "microbatch_count": len(audit_micro_batches),
+                "microbatches": microbatch_layout,
+            }
+
+            with student_engine.train_mode():
+                student_engine.optimizer_zero_grad()
+                student_engine.forward_backward_batch(
+                    data=production_data,
+                    loss_function=student_helper,
+                    forward_only=False,
+                )
+                # The train-mode context clears gradients on exit, so measure
+                # the exact production batch while it remains active.
                 grad_diagnostics = fsdp2_grad_norm_diagnostics(
-                    engine.module.named_parameters(),
-                    group=engine.get_data_parallel_group(),
+                    student_engine.module.named_parameters(),
+                    group=student_engine.get_data_parallel_group(),
                     top_k=20,
                 )
         gathered_records: list[Any] | None = [None] * world_size if rank == 0 else None
         gathered_traces: list[Any] | None = [None] * world_size if rank == 0 else None
+        gathered_production_batches: list[Any] | None = [None] * world_size if rank == 0 else None
         dist.gather_object(local_records, gathered_records, dst=0)
         dist.gather_object(local_trace_records, gathered_traces, dst=0)
+        dist.gather_object(local_production_batch, gathered_production_batches, dst=0)
 
         exit_code = 0
         if rank == 0:
             records = [record for rank_records in gathered_records for record in rank_records]
             traces = [record for rank_records in gathered_traces for record in rank_records]
+            production_batches = list(gathered_production_batches)
             aggregate = cross_engine.aggregate(records)
             exact = {
                 name: cross_engine.summary([float(record[name]) for record in records])
@@ -516,7 +717,7 @@ def run_distributed_audit(args) -> int:
                 )
             }
             grad_norm = float(grad_diagnostics["total_norm"]) if grad_diagnostics is not None else None
-            gate = evaluate_gate(aggregate, exact, grad_norm, args)
+            gate = evaluate_gate(aggregate, exact, grad_norm, production_batches, args)
             checkpointing_label = "enabled" if args.gradient_checkpointing else "disabled"
             report = {
                 "report_version": REPORT_VERSION,
@@ -525,6 +726,7 @@ def run_distributed_audit(args) -> int:
                 "gate": gate,
                 "contract": {
                     "reference": (
+                        "E2B target parity plus E4B student exact first-batch backward through "
                         f"verl TrainingWorker FSDP2 {args.execution_mode} mode, activation checkpointing "
                         f"{checkpointing_label}, {args.fsdp_param_dtype} FSDP parameters, "
                         f"{args.fsdp_reduce_dtype} reductions, {args.fsdp_buffer_dtype} buffers, "
@@ -542,6 +744,13 @@ def run_distributed_audit(args) -> int:
                     "fsdp_param_dtype": args.fsdp_param_dtype,
                     "fsdp_reduce_dtype": args.fsdp_reduce_dtype,
                     "fsdp_buffer_dtype": args.fsdp_buffer_dtype,
+                    "fsdp_cast_forward_inputs": True,
+                    "train_seed": args.train_seed,
+                    "train_batch_size": args.train_batch_size,
+                    "micro_batch_size_per_gpu": args.micro_batch_size_per_gpu,
+                    "max_padded_tokens_per_microbatch": args.max_padded_tokens_per_microbatch,
+                    "kl_chunk_size": args.kl_chunk_size,
+                    "max_length": args.max_length,
                 },
                 "dataset": {
                     "index_path": str(index_path),
@@ -557,10 +766,18 @@ def run_distributed_audit(args) -> int:
                     "trace_count": len(traces),
                     "position_count": len(records),
                     "traces": traces,
+                    "production_first_train_batch": production_batches,
                 },
                 "model": {
                     "path": str(model_path),
                     "model_identity_sha256": expected_identity,
+                    "dtype_load": args.model_dtype,
+                    "autocast": "bfloat16",
+                    "attention_implementation": "sdpa",
+                },
+                "student_model": {
+                    "path": str(student_model_path),
+                    "model_identity_sha256": student_identity.model_identity_sha256,
                     "dtype_load": args.model_dtype,
                     "autocast": "bfloat16",
                     "attention_implementation": "sdpa",
@@ -603,6 +820,7 @@ def run_distributed_audit(args) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument("--student-model", type=Path, required=True)
     parser.add_argument("--dataset-index", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--split", choices=("train", "validation"), default="validation")
@@ -625,6 +843,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fsdp-param-dtype", choices=("fp32", "bf16"), default="fp32")
     parser.add_argument("--fsdp-reduce-dtype", choices=("fp32", "bf16"), default="fp32")
     parser.add_argument("--fsdp-buffer-dtype", choices=("fp32", "bf16"), default="fp32")
+    parser.add_argument("--train-seed", type=int, default=42)
+    parser.add_argument("--train-batch-size", type=int, default=128)
+    parser.add_argument("--micro-batch-size-per-gpu", type=int, default=2)
+    parser.add_argument("--max-padded-tokens-per-microbatch", type=int, default=5120)
+    parser.add_argument("--kl-chunk-size", type=int, default=4096)
+    parser.add_argument("--max-length", type=int, default=12288)
     parser.add_argument("--min-top1-tie-safe", type=float, default=0.999)
     parser.add_argument("--min-top10-overlap", type=float, default=0.995)
     parser.add_argument("--min-topk-overlap", type=float, default=0.995)
@@ -632,10 +856,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-support-probability-l1", type=float, default=0.003)
     parser.add_argument("--max-sampled-token-abs-delta-p95", type=float, default=0.01)
     parser.add_argument("--max-membership-delta-mass-p99", type=float, default=0.001)
-    parser.add_argument("--max-grad-norm", type=float, default=10.0)
+    parser.add_argument("--max-grad-norm", type=float, default=50.0)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
-    for name in ("traces_per_rank", "positions_per_trace"):
+    for name in (
+        "traces_per_rank",
+        "positions_per_trace",
+        "train_batch_size",
+        "micro_batch_size_per_gpu",
+        "max_padded_tokens_per_microbatch",
+        "kl_chunk_size",
+        "max_length",
+    ):
         if getattr(args, name) <= 0:
             parser.error(f"--{name.replace('_', '-')} must be positive")
     return args

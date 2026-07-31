@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -96,3 +97,34 @@ def test_completion_receipt_fails_closed_when_missing(tmp_path: Path):
         hf_push=False,
         hf_repo="unused",
     )
+
+
+def test_child_environment_pins_verified_gemma4_batching_contract(tmp_path: Path):
+    args = Namespace(
+        model_path=tmp_path / "model",
+        dataset_index=tmp_path / "overlay.json",
+        source_dataset_index=tmp_path / "source.json",
+        training_engine_audit_receipt=tmp_path / "audit.json",
+        max_steps=3,
+        save_freq=3,
+        test_freq=3,
+        project="test-project",
+        experiment_name="test-experiment",
+        checkpoint_dir=tmp_path / "checkpoints",
+        max_checkpoints_to_keep=4,
+        hf_push=False,
+        hf_repo="unused",
+        max_grad_norm=50.0,
+        grad_diagnostics=True,
+        supervisor_dir=tmp_path / "supervisor",
+        gpus=8,
+        entity="test-entity",
+    )
+
+    environment = supervisor.build_child_environment(args, "run123")
+
+    assert environment["MICRO_BATCH_SIZE_PER_GPU"] == "2"
+    assert environment["MAX_PADDED_TOKENS_PER_MICROBATCH"] == "5120"
+    assert environment["VERL_GEMMA4_CUDNN_SDPA"] == "1"
+    assert environment["FSDP_CAST_FORWARD_INPUTS"] == "true"
+    assert environment["VERL_MAX_PRECLIP_GRAD_NORM"] == "50.0"

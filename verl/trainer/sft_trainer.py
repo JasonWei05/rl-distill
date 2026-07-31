@@ -434,6 +434,7 @@ class SFTTrainer:
             "skip_lm_log_probs",
             "distillation_use_topk",
             "use_hidden_logits_processor",
+            "max_padded_tokens_per_microbatch",
         ):
             if key in self.config.data:
                 meta_info[key] = self.config.data[key]

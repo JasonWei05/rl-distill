@@ -204,6 +204,13 @@ histories.
 - A separate engine bug was found while isolating precision: a bare `module.to(bfloat16)` downcasts
   Gemma 4's model-created FP32 rotary-frequency buffers. The FSDP loader now casts parameters while
   preserving those buffers exactly, with a focused regression test.
+- The exact seed-42 first E2B-to-E4B production batch exposed a separate cuDNN SDPA BF16 backward
+  pathology when two longer padded sequences share one microbatch. The unconstrained microbatch-2
+  layout produced gradient norm `387.89`; microbatch 1 produced `14.84`, disabling cuDNN produced
+  `16.29`, and disabling activation or vocabulary-chunk checkpointing did not fix it. Production
+  retains cuDNN for target parity and length-sorts each local batch while enforcing
+  `max_sequence_length * microbatch_size <= 5,120` for multi-sequence microbatches. The exact batch
+  then completed nine synchronized microbatches per rank with gradient norm `13.66`.
 - Deterministic trace-contract failures now return a distinct generator status, and the supervisor
   refuses identical-seed retries for that status instead of looping on an unrecoverable row.
 - The validation loader retains a final partial batch only when exact distillation coverage is
@@ -621,6 +628,10 @@ to `2e-7` at step 750.
   positions back to per-sample padded coordinates. Training batches remain strictly divisible by
   the configured microbatch size; forward-only validation permits a smaller final microbatch while
   preserving any configured force-group boundary. The verified eight-H100 default is microbatch 2.
+- Fixed microbatch-2 training must enforce a 5,120 padded-token ceiling. Rows longer than the ceiling
+  remain valid singletons; multi-sequence microbatches may not exceed it, and all data-parallel ranks
+  must synchronize to the same microbatch count. The signed audit reconstructs the exact seed-42
+  first 128-row train batch and verifies this layout before authorizing production.
 - Vocabulary projection chunks must use activation checkpointing during training; otherwise each
   chunk's full-vocabulary autograd intermediates remain live until backward and defeat the memory
   bound at 8,192 response tokens.
@@ -1034,7 +1045,8 @@ test "${GEMMA4_E2B_TO_E4B_PRODUCTION_AUTHORIZED}" = YES && \
   EXPECTED_STUDENT_IDENTITY_SHA256=acdc0d2bcb8f676593b5387807da1cd1b84a9e26fa279db4a86f54a211055b2d \
   EXPECTED_TRAIN_QUESTIONS=9723 EXPECTED_VALIDATION_QUESTIONS=128 \
   EXPECTED_TRAIN_SAMPLES_PER_QUESTION=5 EXPECTED_VALIDATION_SAMPLES_PER_QUESTION=1 \
-  MICRO_BATCH_SIZE_PER_GPU=2 FULL_VOCAB_KL_CHUNK_SIZE=4096 TRAIN_BATCH_SIZE=128 \
+  MICRO_BATCH_SIZE_PER_GPU=2 MAX_PADDED_TOKENS_PER_MICROBATCH=5120 \
+  FULL_VOCAB_KL_CHUNK_SIZE=4096 TRAIN_BATCH_SIZE=128 \
   LR=2e-6 LR_WARMUP_STEPS=100 LR_SCHEDULER_TYPE=linear MIN_LR_RATIO=0.1 \
   TOTAL_EPOCHS=2 TOTAL_TRAINING_STEPS=750 SAVE_FREQ=250 TEST_FREQ=10 \
   PROJECT_NAME=gemma4-distill-vs-rl EXP_NAME=e2b-base-to-e4b-topk128-lr2e6-linear-b128-2ep-750-v128-seed42 \
