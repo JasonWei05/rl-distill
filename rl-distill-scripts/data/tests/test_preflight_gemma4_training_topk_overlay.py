@@ -123,8 +123,11 @@ def _source_record(
 def _build_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     source_root = tmp_path / "source"
     overlay_root = tmp_path / "overlay"
+    student_root = tmp_path / "student"
     source_root.mkdir()
     overlay_root.mkdir()
+    student_root.mkdir()
+    (student_root / "config.json").write_text("{}\n", encoding="utf-8")
     teacher = {
         "model": "teacher",
         "revision": None,
@@ -370,6 +373,7 @@ def _build_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "overlay_records": overlay_records,
         "run_config": run_config,
         "source_result": source_result,
+        "student_root": student_root,
         "teacher_identity_sha256": schema.hash_json(teacher),
     }
 
@@ -378,7 +382,7 @@ def _kwargs(fixture):
     return {
         "dataset_index": fixture["overlay_index_path"],
         "source_dataset_index": fixture["source_index_path"],
-        "student_model": "/models/student",
+        "student_model": str(fixture["student_root"]),
         "student_revision": None,
         "expected_direction": DIRECTION,
         "expected_teacher_identity_sha256": fixture["teacher_identity_sha256"],
@@ -434,6 +438,79 @@ def test_overlay_preflight_emits_only_verified_overlay_files(tmp_path, monkeypat
     assert values["DATASET_INDEX_SHA256"] == fixture["overlay_index"]["dataset_index_sha256"]
     assert values["TEACHER_IDENTITY_SHA256"] == fixture["teacher_identity_sha256"]
     assert values["STUDENT_IDENTITY_SHA256"] == STUDENT_IDENTITY
+
+
+def test_overlay_preflight_receipt_round_trip_and_artifact_change_rejection(tmp_path, monkeypatch):
+    fixture = _build_fixture(tmp_path, monkeypatch)
+    kwargs = _kwargs(fixture)
+    result = preflight.run_preflight(**kwargs)
+    receipt_path = tmp_path / "training-preflight-receipt.json"
+
+    preflight.write_preflight_receipt(receipt_path, result=result, **kwargs)
+    cached = preflight.load_preflight_receipt(receipt_path, **kwargs)
+
+    assert cached.lines() == result.lines()
+
+    overlay_path = fixture["overlay_root"] / fixture["overlay_index"]["splits"]["train"]["shards"][0]["path"]
+    with overlay_path.open("ab") as output:
+        output.write(b"changed")
+
+    with pytest.raises(preflight.OverlayPreflightError, match="artifact changed"):
+        preflight.load_preflight_receipt(receipt_path, **kwargs)
+
+
+def test_overlay_preflight_receipt_rejects_launch_contract_change(tmp_path, monkeypatch):
+    fixture = _build_fixture(tmp_path, monkeypatch)
+    kwargs = _kwargs(fixture)
+    result = preflight.run_preflight(**kwargs)
+    receipt_path = tmp_path / "training-preflight-receipt.json"
+    preflight.write_preflight_receipt(receipt_path, result=result, **kwargs)
+
+    with pytest.raises(preflight.OverlayPreflightError, match="does not match the requested launch contract"):
+        preflight.load_preflight_receipt(
+            receipt_path,
+            **{**kwargs, "expected_questions": {"train": 2, "validation": 1}},
+        )
+
+
+def test_overlay_preflight_cli_reuses_receipt_without_full_scan(tmp_path, monkeypatch, capsys):
+    fixture = _build_fixture(tmp_path, monkeypatch)
+    receipt_path = tmp_path / "training-preflight-receipt.json"
+    argv = [
+        "--dataset-index",
+        str(fixture["overlay_index_path"]),
+        "--source-dataset-index",
+        str(fixture["source_index_path"]),
+        "--student-model",
+        str(fixture["student_root"]),
+        "--expected-direction",
+        DIRECTION,
+        "--expected-teacher-identity-sha256",
+        fixture["teacher_identity_sha256"],
+        "--expected-student-identity-sha256",
+        STUDENT_IDENTITY,
+        "--expected-train-questions",
+        "1",
+        "--expected-validation-questions",
+        "1",
+        "--expected-train-samples-per-question",
+        "1",
+        "--expected-validation-samples-per-question",
+        "1",
+        "--receipt-cache",
+        str(receipt_path),
+    ]
+
+    assert preflight.main(argv) == 0
+    capsys.readouterr()
+    assert receipt_path.is_file()
+
+    def fail_full_scan(**_kwargs):
+        raise AssertionError("cached launch unexpectedly ran the full preflight")
+
+    monkeypatch.setattr(preflight, "run_preflight", fail_full_scan)
+    assert preflight.main(argv) == 0
+    assert "TRAIN_FILES_HYDRA=" in capsys.readouterr().out
 
 
 def test_overlay_preflight_forwards_split_specific_source_contract(tmp_path, monkeypatch):

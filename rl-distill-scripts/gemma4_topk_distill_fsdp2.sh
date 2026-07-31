@@ -24,6 +24,7 @@ set -euo pipefail
 #   DISTILL_DIRECTION                  - e4b_rl100_to_e2b or e2b_base_to_e4b
 #   EXPECTED_TEACHER_IDENTITY_SHA256   - hash_json() of the pinned teacher identity
 #   EXPECTED_STUDENT_IDENTITY_SHA256   - content-bound student identity from preflight
+#   PREFLIGHT_RECEIPT_CACHE             - optional overlay receipt path; defaults beside its index
 #   HF_PUSH_REPO                       - required only when HF_PUSH_ENABLE=true
 #
 # Direct TRAIN_FILE/VAL_FILE inputs bypass the dataset-wide provenance checks
@@ -52,6 +53,8 @@ PYTHON_BIN=${PYTHON_BIN:-python}
 SMOKE_ONLY_ALLOW_DIRECT_FILES=${SMOKE_ONLY_ALLOW_DIRECT_FILES:-false}
 ALLOW_QUESTION_OVERLAP=${ALLOW_QUESTION_OVERLAP:-false}
 PREFLIGHT_LOCAL_FILES_ONLY=${PREFLIGHT_LOCAL_FILES_ONLY:-true}
+PREFLIGHT_RECEIPT_CACHE=${PREFLIGHT_RECEIPT_CACHE:-}
+REFRESH_PREFLIGHT_RECEIPT=${REFRESH_PREFLIGHT_RECEIPT:-false}
 TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS:-750}
 EXPECTED_TRAIN_QUESTIONS=${EXPECTED_TRAIN_QUESTIONS:-9723}
 EXPECTED_VALIDATION_QUESTIONS=${EXPECTED_VALIDATION_QUESTIONS:-200}
@@ -74,6 +77,10 @@ esac
 case "${PREFLIGHT_LOCAL_FILES_ONLY,,}" in
     true|false) ;;
     *) echo "PREFLIGHT_LOCAL_FILES_ONLY must be true or false" >&2; exit 2 ;;
+esac
+case "${REFRESH_PREFLIGHT_RECEIPT,,}" in
+    true|false) ;;
+    *) echo "REFRESH_PREFLIGHT_RECEIPT must be true or false" >&2; exit 2 ;;
 esac
 for count_name in EXPECTED_TRAIN_QUESTIONS EXPECTED_VALIDATION_QUESTIONS \
     EXPECTED_TRAIN_SAMPLES_PER_QUESTION EXPECTED_VALIDATION_SAMPLES_PER_QUESTION; do
@@ -125,6 +132,10 @@ print(schema)
                 echo "SOURCE_DATASET_INDEX is valid only for an unsharded-HF overlay" >&2
                 exit 2
             fi
+            if [ -n "${PREFLIGHT_RECEIPT_CACHE}" ]; then
+                echo "PREFLIGHT_RECEIPT_CACHE is currently supported only for an unsharded-HF overlay" >&2
+                exit 2
+            fi
             PREFLIGHT_SCRIPT="${PROJECT_ROOT}/rl-distill-scripts/data/preflight_gemma4_topk_distill.py"
             ;;
         gemma4-hf-bf16-sdpa-topk-overlay-v1)
@@ -133,6 +144,9 @@ print(schema)
                 exit 2
             fi
             PREFLIGHT_SCRIPT="${PROJECT_ROOT}/rl-distill-scripts/data/preflight_gemma4_training_topk_overlay.py"
+            if [ -z "${PREFLIGHT_RECEIPT_CACHE}" ]; then
+                PREFLIGHT_RECEIPT_CACHE="$(dirname -- "${DATASET_INDEX}")/training_preflight_receipt.json"
+            fi
             ;;
         *)
             echo "Unsupported DATASET_INDEX schema_version: ${DATASET_SCHEMA_VERSION}" >&2
@@ -153,7 +167,13 @@ print(schema)
         --expected-validation-samples-per-question "${EXPECTED_VALIDATION_SAMPLES_PER_QUESTION}"
     )
     if [ "${DATASET_SCHEMA_VERSION}" = "gemma4-hf-bf16-sdpa-topk-overlay-v1" ]; then
-        PREFLIGHT_ARGS+=(--source-dataset-index "${SOURCE_DATASET_INDEX}")
+        PREFLIGHT_ARGS+=(
+            --source-dataset-index "${SOURCE_DATASET_INDEX}"
+            --receipt-cache "${PREFLIGHT_RECEIPT_CACHE}"
+        )
+        if [ "${REFRESH_PREFLIGHT_RECEIPT,,}" = "true" ]; then
+            PREFLIGHT_ARGS+=(--refresh-receipt)
+        fi
     fi
     if [ "${PREFLIGHT_LOCAL_FILES_ONLY,,}" = "true" ]; then
         PREFLIGHT_ARGS+=(--local-files-only)

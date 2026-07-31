@@ -1000,6 +1000,13 @@ optimizer steps, then decay linearly to `2e-7` at step 750. Validation runs over
 rows with no distributed padding. Save and upload directly loadable HF checkpoints at steps 250,
 500, and 750.
 
+The first overlay launch performs the complete source/overlay content preflight and writes
+`training_preflight_receipt.json` beside the overlay index. Later launches reuse that receipt after
+checking both index identities, the exact student snapshot, validator source hashes, the requested
+roster/identity contract, and filesystem metadata for every registered artifact. Set
+`REFRESH_PREFLIGHT_RECEIPT=true` to force a new full scan after any intentional artifact or validator
+change; receipt mismatches fail closed instead of silently rescanning.
+
 ```bash
 GEMMA4_E2B_TO_E4B_PRODUCTION_AUTHORIZED=YES
 test "${GEMMA4_E2B_TO_E4B_PRODUCTION_AUTHORIZED}" = YES && \

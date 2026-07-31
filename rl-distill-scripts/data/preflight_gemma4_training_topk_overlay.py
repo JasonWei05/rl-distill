@@ -27,8 +27,10 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 from collections.abc import Iterator, Mapping, Sequence
+from datetime import datetime, timezone
 from itertools import zip_longest
 from pathlib import Path
 from typing import Any
@@ -47,6 +49,7 @@ EXPECTED_ALIGNMENT = "response token at input index i is scored by hidden/logits
 EXPECTED_NORMALIZATION = "full-vocabulary logsumexp in FP32 after BF16 LM head and softcap"
 EXPECTED_STORAGE = {"token_ids": "int32", "logprobs": "float16"}
 EXPECTED_PARITY_COMPARISON = "exact top-k IDs, FP16 top-k logprobs, and FP16 sampled-token logprobs"
+PREFLIGHT_RECEIPT_SCHEMA_VERSION = 1
 
 
 class OverlayPreflightError(ValueError):
@@ -114,6 +117,330 @@ def _resolve_relative(root: Path, value: Any, description: str) -> Path:
     if not resolved.is_relative_to(root):
         raise OverlayPreflightError(f"{description} escapes {root}")
     return resolved
+
+
+def _normalize_receipt_contract(
+    *,
+    dataset_index: str | Path,
+    source_dataset_index: str | Path,
+    student_model: str,
+    student_revision: str | None,
+    expected_direction: str,
+    expected_teacher_identity_sha256: str,
+    expected_student_identity_sha256: str,
+    local_files_only: bool,
+    allow_question_overlap: bool,
+    expected_questions: Mapping[str, int] | None,
+    expected_samples_per_question: int | Mapping[str, int],
+) -> dict[str, Any]:
+    try:
+        overlay_index_path = Path(dataset_index).expanduser().resolve(strict=True)
+        source_index_path = Path(source_dataset_index).expanduser().resolve(strict=True)
+    except OSError as error:
+        raise OverlayPreflightError(f"cannot resolve receipt dataset index: {error}") from error
+    normalized_student = source_preflight._normalize_student_model(student_model)
+    student_path = Path(normalized_student).expanduser()
+    if not student_path.exists():
+        raise OverlayPreflightError("preflight receipts currently require a local immutable student snapshot")
+    student_path = student_path.resolve(strict=True)
+    question_counts = dict(expected_questions or source_preflight.EXPECTED_QUESTIONS)
+    if set(question_counts) != {"train", "validation"}:
+        raise OverlayPreflightError("receipt expected question counts must contain train and validation")
+    for split_name, count in question_counts.items():
+        if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+            raise OverlayPreflightError(f"receipt expected {split_name} question count must be positive")
+    sample_counts = source_preflight._normalize_split_counts(
+        expected_samples_per_question,
+        field_name="receipt expected samples_per_question",
+    )
+    return {
+        "dataset_index": str(overlay_index_path),
+        "source_dataset_index": str(source_index_path),
+        "student_model": str(student_path),
+        "student_revision": student_revision,
+        "expected_direction": expected_direction,
+        "expected_teacher_identity_sha256": _require_sha256(
+            expected_teacher_identity_sha256,
+            "receipt expected_teacher_identity_sha256",
+        ),
+        "expected_student_identity_sha256": _require_sha256(
+            expected_student_identity_sha256,
+            "receipt expected_student_identity_sha256",
+        ),
+        "local_files_only": bool(local_files_only),
+        "allow_question_overlap": bool(allow_question_overlap),
+        "expected_questions": question_counts,
+        "expected_samples_per_question": sample_counts,
+    }
+
+
+def _registered_receipt_paths(contract: Mapping[str, Any]) -> list[Path]:
+    overlay_index_path = Path(contract["dataset_index"])
+    source_index_path = Path(contract["source_dataset_index"])
+    overlay_root = overlay_index_path.parent
+    source_root = source_index_path.parent
+    source_index = _load_json(source_index_path, "receipt source dataset index")
+    overlay_index = _load_json(overlay_index_path, "receipt overlay dataset index")
+    paths = {
+        overlay_index_path,
+        source_index_path,
+        (overlay_root / "rescore_config.json").resolve(strict=True),
+        (overlay_root / rescorer.PARITY_RECEIPT_NAME).resolve(strict=True),
+    }
+    for split_name in ("train", "validation"):
+        source_split = source_index.get("splits", {}).get(split_name)
+        overlay_split = overlay_index.get("splits", {}).get(split_name)
+        if not isinstance(source_split, Mapping) or not isinstance(overlay_split, Mapping):
+            raise OverlayPreflightError(f"receipt indexes are missing {split_name} split metadata")
+        run_config_path = source_split.get("run_config_path")
+        if run_config_path is not None:
+            paths.add(_resolve_relative(source_root, run_config_path, "source run config"))
+        for entry in source_split.get("shards", []):
+            if not isinstance(entry, Mapping):
+                raise OverlayPreflightError("receipt source shard entry must be an object")
+            paths.add(_resolve_relative(source_root, entry.get("path"), "source shard"))
+            paths.add(_resolve_relative(source_root, entry.get("manifest_path"), "source shard manifest"))
+        for entry in overlay_split.get("shards", []):
+            if not isinstance(entry, Mapping):
+                raise OverlayPreflightError("receipt overlay shard entry must be an object")
+            paths.add(_resolve_relative(overlay_root, entry.get("path"), "overlay shard"))
+            paths.add(_resolve_relative(overlay_root, entry.get("manifest_path"), "overlay shard manifest"))
+
+    student_root = Path(contract["student_model"])
+    for path in student_root.rglob("*"):
+        if path.is_file() or path.is_symlink():
+            paths.add(path.absolute())
+    return sorted(paths, key=lambda path: str(path))
+
+
+def _snapshot_path(path: Path) -> dict[str, Any]:
+    try:
+        link_stat = path.lstat()
+        target_stat = path.stat()
+    except OSError as error:
+        raise OverlayPreflightError(f"cannot stat receipt artifact {path}: {error}") from error
+    if not path.is_file():
+        raise OverlayPreflightError(f"receipt artifact is not a regular file: {path}")
+    return {
+        "path": str(path),
+        "symlink_target": os.readlink(path) if path.is_symlink() else None,
+        "lstat_size": link_stat.st_size,
+        "lstat_mtime_ns": link_stat.st_mtime_ns,
+        "lstat_ctime_ns": link_stat.st_ctime_ns,
+        "lstat_mode": link_stat.st_mode,
+        "target_size": target_stat.st_size,
+        "target_mtime_ns": target_stat.st_mtime_ns,
+        "target_ctime_ns": target_stat.st_ctime_ns,
+        "target_mode": target_stat.st_mode,
+        "target_device": target_stat.st_dev,
+        "target_inode": target_stat.st_ino,
+    }
+
+
+def _validator_source_sha256s() -> dict[str, str]:
+    paths = {
+        "overlay_preflight": Path(__file__).resolve(),
+        "source_preflight": Path(source_preflight.__file__).resolve(),
+        "trace_schema": Path(trace_schema.__file__).resolve(),
+        "rescorer": Path(rescorer.__file__).resolve(),
+    }
+    return {name: trace_schema.sha256_file(path) for name, path in sorted(paths.items())}
+
+
+def _result_payload(result: source_preflight.PreflightResult) -> dict[str, Any]:
+    return {
+        "train_files": list(result.train_files),
+        "validation_files": list(result.validation_files),
+        "topk_width": result.topk_width,
+        "topk_validation_tolerance": result.topk_validation_tolerance,
+        "dataset_index_sha256": result.dataset_index_sha256,
+        "experiment_sha256": result.experiment_sha256,
+        "direction": result.direction,
+        "teacher_identity_sha256": result.teacher_identity_sha256,
+        "student_identity_sha256": result.student_identity_sha256,
+        "student_tokenizer_sha256": result.student_tokenizer_sha256,
+    }
+
+
+def write_preflight_receipt(
+    receipt_path: str | Path,
+    *,
+    result: source_preflight.PreflightResult,
+    dataset_index: str | Path,
+    source_dataset_index: str | Path,
+    student_model: str,
+    student_revision: str | None,
+    expected_direction: str,
+    expected_teacher_identity_sha256: str,
+    expected_student_identity_sha256: str,
+    local_files_only: bool = False,
+    allow_question_overlap: bool = False,
+    expected_questions: Mapping[str, int] | None = None,
+    expected_samples_per_question: int | Mapping[str, int] = source_preflight.EXPECTED_SAMPLES_PER_QUESTION,
+) -> Path:
+    contract = _normalize_receipt_contract(
+        dataset_index=dataset_index,
+        source_dataset_index=source_dataset_index,
+        student_model=student_model,
+        student_revision=student_revision,
+        expected_direction=expected_direction,
+        expected_teacher_identity_sha256=expected_teacher_identity_sha256,
+        expected_student_identity_sha256=expected_student_identity_sha256,
+        local_files_only=local_files_only,
+        allow_question_overlap=allow_question_overlap,
+        expected_questions=expected_questions,
+        expected_samples_per_question=expected_samples_per_question,
+    )
+    receipt = {
+        "schema_version": PREFLIGHT_RECEIPT_SCHEMA_VERSION,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "contract": contract,
+        "source_dataset_index_sha256": _verify_self_hash(
+            _load_json(Path(contract["source_dataset_index"]), "receipt source dataset index"),
+            "receipt source dataset index",
+        ),
+        "overlay_dataset_index_sha256": _verify_self_hash(
+            _load_json(Path(contract["dataset_index"]), "receipt overlay dataset index"),
+            "receipt overlay dataset index",
+        ),
+        "validator_source_sha256s": _validator_source_sha256s(),
+        "artifacts": [_snapshot_path(path) for path in _registered_receipt_paths(contract)],
+        "result": _result_payload(result),
+    }
+    receipt["preflight_receipt_sha256"] = trace_schema.hash_json(receipt)
+    output = Path(receipt_path).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    trace_schema.atomic_write_json(output, receipt)
+    return output
+
+
+def load_preflight_receipt(
+    receipt_path: str | Path,
+    *,
+    dataset_index: str | Path,
+    source_dataset_index: str | Path,
+    student_model: str,
+    student_revision: str | None,
+    expected_direction: str,
+    expected_teacher_identity_sha256: str,
+    expected_student_identity_sha256: str,
+    local_files_only: bool = False,
+    allow_question_overlap: bool = False,
+    expected_questions: Mapping[str, int] | None = None,
+    expected_samples_per_question: int | Mapping[str, int] = source_preflight.EXPECTED_SAMPLES_PER_QUESTION,
+) -> source_preflight.PreflightResult:
+    path = Path(receipt_path).expanduser().resolve(strict=True)
+    receipt = _load_json(path, "training preflight receipt")
+    if receipt.get("schema_version") != PREFLIGHT_RECEIPT_SCHEMA_VERSION:
+        raise OverlayPreflightError("training preflight receipt has an unsupported schema version")
+    claimed = _require_sha256(receipt.get("preflight_receipt_sha256"), "training preflight receipt self-hash")
+    unhashed = dict(receipt)
+    del unhashed["preflight_receipt_sha256"]
+    actual = trace_schema.hash_json(unhashed)
+    if actual != claimed:
+        raise OverlayPreflightError(f"training preflight receipt self-hash mismatch: {actual} != {claimed}")
+    contract = _normalize_receipt_contract(
+        dataset_index=dataset_index,
+        source_dataset_index=source_dataset_index,
+        student_model=student_model,
+        student_revision=student_revision,
+        expected_direction=expected_direction,
+        expected_teacher_identity_sha256=expected_teacher_identity_sha256,
+        expected_student_identity_sha256=expected_student_identity_sha256,
+        local_files_only=local_files_only,
+        allow_question_overlap=allow_question_overlap,
+        expected_questions=expected_questions,
+        expected_samples_per_question=expected_samples_per_question,
+    )
+    if receipt.get("contract") != contract:
+        raise OverlayPreflightError("training preflight receipt does not match the requested launch contract")
+    source_index_path = Path(contract["source_dataset_index"])
+    overlay_index_path = Path(contract["dataset_index"])
+    source_index = _load_json(source_index_path, "receipt source dataset index")
+    overlay_index = _load_json(overlay_index_path, "receipt overlay dataset index")
+    source_sha256 = _verify_self_hash(source_index, "receipt source dataset index")
+    overlay_sha256 = _verify_self_hash(overlay_index, "receipt overlay dataset index")
+    if receipt.get("source_dataset_index_sha256") != source_sha256:
+        raise OverlayPreflightError("training preflight receipt source dataset identity changed")
+    if receipt.get("overlay_dataset_index_sha256") != overlay_sha256:
+        raise OverlayPreflightError("training preflight receipt overlay dataset identity changed")
+    if receipt.get("validator_source_sha256s") != _validator_source_sha256s():
+        raise OverlayPreflightError("training preflight validator sources changed; refresh the receipt")
+    artifacts = receipt.get("artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        raise OverlayPreflightError("training preflight receipt has no artifact snapshot")
+    expected_paths = [str(path) for path in _registered_receipt_paths(contract)]
+    receipt_paths = [entry.get("path") for entry in artifacts if isinstance(entry, Mapping)]
+    if receipt_paths != expected_paths:
+        raise OverlayPreflightError("training preflight registered artifact set changed")
+    for entry in artifacts:
+        if not isinstance(entry, Mapping) or _snapshot_path(Path(entry.get("path", ""))) != entry:
+            raise OverlayPreflightError(
+                f"training preflight artifact changed: {entry.get('path') if isinstance(entry, Mapping) else entry}"
+            )
+    payload = receipt.get("result")
+    if not isinstance(payload, Mapping):
+        raise OverlayPreflightError("training preflight receipt result must be an object")
+    result = source_preflight.PreflightResult(
+        train_files=tuple(payload.get("train_files", [])),
+        validation_files=tuple(payload.get("validation_files", [])),
+        topk_width=_require_int(payload.get("topk_width"), "receipt result topk_width", minimum=1),
+        topk_validation_tolerance=_require_number(
+            payload.get("topk_validation_tolerance"),
+            "receipt result topk_validation_tolerance",
+            positive=True,
+        ),
+        dataset_index_sha256=_require_sha256(
+            payload.get("dataset_index_sha256"),
+            "receipt result dataset_index_sha256",
+        ),
+        experiment_sha256=_require_sha256(payload.get("experiment_sha256"), "receipt result experiment_sha256"),
+        direction=str(payload.get("direction")),
+        teacher_identity_sha256=_require_sha256(
+            payload.get("teacher_identity_sha256"),
+            "receipt result teacher_identity_sha256",
+        ),
+        student_identity_sha256=_require_sha256(
+            payload.get("student_identity_sha256"),
+            "receipt result student_identity_sha256",
+        ),
+        student_tokenizer_sha256=_require_sha256(
+            payload.get("student_tokenizer_sha256"),
+            "receipt result student_tokenizer_sha256",
+        ),
+    )
+    if not result.train_files or not result.validation_files:
+        raise OverlayPreflightError("training preflight receipt result has empty trainer files")
+    if result.dataset_index_sha256 != overlay_sha256:
+        raise OverlayPreflightError("training preflight receipt result has the wrong overlay identity")
+    if result.direction != expected_direction:
+        raise OverlayPreflightError("training preflight receipt result has the wrong direction")
+    if result.teacher_identity_sha256 != contract["expected_teacher_identity_sha256"]:
+        raise OverlayPreflightError("training preflight receipt result has the wrong teacher identity")
+    if result.student_identity_sha256 != contract["expected_student_identity_sha256"]:
+        raise OverlayPreflightError("training preflight receipt result has the wrong student identity")
+    expected_files: dict[str, tuple[str, ...]] = {}
+    for split_name in ("train", "validation"):
+        split = overlay_index.get("splits", {}).get(split_name)
+        if not isinstance(split, Mapping) or not isinstance(split.get("shards"), list):
+            raise OverlayPreflightError(f"training preflight overlay index is missing {split_name} shards")
+        expected_files[split_name] = tuple(
+            str(_resolve_relative(overlay_index_path.parent, entry.get("path"), "overlay result shard"))
+            for entry in split["shards"]
+            if isinstance(entry, Mapping)
+        )
+    if result.train_files != expected_files["train"] or result.validation_files != expected_files["validation"]:
+        raise OverlayPreflightError("training preflight receipt result file lists changed")
+    if result.topk_width != rescorer.TOPK_WIDTH:
+        raise OverlayPreflightError("training preflight receipt result has the wrong top-k width")
+    if result.topk_validation_tolerance != source_preflight.FP16_TOPK_MASS_TOLERANCE:
+        raise OverlayPreflightError("training preflight receipt result has the wrong top-k tolerance")
+    if result.experiment_sha256 != source_index.get("experiment_sha256"):
+        raise OverlayPreflightError("training preflight receipt result has the wrong source experiment identity")
+    tokenizer = source_index.get("tokenizer")
+    if not isinstance(tokenizer, Mapping) or result.student_tokenizer_sha256 != tokenizer.get("sha256"):
+        raise OverlayPreflightError("training preflight receipt result has the wrong tokenizer identity")
+    return result
 
 
 def _verify_target_identity(target: Any, source_teacher: Mapping[str, Any]) -> str:
@@ -859,31 +1186,48 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         default=source_preflight.EXPECTED_SAMPLES_PER_QUESTION,
     )
+    parser.add_argument(
+        "--receipt-cache",
+        default=None,
+        help="Use a matching preflight receipt, or write it after the first full validation.",
+    )
+    parser.add_argument(
+        "--refresh-receipt",
+        action="store_true",
+        help="Ignore an existing receipt, rerun the full validation, and replace it.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    preflight_kwargs = {
+        "dataset_index": args.dataset_index,
+        "source_dataset_index": args.source_dataset_index,
+        "student_model": args.student_model,
+        "student_revision": args.student_revision,
+        "expected_direction": args.expected_direction,
+        "expected_teacher_identity_sha256": args.expected_teacher_identity_sha256,
+        "expected_student_identity_sha256": args.expected_student_identity_sha256,
+        "local_files_only": args.local_files_only,
+        "allow_question_overlap": args.allow_question_overlap,
+        "expected_questions": {
+            "train": args.expected_train_questions,
+            "validation": args.expected_validation_questions,
+        },
+        "expected_samples_per_question": {
+            "train": args.expected_train_samples_per_question,
+            "validation": args.expected_validation_samples_per_question,
+        },
+    }
     try:
-        result = run_preflight(
-            dataset_index=args.dataset_index,
-            source_dataset_index=args.source_dataset_index,
-            student_model=args.student_model,
-            student_revision=args.student_revision,
-            expected_direction=args.expected_direction,
-            expected_teacher_identity_sha256=args.expected_teacher_identity_sha256,
-            expected_student_identity_sha256=args.expected_student_identity_sha256,
-            local_files_only=args.local_files_only,
-            allow_question_overlap=args.allow_question_overlap,
-            expected_questions={
-                "train": args.expected_train_questions,
-                "validation": args.expected_validation_questions,
-            },
-            expected_samples_per_question={
-                "train": args.expected_train_samples_per_question,
-                "validation": args.expected_validation_samples_per_question,
-            },
-        )
+        receipt_path = Path(args.receipt_cache).expanduser() if args.receipt_cache else None
+        if receipt_path is not None and receipt_path.exists() and not args.refresh_receipt:
+            result = load_preflight_receipt(receipt_path, **preflight_kwargs)
+        else:
+            result = run_preflight(**preflight_kwargs)
+            if receipt_path is not None:
+                write_preflight_receipt(receipt_path, result=result, **preflight_kwargs)
     except (OSError, RuntimeError, ValueError, pa.ArrowException, OverlayPreflightError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2

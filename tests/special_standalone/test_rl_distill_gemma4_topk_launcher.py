@@ -261,7 +261,29 @@ def test_launcher_routes_overlay_schema_to_strict_overlay_preflight(tmp_path: Pa
     assert argv[0].endswith("/data/preflight_gemma4_training_topk_overlay.py")
     source_flag = argv.index("--source-dataset-index")
     assert argv[source_flag + 1] == str(source_index)
+    receipt_flag = argv.index("--receipt-cache")
+    assert argv[receipt_flag + 1] == str(tmp_path / "training_preflight_receipt.json")
     assert 'data.train_files=["/tmp/overlay-train.parquet"]' in result.stdout.splitlines()
+
+
+def test_launcher_can_force_overlay_receipt_refresh(tmp_path: Path) -> None:
+    environment, fake_bin = _base_environment(tmp_path)
+    environment["SOURCE_DATASET_INDEX"] = str(tmp_path / "source-dataset-index.json")
+    environment["REFRESH_PREFLIGHT_RECEIPT"] = "true"
+    fake_python = fake_bin / "preflight-python"
+    argv_record = tmp_path / "preflight-argv.json"
+    _write_fake_preflight_python(
+        fake_python,
+        _preflight_output(["/tmp/overlay-train.parquet"], ["/tmp/overlay-validation.parquet"]),
+        schema_version=OVERLAY_SCHEMA_VERSION,
+        argv_record=argv_record,
+    )
+    environment["PYTHON_BIN"] = str(fake_python)
+
+    result = _run_launcher(environment)
+
+    assert result.returncode == 0, result.stderr
+    assert "--refresh-receipt" in json.loads(argv_record.read_text(encoding="utf-8"))
 
 
 def test_launcher_requires_explicit_source_index_for_overlay(tmp_path: Path) -> None:
