@@ -113,6 +113,16 @@ if [ -n "${total_training_steps}" ]; then
     total_training_steps_args+=(trainer.total_training_steps="${total_training_steps}")
 fi
 
+# Do not put credentials in Hydra overrides: resolved configs, process listings,
+# and failure logs would expose the literal values. The DAPO entry point reads
+# exported driver credentials and injects them into Ray's job runtime environment
+# programmatically for both local Ray and an existing cluster (`address=auto`).
+ray_secret_args=()
+if [ "${FORWARD_SECRETS_IN_RAY_CONFIG:-False}" = "True" ]; then
+    echo "Refusing to put WANDB_API_KEY/HF_TOKEN in command-line Ray config" >&2
+    exit 2
+fi
+
 export TORCH_NCCL_AVOID_RECORD_STREAMS=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-${NETWORK_INTERFACE_NAME:-lo}}
@@ -121,10 +131,9 @@ export GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-${NETWORK_INTERFACE_NAME:-lo}}
 
 python3 -m dapo.main_dapo \
     +ray_kwargs.ray_init.address="'${RAY_ADDRESS}'" \
-    +ray_kwargs.ray_init.runtime_env.env_vars.WANDB_API_KEY="${WANDB_API_KEY:-}" \
     +ray_kwargs.ray_init.runtime_env.env_vars.WANDB_BASE_URL="${WANDB_BASE_URL:-}" \
-    +ray_kwargs.ray_init.runtime_env.env_vars.HF_TOKEN="${HF_TOKEN:-}" \
     +ray_kwargs.ray_init.runtime_env.env_vars.VERL_VLLM_PORT_BASE="'${VERL_VLLM_PORT_BASE:-52000}'" \
+    "${ray_secret_args[@]}" \
     data.train_files="${TRAIN_FILE}" \
     data.val_files="${VAL_FILES}" \
     data.prompt_key=prompt \

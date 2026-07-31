@@ -1,0 +1,64 @@
+{
+  "base": {
+    "canonical_sha256": "0c732ba167b469eda41c85ff96138026f5a7b514846e235dfa61e04b1c715fd3",
+    "metadata_files": {
+      "processor_config.json": "32bdf45d2ad4cc29a0822ddd157a182de76644f0419a6228d151495256e9813c"
+    },
+    "model_id": "google/gemma-4-E4B",
+    "revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+  },
+  "repo_id": "JWei05/nemorl-dapo-gemma4-e4b-pt-500step",
+  "repo_revision": "7c8d8cd4642465f418aa101a2e884cd5607ba8f1",
+  "output": {
+    "expand_gemma4_shared_kv_aliases": true,
+    "sha256": "830d47f78008b56787798a21a5e53d4e402a405bb899a9db5e18b7b83371110f"
+  },
+  "schema_version": 1,
+  "steps": [
+    {
+      "base_sha256": "0c732ba167b469eda41c85ff96138026f5a7b514846e235dfa61e04b1c715fd3",
+      "codec": "sparse-zigzag-varint-zstd-v2",
+      "delta_bytes": 290429896,
+      "step": 20,
+      "target_bytes": 15882477500,
+      "target_sha256": "4c092d4cf069a5e6ed408b1dd8dfeea0bb4e337cd6067d61699677201192ae3e"
+    },
+    {
+      "base_sha256": "4c092d4cf069a5e6ed408b1dd8dfeea0bb4e337cd6067d61699677201192ae3e",
+      "base_step": 20,
+      "codec": "sparse-u16-add-zstd-v1",
+      "delta_bytes": 560876948,
+      "step": 40,
+      "target_bytes": 15882477500,
+      "target_sha256": "b44570b171a122f88be302b0aa85b75b0ea9908b4ea674d72b6bb4070a01a5d2"
+    },
+    {
+      "base_sha256": "b44570b171a122f88be302b0aa85b75b0ea9908b4ea674d72b6bb4070a01a5d2",
+      "base_step": 40,
+      "codec": "sparse-zigzag-varint-zstd-v2",
+      "delta_bytes": 437836093,
+      "step": 60,
+      "target_bytes": 15882477500,
+      "target_sha256": "81546f6a1188f78252689fc6c40bcc4e1f257bb31b750a637e135de1ab5a580a"
+    },
+    {
+      "base_sha256": "81546f6a1188f78252689fc6c40bcc4e1f257bb31b750a637e135de1ab5a580a",
+      "base_step": 60,
+      "codec": "sparse-zigzag-varint-zstd-v2",
+      "delta_bytes": 459271505,
+      "step": 80,
+      "target_bytes": 15882477500,
+      "target_sha256": "9c920e89741d7ff017149056de0774398e45304dbe3783b822c2b0eae80e6b80"
+    },
+    {
+      "base_sha256": "9c920e89741d7ff017149056de0774398e45304dbe3783b822c2b0eae80e6b80",
+      "base_step": 80,
+      "codec": "sparse-zigzag-varint-zstd-v2",
+      "delta_bytes": 477714186,
+      "step": 100,
+      "target_bytes": 15882477500,
+      "target_sha256": "d565a3ff371906ca31a5e355472d70366b6956c0e82a914de4ea8a7c0085630c"
+    }
+  ],
+  "target_step": 100
+}

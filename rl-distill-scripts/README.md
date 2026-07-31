@@ -1,5 +1,10 @@
 # DAPO on B200 — Gemma 3 training
 
+For the current Gemma 4 E2B/E4B reinforcement-learning-versus-distillation project, including the
+registered trace schema, pinned checkpoints, verified gates, production trace supervisor, evaluation
+matrix, and unresolved experiment decisions, use
+[`GEMMA4_DISTILL_VS_RL_EXPERIMENTS.md`](GEMMA4_DISTILL_VS_RL_EXPERIMENTS.md).
+
 For Gemma 3 4B dense-to-MoE conversion, exact layerwise validation, native
 vLLM rollout, and Megatron RL, use
 [`GEMMA3_MOE_RL_TRAINING.md`](GEMMA3_MOE_RL_TRAINING.md). That workflow uses

@@ -1,5 +1,9 @@
 # Progress Log
 
+> Gemma 4 E2B/E4B distillation-vs.-RL planning, current artifact status, and the production runbook
+> now live in [`GEMMA4_DISTILL_VS_RL_EXPERIMENTS.md`](GEMMA4_DISTILL_VS_RL_EXPERIMENTS.md). That
+> canonical document supersedes older Gemma 4 status statements in this chronological log.
+
 A running log of experiments/work in this repo. Newest entries on top. Each entry records the goal,
 what was run (config + exact scripts/data), results, and status, so work is resumable and auditable.
 

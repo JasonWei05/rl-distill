@@ -18,7 +18,6 @@ import logging
 import os
 import warnings
 from dataclasses import asdict, dataclass
-from typing import Optional
 
 import torch
 import torch.distributed
@@ -36,6 +35,11 @@ from verl.utils.logger import log_with_rank
 from verl.utils.transformers_compat import get_auto_model_for_vision2seq
 
 from .checkpoint_manager import BaseCheckpointManager
+from .gemma4_checkpoint import (
+    ensure_gemma4_processor_metadata,
+    expand_gemma4_shared_kv_state_dict,
+    verify_gemma4_shared_kv_checkpoint,
+)
 
 # Setup logging
 logger = logging.getLogger(__file__)
@@ -78,8 +82,8 @@ class FSDPCheckpointManager(BaseCheckpointManager):
     def __init__(
         self,
         model: FSDP,
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        lr_scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
+        optimizer: torch.optim.Optimizer | None = None,
+        lr_scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
         processing_class: PreTrainedTokenizer | ProcessorMixin = None,
         checkpoint_config: DictConfig = None,
         trust_remote_code: bool = False,
@@ -287,6 +291,7 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             model_config.save_pretrained(hf_config_tokenizer_path)
             if self.processing_class is not None:
                 self.processing_class.save_pretrained(hf_config_tokenizer_path)
+            ensure_gemma4_processor_metadata(model_config, hf_config_tokenizer_path)
             log_with_rank(
                 f"Saved model config and tokenizer class to {os.path.abspath(hf_config_tokenizer_path)}",
                 rank=self.rank,
@@ -353,13 +358,13 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                 # HF save_pretrained(state_dict=...) uses the dict verbatim and
                 # ignores save_model.torch_dtype, so without this the safetensors
                 # files land in fp32 (2× size, no quality gain for eval/serving).
-                state_dict = {
-                    k: (v.to(torch.bfloat16) if v.is_floating_point() else v)
-                    for k, v in state_dict.items()
-                }
+                state_dict = {k: (v.to(torch.bfloat16) if v.is_floating_point() else v) for k, v in state_dict.items()}
+                state_dict, shared_kv_aliases = expand_gemma4_shared_kv_state_dict(state_dict, model_config)
                 save_model.save_pretrained(hf_local_path, state_dict=state_dict)
+                verify_gemma4_shared_kv_checkpoint(hf_local_path, model_config)
                 log_with_rank(
-                    f"Saved hf_model to {os.path.abspath(hf_local_path)}",
+                    f"Saved hf_model to {os.path.abspath(hf_local_path)} "
+                    f"with {len(shared_kv_aliases)} materialized Gemma 4 shared-KV aliases",
                     rank=self.rank,
                     logger=logger,
                     log_only_rank_0=True,

@@ -316,8 +316,24 @@ class SFTTrainer:
         )
 
         if self.val_dataset:
+            require_exact_val_coverage = bool(config.data.get("require_exact_val_coverage", False))
+            if require_exact_val_coverage and len(self.val_dataset) % dp_size != 0:
+                raise ValueError(
+                    "Exact distributed validation requires the validation row count to be divisible by "
+                    f"the data-parallel size; got {len(self.val_dataset)=}, {dp_size=}. "
+                    "Otherwise DistributedSampler would pad with duplicate rows."
+                )
+            # Preserve the historical drop-last behavior for generic SFT,
+            # whose fallback validation metric averages per-batch losses.
+            # Distillation opts into exact coverage and provides token sums,
+            # so it can safely retain a partial final local batch.
+            drop_last = not require_exact_val_coverage
             self.val_sampler = DistributedSampler(
-                self.val_dataset, shuffle=False, num_replicas=dp_size, rank=dp_rank, drop_last=True
+                self.val_dataset,
+                shuffle=False,
+                num_replicas=dp_size,
+                rank=dp_rank,
+                drop_last=drop_last,
             )
             self.val_dataloader = StatefulDataLoader(
                 dataset=self.val_dataset,
@@ -326,7 +342,7 @@ class SFTTrainer:
                 collate_fn=self.collate_fn,
                 num_workers=self.config.data.num_workers,
                 pin_memory=False,
-                drop_last=True,
+                drop_last=drop_last,
                 pin_memory_device=device_name,
             )
         else:
@@ -424,6 +440,10 @@ class SFTTrainer:
 
         def run_validation(step_for_log: int):
             val_losses = []
+            val_token_sum = 0.0
+            val_active_tokens = 0.0
+            val_teacher_mass_sum = 0.0
+            val_student_mass_sum = 0.0
             val_meta_info = dict(meta_info)
             if "VAL_TEACHER_TOP_K" in os.environ:
                 val_meta_info["teacher_top_k_override"] = int(os.environ["VAL_TEACHER_TOP_K"])
@@ -436,18 +456,38 @@ class SFTTrainer:
                 if self.engine.is_mp_src_rank_with_outputs():
                     metrics = tu.get(output, "metrics")
                     val_losses.append(metrics["loss"])
+                    if "full_vocab_kl/token_sum" in metrics and "full_vocab_kl/active_tokens" in metrics:
+                        val_token_sum += _to_loggable_sum(metrics["full_vocab_kl/token_sum"])
+                        val_active_tokens += _to_loggable_sum(metrics["full_vocab_kl/active_tokens"])
+                        if "full_vocab_kl/teacher_mass_sum" in metrics:
+                            val_teacher_mass_sum += _to_loggable_sum(metrics["full_vocab_kl/teacher_mass_sum"])
+                        if "full_vocab_kl/student_mass_sum" in metrics:
+                            val_student_mass_sum += _to_loggable_sum(metrics["full_vocab_kl/student_mass_sum"])
 
             metric = None
             if self.engine.is_mp_src_rank_with_outputs():
-                val_loss = torch.mean(torch.tensor(val_losses, device=self.device_name))
-                # average over data parallel group
                 dp_group = self.engine.get_data_parallel_group()
-                if dp_group is not None:
-                    torch.distributed.all_reduce(val_loss, op=torch.distributed.ReduceOp.AVG, group=dp_group)
+                if val_active_tokens > 0:
+                    totals = torch.tensor(
+                        [val_token_sum, val_active_tokens, val_teacher_mass_sum, val_student_mass_sum],
+                        dtype=torch.float64,
+                        device=self.device_name,
+                    )
+                    if dp_group is not None:
+                        torch.distributed.all_reduce(totals, op=torch.distributed.ReduceOp.SUM, group=dp_group)
+                    val_loss = totals[0] / totals[1]
+                else:
+                    val_loss = torch.mean(torch.tensor(val_losses, device=self.device_name))
+                    # average over data parallel group
+                    if dp_group is not None:
+                        torch.distributed.all_reduce(val_loss, op=torch.distributed.ReduceOp.AVG, group=dp_group)
 
             if is_logging:
                 metric = {"val/loss": val_loss.detach().item()}
                 metric["val/total_loss"] = metric["val/loss"]
+                if val_active_tokens > 0:
+                    metric["val/full_vocab_kl/teacher_mass"] = (totals[2] / totals[1]).item()
+                    metric["val/full_vocab_kl/student_mass"] = (totals[3] / totals[1]).item()
                 print(f"Validation metrics at step {step_for_log}: {metric}", flush=True)
                 tracking.log(data=metric, step=step_for_log)
             torch.distributed.barrier()
@@ -512,6 +552,12 @@ class SFTTrainer:
                         metrics["full_vocab_kl/mean"] = (
                             metrics["full_vocab_kl/token_sum"] / metrics["full_vocab_kl/active_tokens"]
                         )
+                        for mass_name in ("teacher_mass", "student_mass"):
+                            mass_sum_key = f"full_vocab_kl/{mass_name}_sum"
+                            if mass_sum_key in metrics:
+                                metrics[f"full_vocab_kl/{mass_name}"] = (
+                                    metrics[mass_sum_key] / metrics["full_vocab_kl/active_tokens"]
+                                )
                     if "loss" in metrics and "train/router_loss_scaled" in metrics:
                         metrics["total_loss"] = metrics["loss"] + metrics["train/router_loss_scaled"]
 

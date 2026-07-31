@@ -28,7 +28,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from dapo.hf_push import HFPusher
+from dapo.hf_push import HFPusher, wait_for_hf_pusher
 from verl import DataProto
 from verl.trainer.ppo.core_algos import agg_loss
 from verl.trainer.ppo.metric_utils import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics
@@ -200,6 +200,14 @@ class RayDAPOTrainer(RayPPOTrainer):
         wandb.log({"train/generations": table}, step=self.global_steps)
 
     def fit(self):
+        try:
+            return self._fit_impl()
+        finally:
+            if getattr(self, "_hf_pusher", None) is not None:
+                print("[HFPusher] waiting for pending uploads before exit...", flush=True)
+                wait_for_hf_pusher(self._hf_pusher, timeout=1800)
+
+    def _fit_impl(self):
         """
         The training loop of PPO.
         The driver process only need to call the compute functions of the worker group through RPC
@@ -262,6 +270,7 @@ class RayDAPOTrainer(RayPPOTrainer):
         all_gen_acc = []  # Track accuracy across ALL generated responses (before filtering)
         current_epoch = self.global_steps // len(self.train_dataloader)
 
+        training_complete = False
         for epoch in range(current_epoch, self.config.trainer.total_epochs):
             for batch_dict in self.train_dataloader:
                 if hasattr(self.actor_rollout_wg, "async_calls_finalize_fn_exec"):
@@ -586,11 +595,14 @@ class RayDAPOTrainer(RayPPOTrainer):
                         self.actor_rollout_wg.async_calls_finalize_fn_exec(blocking=True)
                     pprint(f"Final validation metrics: {last_val_metrics}")
                     progress_bar.close()
-                    return
+                    training_complete = True
+                    break
 
                 progress_bar.update(1)
                 self.global_steps += 1
                 self.gen_steps += 1
+            if training_complete:
+                break
         # check if last step checkpint exists
         checkpoint_dir = os.path.join(self.config.trainer.default_local_dir, f"global_step_{self.global_steps}")
         if not os.path.exists(checkpoint_dir):
@@ -601,7 +613,3 @@ class RayDAPOTrainer(RayPPOTrainer):
             self._maybe_push_to_hf(self.global_steps)
             metrics = {f"timing/{k}": v for k, v in timing_raw.items()}
             logger.log(data=metrics, step=self.global_steps)
-
-        if getattr(self, "_hf_pusher", None) is not None:
-            print("[HFPusher] waiting for pending uploads before exit...", flush=True)
-            self._hf_pusher.wait(timeout=1800)

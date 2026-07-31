@@ -18,6 +18,9 @@ only replacing the trainer class with RayDAPOTrainer.
 
 import os
 import socket
+from collections.abc import Mapping
+from copy import deepcopy
+from pprint import pprint
 
 import hydra
 import ray
@@ -34,6 +37,91 @@ from verl.trainer.main_ppo import (
 from verl.trainer.ppo.utils import need_critic, need_reference_policy
 from verl.utils.config import validate_config
 from verl.utils.device import auto_set_device
+
+_RAY_SECRET_ENV_VARS = ("WANDB_API_KEY", "HF_TOKEN")
+_REDACTED = "<redacted>"
+
+
+def _to_plain_container(value):
+    if OmegaConf.is_config(value):
+        return OmegaConf.to_container(value, resolve=True)
+    return deepcopy(value)
+
+
+def _redact_for_logging(value, environ=None):
+    """Return a log-safe copy with Ray credentials removed.
+
+    Secret keys are always redacted. Secret values are also scrubbed wherever
+    they occur so an interpolation or a composite config value cannot leak a
+    credential under an unrelated key.
+    """
+    environ = os.environ if environ is None else environ
+    secret_values = tuple(secret_value for key in _RAY_SECRET_ENV_VARS if (secret_value := environ.get(key)))
+
+    def redact(item, key=None):
+        if key is not None and str(key).upper() in _RAY_SECRET_ENV_VARS:
+            return _REDACTED
+        if isinstance(item, Mapping):
+            return {map_key: redact(map_value, map_key) for map_key, map_value in item.items()}
+        if isinstance(item, list):
+            return [redact(element) for element in item]
+        if isinstance(item, tuple):
+            return tuple(redact(element) for element in item)
+        if isinstance(item, str):
+            for secret_value in secret_values:
+                item = item.replace(secret_value, _REDACTED)
+        return item
+
+    return redact(_to_plain_container(value))
+
+
+def _build_dapo_ray_init_kwargs(config, environ=None):
+    """Build Ray init kwargs, sourcing credentials only from the driver env."""
+    environ = os.environ if environ is None else environ
+    configured_ray_init = config.ray_kwargs.get("ray_init", {})
+    ray_init_kwargs = _to_plain_container(configured_ray_init) or {}
+    if not isinstance(ray_init_kwargs, Mapping):
+        raise TypeError("ray_kwargs.ray_init must be a mapping")
+    ray_init_kwargs = dict(ray_init_kwargs)
+
+    configured_runtime_env = ray_init_kwargs.pop("runtime_env", {}) or {}
+    if not isinstance(configured_runtime_env, Mapping):
+        raise TypeError("ray_kwargs.ray_init.runtime_env must be a mapping or null")
+
+    runtime_env = OmegaConf.to_container(
+        OmegaConf.merge(get_ppo_ray_runtime_env(), configured_runtime_env),
+        resolve=True,
+    )
+    env_vars = dict(runtime_env.get("env_vars") or {})
+
+    # ``run_ppo`` normally injects this before it initializes Ray. DAPO now
+    # initializes Ray itself so credentials can come from the driver environment
+    # without entering Hydra's resolved config, and must preserve that standard
+    # transfer-queue behavior explicitly.
+    transfer_queue = config.get("transfer_queue", None)
+    if transfer_queue is not None and bool(transfer_queue.get("enable", False)):
+        env_vars["TRANSFER_QUEUE_ENABLE"] = "1"
+
+    # Credentials in Hydra config are deliberately ignored. This keeps the
+    # command line, resolved config, and Hydra output files credential-free.
+    for env_var in _RAY_SECRET_ENV_VARS:
+        env_vars.pop(env_var, None)
+        if secret_value := environ.get(env_var):
+            env_vars[env_var] = secret_value
+
+    runtime_env["env_vars"] = env_vars
+    ray_init_kwargs["runtime_env"] = runtime_env
+    return ray_init_kwargs
+
+
+def _initialize_dapo_ray(config):
+    """Initialize Ray with DAPO's credential-safe job runtime environment."""
+    if ray.is_initialized():
+        return
+    ray_init_kwargs = _build_dapo_ray_init_kwargs(config)
+    print("ray init kwargs:")
+    pprint(_redact_for_logging(ray_init_kwargs))
+    ray.init(**ray_init_kwargs)
 
 
 def _materialize_custom_chat_template(config):
@@ -67,15 +155,11 @@ class DAPOTaskRunner(TaskRunner):
     """TaskRunner that uses RayDAPOTrainer instead of RayPPOTrainer."""
 
     def run(self, config):
-        from pprint import pprint
-
-        from omegaconf import OmegaConf
-
         from verl.utils.fs import copy_to_local
 
         print(f"TaskRunner hostname: {socket.gethostname()}, PID: {os.getpid()}")
         _materialize_custom_chat_template(config)
-        pprint(OmegaConf.to_container(config, resolve=True))
+        pprint(_redact_for_logging(config))
         OmegaConf.resolve(config)
 
         actor_rollout_cls, ray_worker_group_cls = self.add_actor_rollout_worker(config)
@@ -150,20 +234,8 @@ class DAPOTaskRunner(TaskRunner):
 def main(config):
     auto_set_device(config)
     config = migrate_legacy_reward_impl(config)
+    _initialize_dapo_ray(config)
     if os.environ.get("DAPO_LOCAL_TASK_RUNNER") == "1":
-        ray_init_kwargs = config.ray_kwargs.get("ray_init", {})
-        runtime_env_kwargs = ray_init_kwargs.get("runtime_env", {})
-        runtime_env_value = (
-            OmegaConf.to_container(runtime_env_kwargs, resolve=True)
-            if OmegaConf.is_config(runtime_env_kwargs)
-            else runtime_env_kwargs
-        )
-        runtime_env = (
-            None if runtime_env_value is None else OmegaConf.merge(get_ppo_ray_runtime_env(), runtime_env_kwargs)
-        )
-        ray_init_kwargs = OmegaConf.create({**ray_init_kwargs, "runtime_env": runtime_env})
-        print(f"ray init kwargs: {ray_init_kwargs}")
-        ray.init(**OmegaConf.to_container(ray_init_kwargs))
         DAPOTaskRunner().run(config)
         return
     run_ppo(config, task_runner_class=ray.remote(num_cpus=1)(DAPOTaskRunner))

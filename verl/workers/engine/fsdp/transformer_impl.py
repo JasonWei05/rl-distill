@@ -21,7 +21,7 @@ import os
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Callable, ContextManager, Optional
+from typing import Callable, ContextManager
 
 import torch
 import torch.distributed
@@ -181,6 +181,63 @@ def _patch_gemma3_skip_lm_head():
 
 
 _patch_gemma3_skip_lm_head()
+
+
+def _patch_gemma4_skip_lm_head():
+    """Allow Gemma 4 to return selected hidden states without projecting the LM head.
+
+    The off-policy distillation path projects response-token hidden states through the
+    vocabulary head in small chunks. Gemma 4's native ``logits_to_keep`` still applies
+    the complete LM head in one call, which defeats that memory bound for long traces.
+    """
+
+    try:
+        from dataclasses import fields
+
+        from transformers.models.gemma4.modeling_gemma4 import (
+            Gemma4CausalLMOutputWithPast,
+            Gemma4ForConditionalGeneration,
+        )
+    except Exception:
+        return
+
+    if getattr(Gemma4ForConditionalGeneration, "_verl_skip_lm_head_patched", False):
+        return
+
+    orig_forward = Gemma4ForConditionalGeneration.forward
+
+    @wraps(orig_forward)
+    def forward_with_skip_lm_head(self, *args, skip_lm_head=False, **kwargs):
+        if not skip_lm_head:
+            return orig_forward(self, *args, **kwargs)
+
+        logits_to_keep = kwargs.pop("logits_to_keep", 0)
+        return_dict = kwargs.pop("return_dict", True)
+        if return_dict is False:
+            raise ValueError("Gemma 4 skip_lm_head requires return_dict=True")
+
+        outputs = self.model(*args, return_dict=True, **kwargs)
+        hidden_states = outputs.last_hidden_state
+        slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
+        hidden_states = hidden_states[:, slice_indices, :]
+
+        output_kwargs = {"loss": None, "logits": hidden_states}
+        for field in fields(Gemma4CausalLMOutputWithPast):
+            if field.name not in output_kwargs:
+                output_kwargs[field.name] = getattr(outputs, field.name, None)
+        output = Gemma4CausalLMOutputWithPast(**output_kwargs)
+        # Transformers 5.5's causal-LM output dataclass does not yet declare
+        # Gemma 4's cache-sharing carrier, but the backbone returns it and
+        # generation/resume callers may rely on the attribute being preserved.
+        if hasattr(outputs, "shared_kv_states"):
+            output.shared_kv_states = outputs.shared_kv_states
+        return output
+
+    Gemma4ForConditionalGeneration.forward = forward_with_skip_lm_head
+    Gemma4ForConditionalGeneration._verl_skip_lm_head_patched = True
+
+
+_patch_gemma4_skip_lm_head()
 
 
 class FSDPEngine(BaseEngine):
@@ -843,9 +900,9 @@ class FSDPEngine(BaseEngine):
     def save_checkpoint(
         self,
         local_path: str,
-        hdfs_path: Optional[str] = None,
+        hdfs_path: str | None = None,
         global_step: int = 0,
-        max_ckpt_to_keep: Optional[int] = None,
+        max_ckpt_to_keep: int | None = None,
         **kwargs,
     ) -> None:
         """
@@ -864,7 +921,7 @@ class FSDPEngine(BaseEngine):
             offload_fsdp_model_to_cpu(self.module)
 
     def load_checkpoint(
-        self, local_path: str, hdfs_path: Optional[str] = None, del_local_after_load: int = True, **kwargs
+        self, local_path: str, hdfs_path: str | None = None, del_local_after_load: int = True, **kwargs
     ) -> None:
         """
         Load FSDP checkpoint, restoring parameters and optimizer state.
@@ -1402,6 +1459,7 @@ class FSDPEngineWithLMHead(FSDPEngine):
                     student_active_flat_idx=student_active_flat_idx,
                     student_lm_head=module.lm_head,
                     student_config=module.config,
+                    student_logit_softcap=getattr(self, "_logit_softcap", None),
                     data=micro_batch,
                 )
 

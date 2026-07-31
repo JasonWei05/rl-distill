@@ -11,6 +11,7 @@ hydra:
 
 teacher_model:
   path: ${oc.env:TEACHER_MODEL_PATH,/tmp/rl_fresh_moe_models/gemma-3-4b-pt-dense}
+  precomputed_topk: ${oc.decode:${oc.env:PRECOMPUTED_TOPK,false}}
   dtype: bfloat16
   temperature: 1.0
   chunk_size: ${oc.decode:${oc.env:FULL_VOCAB_KL_CHUNK_SIZE,64}}
@@ -18,6 +19,8 @@ teacher_model:
   trust_remote_code: false
   attn_implementation: flash_attention_2
   use_hidden_states: true
+  clamp_min_kl: ${oc.decode:${oc.env:CLAMP_MIN_TOPK_KL,false}}
+  checkpoint_student_chunks: ${oc.decode:${oc.env:CHECKPOINT_DISTILL_CHUNKS,true}}
 
 data:
   train_batch_size: 64
@@ -28,6 +31,18 @@ data:
   val_files: ${oc.env:VAL_FILE,/home/tiger/verl/data/dapo_gemma3_4b_pt_teacher_v7_independent/validation.parquet}
   input_ids_key: input_ids
   response_mask_key: response_mask
+  use_precomputed_topk: ${oc.decode:${oc.env:PRECOMPUTED_TOPK,false}}
+  teacher_topk_token_ids_key: teacher_topk_token_ids
+  teacher_topk_logprobs_key: teacher_topk_logprobs
+  teacher_topk_width: ${teacher_model.top_k}
+  # FP16 log-probability quantization can reconstruct a top-k mass slightly
+  # above one. The trace validator derives and publishes this same bound.
+  teacher_topk_validation_tolerance: ${oc.decode:${oc.env:TEACHER_TOPK_VALIDATION_TOLERANCE,0.0025}}
+  parquet_row_group_cache_size: ${oc.decode:${oc.env:PARQUET_ROW_GROUP_CACHE_SIZE,2}}
+  parquet_row_group_cache_max_bytes: ${oc.decode:${oc.env:PARQUET_ROW_GROUP_CACHE_MAX_BYTES,1073741824}}
+  parquet_max_row_group_bytes: ${oc.decode:${oc.env:PARQUET_MAX_ROW_GROUP_BYTES,536870912}}
+  parquet_oversized_row_group_policy: ${oc.env:PARQUET_OVERSIZED_ROW_GROUP_POLICY,warn}
+  parquet_cache_diagnostics_interval: ${oc.decode:${oc.env:PARQUET_CACHE_DIAGNOSTICS_INTERVAL,0}}
   pad_mode: no_padding
   max_length: 20480
   truncation: right
@@ -40,6 +55,7 @@ data:
   num_workers: 2
   train_max_samples: -1
   val_max_samples: -1
+  require_exact_val_coverage: ${oc.decode:${oc.env:REQUIRE_EXACT_VAL_COVERAGE,false}}
   use_logits_processor: true
   skip_lm_log_probs: true
   use_hidden_logits_processor: true
@@ -69,9 +85,9 @@ trainer:
   n_gpus_per_node: ${oc.decode:${oc.env:NPROC_PER_NODE,8}}
   profile_interval: [-1, -1]
   hf_push:
-    enable: ${oc.decode:${oc.env:HF_PUSH_ENABLE,true}}
+    enable: ${oc.decode:${oc.env:HF_PUSH_ENABLE,false}}
     repo_id: ${oc.env:HF_PUSH_REPO,JWei05/DAPO-Gemma3-27B-PT-FullVocabDistill-From-Gemma3-4B-PT-DAPO-17.4k}
-    private: ${oc.decode:${oc.env:HF_PUSH_PRIVATE,false}}
+    private: ${oc.decode:${oc.env:HF_PUSH_PRIVATE,true}}
     delete_local_after: ${oc.decode:${oc.env:HF_PUSH_DELETE_LOCAL,false}}
     max_to_keep: ${oc.decode:${oc.env:HF_PUSH_MAX_TO_KEEP,8}}
 

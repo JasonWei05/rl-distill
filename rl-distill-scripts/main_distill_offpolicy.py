@@ -27,7 +27,7 @@ from functools import partial
 import hydra
 
 # hf_push.py lives alongside this script in rl-distill-scripts/.
-from hf_push import HFPusher  # noqa: E402
+from hf_push import HFPusher, wait_for_hf_pusher  # noqa: E402
 
 from verl.trainer.sft_trainer import SFTTrainer
 from verl.utils.device import auto_set_device
@@ -128,11 +128,10 @@ class DistillSFTTrainer(SFTTrainer):
             "huggingface",
         )
         if not os.path.isdir(hf_dir):
-            print(
-                f"[HFPusher] skip step {step}: {hf_dir} missing (ensure checkpoint.save_contents includes 'hf_model')",
-                flush=True,
+            raise FileNotFoundError(
+                f"HF push is enabled, but the required step-{step} checkpoint directory is missing: {hf_dir}. "
+                "Ensure checkpoint.save_contents includes 'hf_model'."
             )
-            return
         cfg = self.config.trainer.hf_push
         self._hf_pusher.push_async(
             local_dir=hf_dir,
@@ -146,7 +145,7 @@ class DistillSFTTrainer(SFTTrainer):
         finally:
             if getattr(self, "_hf_pusher", None) is not None:
                 print("[HFPusher] waiting for pending uploads before exit...", flush=True)
-                self._hf_pusher.wait(timeout=1800)
+                wait_for_hf_pusher(self._hf_pusher, timeout=1800)
 
 
 @hydra.main(config_path="config", config_name="distill_offpolicy", version_base=None)

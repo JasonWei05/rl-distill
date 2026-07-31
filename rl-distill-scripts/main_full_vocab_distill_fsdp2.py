@@ -18,7 +18,7 @@ import os
 
 import hydra
 import torch
-from hf_push import HFPusher
+from hf_push import HFPusher, wait_for_hf_pusher
 
 from verl.trainer.sft_trainer import SFTTrainer
 from verl.utils.device import auto_set_device
@@ -32,8 +32,16 @@ class FullVocabDistillTrainer(SFTTrainer):
         from full_vocab_kl_loss import FullVocabKLLoss
 
         teacher_cfg = self.config.teacher_model
+        if bool(teacher_cfg.get("precomputed_topk", False)):
+            configured_top_k = int(teacher_cfg.get("top_k", 0))
+            stored_top_k = int(self.config.data.get("teacher_topk_width", 0))
+            if configured_top_k <= 0 or configured_top_k != stored_top_k:
+                raise ValueError(
+                    "Precomputed top-k width must be positive and identical in teacher_model.top_k and "
+                    f"data.teacher_topk_width; got {configured_top_k=} and {stored_top_k=}"
+                )
         self.loss_fn = FullVocabKLLoss(
-            teacher_model_path=teacher_cfg.path,
+            teacher_model_path=teacher_cfg.get("path", None),
             temperature=float(teacher_cfg.get("temperature", 1.0)),
             chunk_size=int(teacher_cfg.get("chunk_size", 64)),
             top_k=int(teacher_cfg.get("top_k", 0)),
@@ -41,6 +49,9 @@ class FullVocabDistillTrainer(SFTTrainer):
             trust_remote_code=bool(teacher_cfg.get("trust_remote_code", False)),
             attn_implementation=str(teacher_cfg.get("attn_implementation", "flash_attention_2")),
             use_teacher_hidden_states=bool(teacher_cfg.get("use_hidden_states", True)),
+            precomputed_topk=bool(teacher_cfg.get("precomputed_topk", False)),
+            clamp_min_kl=bool(teacher_cfg.get("clamp_min_kl", False)),
+            checkpoint_student_chunks=bool(teacher_cfg.get("checkpoint_student_chunks", True)),
         )
 
         config = TrainingWorkerConfig(
@@ -120,8 +131,9 @@ class FullVocabDistillTrainer(SFTTrainer):
             "huggingface",
         )
         if not os.path.isdir(hf_dir):
-            print(f"[HFPusher] skip step {step}: {hf_dir} missing", flush=True)
-            return
+            raise FileNotFoundError(
+                f"HF push is enabled, but the required step-{step} checkpoint directory is missing: {hf_dir}"
+            )
         cfg = self.config.trainer.hf_push
         self._hf_pusher.push_async(
             local_dir=hf_dir,
@@ -135,7 +147,7 @@ class FullVocabDistillTrainer(SFTTrainer):
         finally:
             if getattr(self, "_hf_pusher", None) is not None:
                 print("[HFPusher] waiting for pending uploads before exit...", flush=True)
-                self._hf_pusher.wait(timeout=3600)
+                wait_for_hf_pusher(self._hf_pusher, timeout=3600)
 
 
 @hydra.main(config_path="config", config_name="full_vocab_distill_fsdp2", version_base=None)

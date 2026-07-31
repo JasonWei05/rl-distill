@@ -26,8 +26,8 @@ Usage inside a trainer (rank 0 only):
     )
 
 Push runs in a background thread — the trainer does NOT block on the upload.
-Uploads retry 3× with exponential backoff. Failures are logged and dropped
-(training continues).
+Uploads retry 3× with exponential backoff. ``wait()`` re-raises any background
+failure so a run cannot report success without its required Hub artifacts.
 """
 
 from __future__ import annotations
@@ -35,17 +35,17 @@ from __future__ import annotations
 import os
 import queue
 import shutil
+import sys
 import threading
 import time
 import traceback
 from dataclasses import dataclass, field
-from typing import Optional
 
 from huggingface_hub import HfApi, create_repo
 from huggingface_hub.utils import HfHubHTTPError
 
 
-def _load_hf_token_from_dotenv() -> Optional[str]:
+def _load_hf_token_from_dotenv() -> str | None:
     """Read HF_TOKEN from a local .env without exposing it in launch args."""
     candidates = [
         os.path.join(os.getcwd(), ".env"),
@@ -202,17 +202,19 @@ def _get_ray_remote_task():
 class HFPusher:
     repo_id: str
     private: bool = True
-    token: Optional[str] = None
+    token: str | None = None
     enable_hf_transfer: bool = True
     max_retries: int = 3
     # Keep last N step-folders on the hub (None = keep all). Oldest get deleted.
-    max_to_keep: Optional[int] = None
+    max_to_keep: int | None = None
 
     _pushed_steps: list = field(default_factory=list)
-    _api: Optional[HfApi] = None
+    _api: HfApi | None = None
     _repo_ready: bool = False
-    _queue: Optional[queue.Queue] = None
-    _worker: Optional[threading.Thread] = None
+    _queue: queue.Queue | None = None
+    _worker: threading.Thread | None = None
+    _errors: list[tuple[str, BaseException]] = field(default_factory=list)
+    _closed: bool = False
 
     def __post_init__(self):
         self.token = self.token or os.environ.get("HF_TOKEN") or _load_hf_token_from_dotenv()
@@ -242,10 +244,11 @@ class HFPusher:
                     _, local_dir, step, delete_local_after = item
                     self._do_one_cluster(local_dir, step, delete_local_after)
                 else:
-                    print(f"[HFPusher] unknown queue item: {item}", flush=True)
+                    raise ValueError(f"HFPusher received an unknown queue item: {item}")
             except Exception as e:
                 print(f"[HFPusher] worker error: {e}", flush=True)
                 traceback.print_exc()
+                self._errors.append((repr(item), e))
             finally:
                 self._queue.task_done()
 
@@ -323,6 +326,8 @@ class HFPusher:
             if delete_local_after:
                 shutil.rmtree(local_dir, ignore_errors=True)
                 print(f"[HFPusher] removed local {local_dir}", flush=True)
+            return
+        raise RuntimeError(f"Hugging Face upload failed for step {step}: {local_dir}")
 
     def _do_one_cluster(self, local_dir: str, step: int, delete_local_after: bool):
         """Find the Ray node with the checkpoint, stage it to this driver, then
@@ -370,8 +375,7 @@ class HFPusher:
                 owner = (n, detail)
 
         if owner is None:
-            print(f"[HFPusher] step {step} - no node had the files; push failed", flush=True)
-            return
+            raise FileNotFoundError(f"HFPusher step {step}: no alive Ray node contains {local_dir}")
 
         owner_node, manifest = owner
         staged_dir = self._stage_from_ray_node(ray, owner_node, local_dir, manifest, step)
@@ -393,6 +397,7 @@ class HFPusher:
                 print(f"[HFPusher] step {step} source cleanup -> {status} ({detail})", flush=True)
         else:
             print(f"[HFPusher] step {step} upload failed; leaving staged files at {staged_dir}", flush=True)
+            raise RuntimeError(f"Hugging Face upload failed for step {step}; staged files remain at {staged_dir}")
 
     def _stage_from_ray_node(self, ray, node, local_dir: str, manifest: dict, step: int) -> str:
         """Copy a Ray-node-local directory to driver-local storage in chunks."""
@@ -453,9 +458,10 @@ class HFPusher:
         """Enqueue upload from this process's local filesystem.
         Use this when you know the files live on the node where this pusher runs
         (e.g., single-node training, or backfill scripts launched on the owning node)."""
+        if self._closed:
+            raise RuntimeError("HFPusher is closed")
         if not os.path.isdir(local_dir):
-            print(f"[HFPusher] skip: {local_dir} does not exist", flush=True)
-            return
+            raise FileNotFoundError(f"HFPusher checkpoint directory does not exist: {local_dir}")
         self._queue.put(("local", local_dir, step, delete_local_after))
 
     def push_cluster(self, local_dir: str, step: int, delete_local_after: bool = False):
@@ -463,11 +469,40 @@ class HFPusher:
         whose local filesystem actually holds `local_dir` will upload; the others
         return a 'skip'. Use this from the verl driver actor, since FSDP rank-0
         may live on a different Ray node than the driver."""
+        if self._closed:
+            raise RuntimeError("HFPusher is closed")
         self._queue.put(("cluster", local_dir, step, delete_local_after))
 
-    def wait(self, timeout: Optional[float] = None):
+    def wait(self, timeout: float | None = None):
         """Block until all enqueued uploads finish. Call before process exit."""
-        # `timeout` param kept for compat; queue.join has no timeout, so we
-        # send a sentinel and join the thread instead.
-        self._queue.put(None)
+        if not self._closed:
+            self._closed = True
+            self._queue.put(None)
         self._worker.join(timeout=timeout)
+        if self._worker.is_alive():
+            raise TimeoutError(f"HFPusher did not finish within {timeout} seconds")
+        if self._errors:
+            summary = "; ".join(f"{item}: {error}" for item, error in self._errors)
+            raise RuntimeError(f"HFPusher failed {len(self._errors)} queued upload(s): {summary}") from self._errors[0][
+                1
+            ]
+
+
+def wait_for_hf_pusher(pusher: HFPusher, *, timeout: float | None = None) -> None:
+    """Drain pending uploads without replacing an active training exception.
+
+    Call this from a ``finally`` block. If training succeeded, an upload error is
+    still fatal. If training is already unwinding, preserve that primary error
+    and attach/log the upload failure instead of masking the training cause.
+    """
+    primary_error = sys.exc_info()[1]
+    try:
+        pusher.wait(timeout=timeout)
+    except Exception as upload_error:
+        if primary_error is None:
+            raise
+        note = f"A pending Hugging Face upload also failed during shutdown: {upload_error}"
+        if hasattr(primary_error, "add_note"):
+            primary_error.add_note(note)
+        print(f"[HFPusher] {note}", file=sys.stderr, flush=True)
+        traceback.print_exception(type(upload_error), upload_error, upload_error.__traceback__)

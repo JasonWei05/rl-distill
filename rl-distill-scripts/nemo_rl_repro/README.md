@@ -63,7 +63,15 @@ git submodule update --init --recursive third_party/nemo-rl   # pinned @ 5f89b3a
 # repo-root .env with HF_TOKEN (gated google/gemma-4-E2B) + WANDB_API_KEY
 # data: bash rl-distill-scripts/data/prepare_deepscaler_4of4strict_rl_data.sh
 #   (downloads the exact train 9,723 / val 200x16 split from JWei05/DeepScaleR-4of4-strict-RL)
+
+# only needed by the sparse-delta checkpoint materializer; 0.25.0 is the verified version
+uv pip install --python /path/to/venv/bin/python zstandard==0.25.0
 ```
+
+The pinned E4B step-100 chain can then be validated or materialized with
+`local/materialize_hf_checkpoint_chain.py`; its default lock is
+`config/e4b_step100_delta_chain.lock.json`. Materialization refuses to overwrite an existing output
+directory and verifies every link and the final packaged SHA256.
 
 ## ScaleTrain (the intended path)
 
