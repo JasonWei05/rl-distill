@@ -81,10 +81,18 @@ def _write_fake_preflight_python(
     *,
     schema_version: str = "gemma4-distill-topk-v1",
     argv_record: Path | None = None,
+    verifier_argv_record: Path | None = None,
 ) -> None:
-    record_statement = ""
-    if argv_record is not None:
-        record_statement = f"Path({str(argv_record)!r}).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n"
+    preflight_record = (
+        f"    Path({str(argv_record)!r}).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n"
+        if argv_record is not None
+        else ""
+    )
+    verifier_record = (
+        f"    Path({str(verifier_argv_record)!r}).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n"
+        if verifier_argv_record is not None
+        else "    pass\n"
+    )
     _write_executable(
         path,
         "#!/usr/bin/env python3\n"
@@ -95,11 +103,9 @@ def _write_fake_preflight_python(
         "if len(sys.argv) > 1 and sys.argv[1] == '-c':\n"
         "    print(schema_version)\n"
         "elif len(sys.argv) > 1 and sys.argv[1].endswith('verify_gemma4_fsdp2_training_audit.py'):\n"
-        "    pass\n"
-        "else:\n"
-        + "    "
-        + record_statement.replace("\n", "\n    ").rstrip()
-        + ("\n" if record_statement else "")
+        + verifier_record
+        + "else:\n"
+        + preflight_record
         + f"    print({output!r}, end='')\n",
     )
 
@@ -135,8 +141,8 @@ def test_launcher_uses_preflight_hydra_lists_without_eval(tmp_path: Path) -> Non
     assert "teacher_model.top_k=128" in argv
     assert "teacher_model.chunk_size=4096" in argv
     assert "data.teacher_topk_validation_tolerance=0.0025" in argv
-    assert "data.micro_batch_size_per_gpu=2" in argv
-    assert "data.max_padded_tokens_per_microbatch=5120" in argv
+    assert "data.micro_batch_size_per_gpu=1" in argv
+    assert "data.max_padded_tokens_per_microbatch=4096" in argv
     assert (
         "+engine.mixed_precision={param_dtype:bf16,reduce_dtype:fp32,buffer_dtype:fp32,"
         "cast_forward_inputs:true}" in argv
@@ -171,6 +177,7 @@ def test_launcher_rejects_unverified_gemma4_batching_contract(tmp_path: Path) ->
     environment, fake_bin = _base_environment(tmp_path)
     environment["SOURCE_DATASET_INDEX"] = str(tmp_path / "source-dataset-index.json")
     environment["TRAINING_ENGINE_AUDIT_RECEIPT"] = str(tmp_path / "training-engine-audit.json")
+    environment["NPROC_PER_NODE"] = "8"
     fake_python = fake_bin / "preflight-python"
     _write_fake_preflight_python(
         fake_python,
@@ -184,10 +191,24 @@ def test_launcher_rejects_unverified_gemma4_batching_contract(tmp_path: Path) ->
     assert result.returncode == 2
     assert "must be a positive integer" in result.stderr
 
-    environment["MAX_PADDED_TOKENS_PER_MICROBATCH"] = "6144"
-    result = _run_launcher(environment)
-    assert result.returncode == 2
-    assert "5120 padded-token microbatch ceiling" in result.stderr
+    invalid_contracts = {
+        "MAX_PADDED_TOKENS_PER_MICROBATCH": "5120",
+        "MICRO_BATCH_SIZE_PER_GPU": "2",
+        "TRAIN_BATCH_SIZE": "64",
+        "FULL_VOCAB_KL_CHUNK_SIZE": "1024",
+        "MAX_LENGTH": "8192",
+        "MAX_TOKEN_LEN_PER_GPU": "8192",
+        "CLAMP_MIN_TOPK_KL": "true",
+        "CHECKPOINT_DISTILL_CHUNKS": "false",
+        "NPROC_PER_NODE": "4",
+    }
+    for name, value in invalid_contracts.items():
+        invalid_environment = dict(environment)
+        invalid_environment["MAX_PADDED_TOKENS_PER_MICROBATCH"] = "4096"
+        invalid_environment[name] = value
+        result = _run_launcher(invalid_environment)
+        assert result.returncode == 2, (name, result.stderr)
+        assert "audited overlay contract requires 8 GPUs" in result.stderr
 
 
 def test_launcher_rejects_invalid_gradient_gate(tmp_path: Path) -> None:
@@ -314,13 +335,16 @@ def test_launcher_routes_overlay_schema_to_strict_overlay_preflight(tmp_path: Pa
     source_index = tmp_path / "source-dataset-index.json"
     environment["SOURCE_DATASET_INDEX"] = str(source_index)
     environment["TRAINING_ENGINE_AUDIT_RECEIPT"] = str(tmp_path / "training-engine-audit.json")
+    environment["NPROC_PER_NODE"] = "8"
     fake_python = fake_bin / "preflight-python"
     argv_record = tmp_path / "preflight-argv.json"
+    verifier_argv_record = tmp_path / "verifier-argv.json"
     _write_fake_preflight_python(
         fake_python,
         _preflight_output(["/tmp/overlay-train.parquet"], ["/tmp/overlay-validation.parquet"]),
         schema_version=OVERLAY_SCHEMA_VERSION,
         argv_record=argv_record,
+        verifier_argv_record=verifier_argv_record,
     )
     environment["PYTHON_BIN"] = str(fake_python)
 
@@ -333,6 +357,19 @@ def test_launcher_routes_overlay_schema_to_strict_overlay_preflight(tmp_path: Pa
     assert argv[source_flag + 1] == str(source_index)
     receipt_flag = argv.index("--receipt-cache")
     assert argv[receipt_flag + 1] == str(tmp_path / "training_preflight_receipt.json")
+    verifier_argv = json.loads(verifier_argv_record.read_text(encoding="utf-8"))
+    expected_verifier_arguments = {
+        "--expected-world-size": "8",
+        "--expected-train-batch-size": "128",
+        "--expected-train-batches": "3",
+        "--expected-micro-batch-size-per-gpu": "1",
+        "--expected-max-padded-tokens-per-microbatch": "4096",
+        "--expected-kl-chunk-size": "4096",
+        "--expected-max-length": "12288",
+    }
+    for flag, expected in expected_verifier_arguments.items():
+        flag_index = verifier_argv.index(flag)
+        assert verifier_argv[flag_index + 1] == expected
     assert 'data.train_files=["/tmp/overlay-train.parquet"]' in result.stdout.splitlines()
 
 
@@ -340,6 +377,7 @@ def test_launcher_can_force_overlay_receipt_refresh(tmp_path: Path) -> None:
     environment, fake_bin = _base_environment(tmp_path)
     environment["SOURCE_DATASET_INDEX"] = str(tmp_path / "source-dataset-index.json")
     environment["TRAINING_ENGINE_AUDIT_RECEIPT"] = str(tmp_path / "training-engine-audit.json")
+    environment["NPROC_PER_NODE"] = "8"
     environment["REFRESH_PREFLIGHT_RECEIPT"] = "true"
     fake_python = fake_bin / "preflight-python"
     argv_record = tmp_path / "preflight-argv.json"

@@ -9,6 +9,31 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-07-31 — E2B-to-E4B paired-microbatch anomaly isolated; singleton production contract
+
+**Failure.** Fresh W&B smoke `b50c8b0e` used the BF16-forward/FP32-master stack and the previously
+authorized microbatch-2/5,120-padded-token policy. Gradient norms were `13.62`, `20.16`, then
+`356.42`; layers 0-1 `per_layer_input_gate` dominated the third step. The supervisor stopped before
+the anomalous optimizer update, so this run is not resumable.
+
+**Isolation.** An exact replay of the same first three deterministic train batches with per-
+microbatch diagnostics reproduced the third-batch failure at gradient norm `62.96`. The different
+magnitude establishes nondeterminism in the bad backward path. Microbatch 1 on the same batches
+produced `14.84`, `21.26`, and `16.10`, completed validation at loss `0.20946`, and saved a complete
+step-3 checkpoint. Disabling activation checkpointing or vocabulary-projection chunk checkpointing
+did not repair paired batches; the evidence points to BF16 cuDNN SDPA backward when two padded
+sequences share a microbatch, not the earlier NeMoRL shared-KV/use-cache bug.
+
+**Fix and gate.** Production now requires microbatch 1, keeps cuDNN SDPA for target parity, and uses
+a defensive 4,096 padded-token ceiling. The training-engine receipt is upgraded to bind the exact
+runtime contract and exercise all first three seed-42 batches (384 distinct rows) rather than only
+the first batch. Focused audit/verifier/launcher tests pass (`34 passed`), and the broader Gemma 4
+data, launcher, supervisor, checkpoint, batching, gradient-diagnostic, and engine suite passes
+(`252 passed`). A clean eight-GPU receipt and fresh three-step W&B smoke are still required before
+launching the 750-step run.
+
+---
+
 ## 2026-07-31 — Gemma 4 source traces complete; cross-engine target policy and preparation tooling
 
 **Scope.** Preparation only for the two Gemma 4 distillation-vs.-RL lines. No 750-step

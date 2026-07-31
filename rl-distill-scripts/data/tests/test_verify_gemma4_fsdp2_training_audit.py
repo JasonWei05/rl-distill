@@ -42,6 +42,52 @@ def _stub_student_identity(monkeypatch):
     )
 
 
+def _production_train_batches(
+    *,
+    train_row_count: int = 48615,
+    world_size: int = 8,
+    global_batch_size: int = 128,
+    batch_count: int = 3,
+) -> list[list[dict]]:
+    local_batch_size = global_batch_size // world_size
+    samplers = [
+        list(
+            DistributedSampler(
+                range(train_row_count),
+                num_replicas=world_size,
+                rank=rank,
+                shuffle=True,
+                seed=42,
+                drop_last=True,
+            )
+        )
+        for rank in range(world_size)
+    ]
+    return [
+        [
+            {
+                "batch_index": batch_offset + 1,
+                "rank": rank,
+                "global_indices": samplers[rank][
+                    batch_offset * local_batch_size : (batch_offset + 1) * local_batch_size
+                ],
+                "sequence_lengths": [2000] * local_batch_size,
+                "microbatch_count": local_batch_size,
+                "microbatches": [
+                    {
+                        "indices": [local_index],
+                        "sequence_lengths": [2000],
+                        "padded_tokens": 2000,
+                    }
+                    for local_index in range(local_batch_size)
+                ],
+            }
+            for rank in range(world_size)
+        ]
+        for batch_offset in range(batch_count)
+    ]
+
+
 def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
     identity = "a" * 64
     dataset_index = tmp_path / "dataset_index.json"
@@ -68,6 +114,10 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
             "forward_path": "compact_hidden",
             "fsdp_wrap": True,
             "backward_exercised": True,
+            "use_remove_padding": False,
+            "checkpoint_student_chunks": True,
+            "clamp_min_topk_kl": False,
+            "cudnn_sdpa": True,
             "model_dtype": "fp32",
             "fsdp_param_dtype": "bf16",
             "fsdp_reduce_dtype": "fp32",
@@ -75,8 +125,9 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
             "fsdp_cast_forward_inputs": True,
             "train_seed": 42,
             "train_batch_size": 128,
-            "micro_batch_size_per_gpu": 2,
-            "max_padded_tokens_per_microbatch": 5120,
+            "train_batches": 3,
+            "micro_batch_size_per_gpu": 1,
+            "max_padded_tokens_per_microbatch": 4096,
             "kl_chunk_size": 4096,
             "max_length": 12288,
             "top_k": 128,
@@ -105,32 +156,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
             "world_size": 8,
             "trace_count": 16,
             "position_count": 511,
-            "production_first_train_batch": [
-                {
-                    "rank": rank,
-                    "global_indices": list(
-                        DistributedSampler(
-                            range(48615),
-                            num_replicas=8,
-                            rank=rank,
-                            shuffle=True,
-                            seed=42,
-                            drop_last=True,
-                        )
-                    )[:16],
-                    "sequence_lengths": [2000] * 16,
-                    "microbatch_count": 8,
-                    "microbatches": [
-                        {
-                            "indices": [offset, offset + 1],
-                            "sequence_lengths": [2000, 2000],
-                            "padded_tokens": 4000,
-                        }
-                        for offset in range(0, 16, 2)
-                    ],
-                }
-                for rank in range(8)
-            ],
+            "production_train_batches": _production_train_batches(),
         },
         "aggregate": {
             "topk_overlap_fraction": {"mean": 1.0},
@@ -139,7 +165,16 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
             "stored_support_probability_l1": {"mean": 0.0002},
         },
         "exact_serialization": {"ordered_topk_exact": {"mean": 1.0}},
-        "backward": {"total_norm": 1.2},
+        "backward": {
+            "batch_count": 3,
+            "total_norm": 1.4,
+            "max_batch_index": 3,
+            "batches": [
+                {"batch_index": 1, "total_norm": 1.2},
+                {"batch_index": 2, "total_norm": 1.3},
+                {"batch_index": 3, "total_norm": 1.4},
+            ],
+        },
         "implementation": {
             "commit": "d" * 40,
             "dirty": False,
@@ -165,29 +200,62 @@ def test_verifier_accepts_exact_production_contract(tmp_path: Path) -> None:
     assert verified["status"] == "pass"
 
 
+def test_verifier_binds_receipt_to_runtime_contract(tmp_path: Path) -> None:
+    receipt, dataset_index, student_model, _ = _fixture(tmp_path)
+
+    with pytest.raises(verifier.TrainingAuditReceiptError, match="micro_batch_size_per_gpu"):
+        verifier.verify_receipt(
+            receipt_path=receipt,
+            dataset_index_path=dataset_index,
+            student_model_path=student_model,
+            expected_world_size=8,
+            expected_micro_batch_size_per_gpu=2,
+            verify_repository=False,
+        )
+
+
 @pytest.mark.parametrize(
     ("mutator", "match"),
     [
         (lambda report: report["contract"].update(fsdp_param_dtype="fp32"), "fsdp_param_dtype"),
         (lambda report: report["contract"].update(gradient_checkpointing=False), "gradient_checkpointing"),
+        (lambda report: report["contract"].update(checkpoint_student_chunks=False), "checkpoint_student_chunks"),
         (lambda report: report["selection"].update(position_count=510), "16 traces and 511"),
         (
             lambda report: report["aggregate"]["stored_support_weighted_abs_logprob_delta"].update(mean=0.01),
             "weighted logprob drift",
         ),
         (
-            lambda report: report["selection"]["production_first_train_batch"][0]["global_indices"].__setitem__(0, -1),
+            lambda report: report["selection"]["production_train_batches"][0][0]["global_indices"].__setitem__(0, -1),
             "sampler indices",
         ),
         (
-            lambda report: report["selection"]["production_first_train_batch"][0]["microbatches"][0].update(
+            lambda report: report["selection"]["production_train_batches"][0][0]["microbatches"][0].update(
                 padded_tokens=6000
             ),
             "padded_tokens",
         ),
         (
-            lambda report: report["selection"]["production_first_train_batch"][0].update(microbatch_count=9),
-            "microbatch counts differ",
+            lambda report: report["selection"]["production_train_batches"][0][0]["microbatches"][0].update(
+                indices=[16]
+            ),
+            "invalid local row index",
+        ),
+        (
+            lambda report: report["selection"]["production_train_batches"][0][0].update(microbatch_count=15),
+            "microbatch_count",
+        ),
+        (
+            lambda report: report["selection"]["production_train_batches"][1][0].update(batch_index=1),
+            "production batch index",
+        ),
+        (
+            lambda report: report["selection"]["production_train_batches"].pop(),
+            "exactly 3 production train-batch layouts",
+        ),
+        (
+            lambda report: report["backward"]["batches"][2].update(total_norm=51.0),
+            "required <= 50.0",
         ),
         (
             lambda report: report["student_model"].update(model_identity_sha256="f" * 64),

@@ -305,12 +305,29 @@ export CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS:-1}
 export TEACHER_TOP_K=${TEACHER_TOP_K:-128}
 export TEACHER_TOPK_VALIDATION_TOLERANCE=${TEACHER_TOPK_VALIDATION_TOLERANCE:-0.0025}
 export FULL_VOCAB_KL_CHUNK_SIZE=${FULL_VOCAB_KL_CHUNK_SIZE:-4096}
+export TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-128}
+export MICRO_BATCH_SIZE_PER_GPU=${MICRO_BATCH_SIZE_PER_GPU:-1}
+export MAX_LENGTH=${MAX_LENGTH:-12288}
+export MAX_TOKEN_LEN_PER_GPU=${MAX_TOKEN_LEN_PER_GPU:-${MAX_LENGTH}}
+for positive_name in FULL_VOCAB_KL_CHUNK_SIZE TRAIN_BATCH_SIZE MICRO_BATCH_SIZE_PER_GPU MAX_LENGTH \
+    MAX_TOKEN_LEN_PER_GPU; do
+    if ! [[ ${!positive_name} =~ ^[1-9][0-9]*$ ]]; then
+        echo "${positive_name} must be a positive integer" >&2
+        exit 2
+    fi
+done
 # The historical Gemma 3 top-k objective is a truncated contribution to the
 # full-vocabulary forward KL and can legitimately be negative when the omitted
 # tail would supply the compensating positive term. Clamping would silently
 # zero its gradient, so preserve the established objective by default.
 export CLAMP_MIN_TOPK_KL=${CLAMP_MIN_TOPK_KL:-false}
 export CHECKPOINT_DISTILL_CHUNKS=${CHECKPOINT_DISTILL_CHUNKS:-true}
+for boolean_name in CLAMP_MIN_TOPK_KL CHECKPOINT_DISTILL_CHUNKS; do
+    case "${!boolean_name,,}" in
+        true|false) ;;
+        *) echo "${boolean_name} must be true or false" >&2; exit 2 ;;
+    esac
+done
 export MODEL_DTYPE=${MODEL_DTYPE:-fp32}
 export ENABLE_GRADIENT_CHECKPOINTING=${ENABLE_GRADIENT_CHECKPOINTING:-true}
 case "${ENABLE_GRADIENT_CHECKPOINTING,,}" in
@@ -354,11 +371,12 @@ case "${FSDP_CAST_FORWARD_INPUTS,,}" in
     *) echo "FSDP_CAST_FORWARD_INPUTS must be true or false" >&2; exit 2 ;;
 esac
 
-# Gemma 4 BF16 cuDNN SDPA has a reproducible backward pathology when two long
-# padded sequences share a microbatch. Keep cuDNN enabled for exact target
-# parity, but isolate a row whenever max_sequence_length * batch_size would
-# exceed the verified 5,120-token ceiling.
-export MAX_PADDED_TOKENS_PER_MICROBATCH=${MAX_PADDED_TOKENS_PER_MICROBATCH:-5120}
+# Gemma 4 BF16 cuDNN SDPA has a reproducible, magnitude-nondeterministic
+# backward pathology when two sequences share a microbatch. It appeared on the
+# third deterministic production batch even below the earlier 5,120-token
+# ceiling. Production therefore uses singleton microbatches; retain a 4,096
+# ceiling as a fail-safe if the batch-size contract is changed in the future.
+export MAX_PADDED_TOKENS_PER_MICROBATCH=${MAX_PADDED_TOKENS_PER_MICROBATCH:-4096}
 if ! [[ "${MAX_PADDED_TOKENS_PER_MICROBATCH}" =~ ^[1-9][0-9]*$ ]]; then
     echo "MAX_PADDED_TOKENS_PER_MICROBATCH must be a positive integer" >&2
     exit 2
@@ -375,16 +393,29 @@ if [ "${DATASET_SCHEMA_VERSION:-}" = "gemma4-hf-bf16-sdpa-topk-overlay-v1" ]; th
        [ "${FSDP_CAST_FORWARD_INPUTS,,}" != "true" ] || \
        [ "${ENABLE_GRADIENT_CHECKPOINTING,,}" != "true" ] || \
        [ "${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP}" != "Gemma4TextDecoderLayer" ] || \
-       [ "${MAX_PADDED_TOKENS_PER_MICROBATCH}" != "5120" ] || \
+       [ "${TRAIN_BATCH_SIZE:-128}" != "128" ] || \
+       [ "${MICRO_BATCH_SIZE_PER_GPU:-1}" != "1" ] || \
+       [ "${MAX_PADDED_TOKENS_PER_MICROBATCH}" != "4096" ] || \
+       [ "${FULL_VOCAB_KL_CHUNK_SIZE}" != "4096" ] || \
+       [ "${MAX_LENGTH}" != "12288" ] || [ "${MAX_TOKEN_LEN_PER_GPU}" != "12288" ] || \
+       [ "${CLAMP_MIN_TOPK_KL,,}" != "false" ] || \
+       [ "${CHECKPOINT_DISTILL_CHUNKS,,}" != "true" ] || \
+       [ "${NPROC_PER_NODE}" != "8" ] || \
        [ "${VERL_GEMMA4_CUDNN_SDPA}" != "1" ]; then
-        echo "The audited overlay contract requires MODEL_DTYPE=fp32, BF16 FSDP forward parameters, FP32 reductions/buffers, FSDP input casting, activation checkpointing, Gemma4TextDecoderLayer wrapping, cuDNN SDPA, and a 5120 padded-token microbatch ceiling" >&2
+        echo "The audited overlay contract requires 8 GPUs, global batch 128, singleton microbatches, a 4096 padded-token ceiling/chunk size, max lengths 12288, the unclamped checkpointed distillation objective, MODEL_DTYPE=fp32, BF16 FSDP forward parameters, FP32 reductions/buffers, FSDP input casting, activation checkpointing, Gemma4TextDecoderLayer wrapping, and cuDNN SDPA" >&2
         exit 2
     fi
     "${PYTHON_BIN}" "${PROJECT_ROOT}/rl-distill-scripts/data/verify_gemma4_fsdp2_training_audit.py" \
         --receipt "${TRAINING_ENGINE_AUDIT_RECEIPT}" \
         --dataset-index "${DATASET_INDEX}" \
         --student-model "${MODEL_PATH}" \
-        --expected-world-size "${NPROC_PER_NODE}"
+        --expected-world-size "${NPROC_PER_NODE}" \
+        --expected-train-batch-size "${TRAIN_BATCH_SIZE}" \
+        --expected-train-batches 3 \
+        --expected-micro-batch-size-per-gpu "${MICRO_BATCH_SIZE_PER_GPU}" \
+        --expected-max-padded-tokens-per-microbatch "${MAX_PADDED_TOKENS_PER_MICROBATCH}" \
+        --expected-kl-chunk-size "${FULL_VOCAB_KL_CHUNK_SIZE}" \
+        --expected-max-length "${MAX_LENGTH}"
 fi
 
 # A bad Gemma 4 training forward can have a plausible loss while its backward
@@ -399,14 +430,6 @@ if ! [[ "${VERL_MAX_PRECLIP_GRAD_NORM}" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
     echo "VERL_MAX_PRECLIP_GRAD_NORM must be a positive decimal number" >&2
     exit 2
 fi
-export TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-128}
-export MICRO_BATCH_SIZE_PER_GPU=${MICRO_BATCH_SIZE_PER_GPU:-2}
-if ! [[ "${MICRO_BATCH_SIZE_PER_GPU}" =~ ^[1-9][0-9]*$ ]]; then
-    echo "MICRO_BATCH_SIZE_PER_GPU must be a positive integer" >&2
-    exit 2
-fi
-export MAX_LENGTH=${MAX_LENGTH:-12288}
-export MAX_TOKEN_LEN_PER_GPU=${MAX_TOKEN_LEN_PER_GPU:-${MAX_LENGTH}}
 export TOTAL_TRAINING_STEPS
 export LR=${LR:-2e-6}
 export LR_WARMUP_STEPS=${LR_WARMUP_STEPS:-100}

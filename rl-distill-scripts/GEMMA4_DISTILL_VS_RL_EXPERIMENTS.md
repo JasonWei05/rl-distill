@@ -175,7 +175,9 @@ histories.
   gate completed three optimizer steps at microbatch size 2 and KL chunk size 4,096 using the full
   4,096-prompt-plus-8,192-response contract, then passed a smaller final validation microbatch and
   saved model, optimizer, dataloader, and directly loadable HF state. Peak device memory was 65,394
-  MiB and steady-state step time averaged 109.45 seconds for 786,432 global tokens.
+  MiB and steady-state step time averaged 109.45 seconds for 786,432 global tokens. This historical
+  gate established shape and memory support; later production-batch diagnostics superseded its
+  microbatch-2 recommendation.
 - A live E4B-RL step-100 trace was generated through vLLM 0.25.1 with exact rank-1-through-128
   full-vocabulary-normalized log probabilities and stored token IDs. That trace then passed a real
   two-rank E2B update, step-zero/step-one validation, checkpoint save, resume, and serving check.
@@ -204,13 +206,15 @@ histories.
 - A separate engine bug was found while isolating precision: a bare `module.to(bfloat16)` downcasts
   Gemma 4's model-created FP32 rotary-frequency buffers. The FSDP loader now casts parameters while
   preserving those buffers exactly, with a focused regression test.
-- The exact seed-42 first E2B-to-E4B production batch exposed a separate cuDNN SDPA BF16 backward
-  pathology when two longer padded sequences share one microbatch. The unconstrained microbatch-2
-  layout produced gradient norm `387.89`; microbatch 1 produced `14.84`, disabling cuDNN produced
-  `16.29`, and disabling activation or vocabulary-chunk checkpointing did not fix it. Production
-  retains cuDNN for target parity and length-sorts each local batch while enforcing
-  `max_sequence_length * microbatch_size <= 5,120` for multi-sequence microbatches. The exact batch
-  then completed nine synchronized microbatches per rank with gradient norm `13.66`.
+- The exact seed-42 production sequence exposed a separate cuDNN SDPA BF16 backward pathology when
+  two padded sequences share one microbatch. Bounding the first batch to 5,120 padded tokens reduced
+  its gradient norm from `387.89` to `13.66`, but a fresh three-step W&B smoke (`b50c8b0e`) still
+  reached `356.42` on batch three. An exact diagnostic replay stopped at `62.96`, confirming that the
+  anomaly magnitude is nondeterministic. Replaying the same three batches with singleton
+  microbatches produced norms `14.84`, `21.26`, and `16.10`, completed validation at loss `0.20946`,
+  and saved a checkpoint. Disabling activation or vocabulary-chunk checkpointing did not fix the
+  paired path. Production therefore retains cuDNN for target parity but requires microbatch 1; the
+  4,096 padded-token ceiling is only a defensive contract if batching changes later.
 - Deterministic trace-contract failures now return a distinct generator status, and the supervisor
   refuses identical-seed retries for that status instead of looping on an unrecoverable row.
 - The validation loader retains a final partial batch only when exact distillation coverage is
@@ -627,11 +631,12 @@ to `2e-7` at step 750.
 - Precomputed hidden-state projection supports ragged microbatches by mapping packed response
   positions back to per-sample padded coordinates. Training batches remain strictly divisible by
   the configured microbatch size; forward-only validation permits a smaller final microbatch while
-  preserving any configured force-group boundary. The verified eight-H100 default is microbatch 2.
-- Fixed microbatch-2 training must enforce a 5,120 padded-token ceiling. Rows longer than the ceiling
-  remain valid singletons; multi-sequence microbatches may not exceed it, and all data-parallel ranks
-  must synchronize to the same microbatch count. The signed audit reconstructs the exact seed-42
-  first 128-row train batch and verifies this layout before authorizing production.
+  preserving any configured force-group boundary. The verified eight-H100 production default is
+  microbatch 1.
+- Production must use singleton microbatches and a defensive 4,096 padded-token ceiling. All
+  data-parallel ranks must synchronize to the same microbatch count. The signed audit reconstructs
+  the exact first three seed-42 train batches (384 distinct rows), verifies every rank layout, and
+  exercises backward separately on all three before authorizing production.
 - Vocabulary projection chunks must use activation checkpointing during training; otherwise each
   chunk's full-vocabulary autograd intermediates remain live until backward and defeat the memory
   bound at 8,192 response tokens.
@@ -1021,7 +1026,7 @@ test "${GEMMA4_TRACE_RESUME_AUTHORIZED}" = YES && \
 The primary experiment must use the finalized unsharded-HF overlay, not the immutable source's vLLM
 targets. Set `DATASET_INDEX` to the overlay index and `SOURCE_DATASET_INDEX` to the exact vLLM source
 index so the launcher selects the strict overlay preflight. After the overlay passes preflight and a
-one-step no-upload gate, launch the 750-step run with global batch 128, microbatch 2, and a
+three-step W&B no-upload gate, launch the 750-step run with global batch 128, microbatch 1, and a
 4,096-token vocabulary-projection chunk. Train for at most two epochs, warm up to `2e-6` over 100
 optimizer steps, then decay linearly to `2e-7` at step 750. Validation runs over all 128 registered
 rows with no distributed padding. Save and upload directly loadable HF checkpoints at steps 250,
@@ -1045,7 +1050,8 @@ test "${GEMMA4_E2B_TO_E4B_PRODUCTION_AUTHORIZED}" = YES && \
   EXPECTED_STUDENT_IDENTITY_SHA256=acdc0d2bcb8f676593b5387807da1cd1b84a9e26fa279db4a86f54a211055b2d \
   EXPECTED_TRAIN_QUESTIONS=9723 EXPECTED_VALIDATION_QUESTIONS=128 \
   EXPECTED_TRAIN_SAMPLES_PER_QUESTION=5 EXPECTED_VALIDATION_SAMPLES_PER_QUESTION=1 \
-  MICRO_BATCH_SIZE_PER_GPU=2 MAX_PADDED_TOKENS_PER_MICROBATCH=5120 \
+  TRAINING_ENGINE_AUDIT_RECEIPT=/tmp/verl/audits/gemma4-e2b-overlay-vs-fsdp2-production-three-batch.json \
+  MICRO_BATCH_SIZE_PER_GPU=1 MAX_PADDED_TOKENS_PER_MICROBATCH=4096 \
   FULL_VOCAB_KL_CHUNK_SIZE=4096 TRAIN_BATCH_SIZE=128 \
   LR=2e-6 LR_WARMUP_STEPS=100 LR_SCHEDULER_TYPE=linear MIN_LR_RATIO=0.1 \
   TOTAL_EPOCHS=2 TOTAL_TRAINING_STEPS=750 SAVE_FREQ=250 TEST_FREQ=10 \
@@ -1214,7 +1220,7 @@ defaults are proposals, not silently adopted decisions.
   Recommended: response-token mean to match the existing RL token-level loss convention, while
   reporting sequence-weighted validation metrics as diagnostics.
 - **D19 — Batch interpretation: resolved.** Use global batch 128 sequences per optimizer update,
-  split across eight data-parallel ranks. With microbatch 2, each rank accumulates eight
+  split across eight data-parallel ranks. With microbatch 1, each rank accumulates sixteen
   microbatches per optimizer step.
 - **D20 — Gradient clipping and epsilon.** These were not specified. Recommended: global grad norm
   1.0 and AdamW epsilon `1e-8`.
@@ -1400,7 +1406,7 @@ defaults are proposals, not silently adopted decisions.
   equivalence; that requires a separate real-engine audit.
 - **2026-07-31 — E2B-to-E4B production authorized after repository push.** The rescorer, audit,
   focused CPU tests, and guarded operator documentation are prepared. After the training-engine
-  overlay passes parity, complete preflight, and a one-step no-upload E4B gate, launch the 750-step
+  overlay passes parity, complete preflight, and a three-step no-upload E4B gate, launch the 750-step
   SFT with W&B logging and private HF checkpoint uploads.
   The opposite distillation direction, benchmark production, and post-distillation RL remain future
   work.
@@ -1416,3 +1422,9 @@ defaults are proposals, not silently adopted decisions.
   the full BF16-forward/FP32-master train/checkpoint/backward audit passed with exact ordered top-128
   support and sub-`0.001` sampled-token drift p95. Production now requires that receipt and preserves
   FP32 Gemma 4 rotary buffers before a fresh smoke and run identity.
+- **2026-07-31 — Paired cuDNN-SDPA microbatches rejected for production.** The first-batch 5,120-token
+  bound did not protect the third deterministic batch: W&B smoke `b50c8b0e` reached gradient norm
+  `356.42`, and an exact replay reached `62.96`. The same first three batches at microbatch 1 stayed
+  at `14.84`, `21.26`, and `16.10` and completed validation/checkpointing. Production now requires
+  singleton microbatches, a defensive 4,096 ceiling, and a receipt covering all three opening
+  batches before a fresh three-step W&B gate.
