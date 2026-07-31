@@ -149,6 +149,24 @@ def test_launcher_uses_preflight_hydra_lists_without_eval(tmp_path: Path) -> Non
     )
 
 
+def test_validate_only_runs_all_preflight_checks_without_starting_torchrun(tmp_path: Path) -> None:
+    environment, fake_bin = _base_environment(tmp_path)
+    marker = tmp_path / "torchrun-was-called"
+    _write_executable(fake_bin / "torchrun", f"#!/usr/bin/env bash\ntouch {marker}\n")
+    fake_python = fake_bin / "preflight-python"
+    _write_fake_preflight_python(
+        fake_python,
+        _preflight_output(["/tmp/train.parquet"], ["/tmp/validation.parquet"]),
+    )
+    environment.update({"PYTHON_BIN": str(fake_python), "VALIDATE_ONLY": "true"})
+
+    result = _run_launcher(environment)
+
+    assert result.returncode == 0, result.stderr
+    assert "preflight and training-engine audit validation passed" in result.stdout
+    assert not marker.exists()
+
+
 def test_launcher_rejects_non_bf16_gemma4_parameter_views_without_explicit_opt_in(tmp_path: Path) -> None:
     environment, fake_bin = _base_environment(tmp_path)
     fake_python = fake_bin / "preflight-python"

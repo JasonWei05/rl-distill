@@ -49,7 +49,9 @@ DEFAULT_DATASET_INDEX = Path("/tmp/verl/datasets/gemma4-e2b-base-topk128-hf-over
 DEFAULT_SOURCE_INDEX = Path(
     "/tmp/verl/datasets/gemma4-e2b-base-topk128-traces-e32aaa02681a-val128-seed42/dataset_index.json"
 )
-DEFAULT_TRAINING_ENGINE_AUDIT_RECEIPT = Path("/tmp/verl/audits/gemma4-e2b-overlay-vs-fsdp2-production.json")
+DEFAULT_TRAINING_ENGINE_AUDIT_RECEIPT = Path("/tmp/verl/audits/gemma4-e2b-overlay-vs-fsdp2-production-three-batch.json")
+PRODUCTION_MICRO_BATCH_SIZE_PER_GPU = 1
+PRODUCTION_MAX_PADDED_TOKENS_PER_MICROBATCH = 4096
 TEACHER_IDENTITY_SHA256 = "2d48d343709dcae087d6ff2def9f09d2950ca66dc2183a8bee38850c4ddbbb36"
 STUDENT_IDENTITY_SHA256 = "acdc0d2bcb8f676593b5387807da1cd1b84a9e26fa279db4a86f54a211055b2d"
 NUMERICAL_FAILURE_MARKERS = (
@@ -253,8 +255,8 @@ def build_child_environment(args: argparse.Namespace, run_id: str) -> dict[str, 
             "EXPECTED_VALIDATION_QUESTIONS": "128",
             "EXPECTED_TRAIN_SAMPLES_PER_QUESTION": "5",
             "EXPECTED_VALIDATION_SAMPLES_PER_QUESTION": "1",
-            "MICRO_BATCH_SIZE_PER_GPU": "2",
-            "MAX_PADDED_TOKENS_PER_MICROBATCH": "5120",
+            "MICRO_BATCH_SIZE_PER_GPU": str(PRODUCTION_MICRO_BATCH_SIZE_PER_GPU),
+            "MAX_PADDED_TOKENS_PER_MICROBATCH": str(PRODUCTION_MAX_PADDED_TOKENS_PER_MICROBATCH),
             "FULL_VOCAB_KL_CHUNK_SIZE": "4096",
             "TRAIN_BATCH_SIZE": "128",
             "LR": "2e-6",
@@ -379,7 +381,18 @@ def main() -> int:
     log(f"W&B run: {state['wandb_path']}")
     log(f"Checkpoint directory: {args.checkpoint_dir}")
     if args.dry_run:
-        log("Dry run passed")
+        validation_environment = dict(child_environment)
+        validation_environment["VALIDATE_ONLY"] = "true"
+        result = subprocess.run(
+            ["bash", str(LAUNCHER)],
+            cwd=PROJECT_ROOT,
+            env=validation_environment,
+            check=False,
+        )
+        if result.returncode != 0:
+            log(f"Dry-run launcher validation failed with rc={result.returncode}")
+            return result.returncode
+        log("Dry run passed full launcher preflight and audit verification")
         return 0
 
     signal.signal(signal.SIGTERM, request_stop)

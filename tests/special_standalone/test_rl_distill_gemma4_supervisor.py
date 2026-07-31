@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from argparse import Namespace
 from pathlib import Path
 
@@ -123,8 +124,56 @@ def test_child_environment_pins_verified_gemma4_batching_contract(tmp_path: Path
 
     environment = supervisor.build_child_environment(args, "run123")
 
-    assert environment["MICRO_BATCH_SIZE_PER_GPU"] == "2"
-    assert environment["MAX_PADDED_TOKENS_PER_MICROBATCH"] == "5120"
+    assert environment["MICRO_BATCH_SIZE_PER_GPU"] == "1"
+    assert environment["MAX_PADDED_TOKENS_PER_MICROBATCH"] == "4096"
     assert environment["VERL_GEMMA4_CUDNN_SDPA"] == "1"
     assert environment["FSDP_CAST_FORWARD_INPUTS"] == "true"
     assert environment["VERL_MAX_PRECLIP_GRAD_NORM"] == "50.0"
+
+
+def test_default_receipt_is_the_three_batch_production_audit():
+    assert supervisor.DEFAULT_TRAINING_ENGINE_AUDIT_RECEIPT.name == (
+        "gemma4-e2b-overlay-vs-fsdp2-production-three-batch.json"
+    )
+
+
+def test_dry_run_executes_full_launcher_validation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    args = Namespace(
+        model_path=tmp_path / "model",
+        dataset_index=tmp_path / "overlay.json",
+        source_dataset_index=tmp_path / "source.json",
+        training_engine_audit_receipt=tmp_path / "audit.json",
+        max_steps=3,
+        save_freq=3,
+        test_freq=1,
+        project="test-project",
+        experiment_name="test-experiment",
+        checkpoint_dir=tmp_path / "checkpoints",
+        max_checkpoints_to_keep=4,
+        hf_push=False,
+        hf_repo="unused",
+        max_grad_norm=50.0,
+        grad_diagnostics=False,
+        supervisor_dir=tmp_path / "supervisor",
+        gpus=8,
+        entity="test-entity",
+        dry_run=True,
+    )
+    observed: dict[str, object] = {}
+
+    def fake_run(command, *, cwd, env, check):
+        observed.update(command=command, cwd=cwd, validate_only=env.get("VALIDATE_ONLY"), check=check)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(supervisor, "load_dotenv", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(supervisor, "parse_args", lambda: args)
+    monkeypatch.setattr(supervisor, "validate_environment", lambda _args: None)
+    monkeypatch.setattr(supervisor.subprocess, "run", fake_run)
+
+    assert supervisor.main() == 0
+    assert observed == {
+        "command": ["bash", str(supervisor.LAUNCHER)],
+        "cwd": supervisor.PROJECT_ROOT,
+        "validate_only": "true",
+        "check": False,
+    }

@@ -57,6 +57,7 @@ PREFLIGHT_LOCAL_FILES_ONLY=${PREFLIGHT_LOCAL_FILES_ONLY:-true}
 PREFLIGHT_RECEIPT_CACHE=${PREFLIGHT_RECEIPT_CACHE:-}
 TRAINING_ENGINE_AUDIT_RECEIPT=${TRAINING_ENGINE_AUDIT_RECEIPT:-}
 REFRESH_PREFLIGHT_RECEIPT=${REFRESH_PREFLIGHT_RECEIPT:-false}
+VALIDATE_ONLY=${VALIDATE_ONLY:-false}
 TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS:-750}
 NPROC_PER_NODE=${NPROC_PER_NODE:-8}
 EXPECTED_TRAIN_QUESTIONS=${EXPECTED_TRAIN_QUESTIONS:-9723}
@@ -84,6 +85,10 @@ esac
 case "${REFRESH_PREFLIGHT_RECEIPT,,}" in
     true|false) ;;
     *) echo "REFRESH_PREFLIGHT_RECEIPT must be true or false" >&2; exit 2 ;;
+esac
+case "${VALIDATE_ONLY,,}" in
+    true|false) ;;
+    *) echo "VALIDATE_ONLY must be true or false" >&2; exit 2 ;;
 esac
 for count_name in EXPECTED_TRAIN_QUESTIONS EXPECTED_VALIDATION_QUESTIONS \
     EXPECTED_TRAIN_SAMPLES_PER_QUESTION EXPECTED_VALIDATION_SAMPLES_PER_QUESTION NPROC_PER_NODE; do
@@ -529,6 +534,11 @@ COMMON_OVERRIDES=(
 COMMON_OVERRIDES+=(
     "+engine.mixed_precision={param_dtype:${FSDP_PARAM_DTYPE},reduce_dtype:${FSDP_REDUCE_DTYPE},buffer_dtype:${FSDP_BUFFER_DTYPE},cast_forward_inputs:${FSDP_CAST_FORWARD_INPUTS}}"
 )
+
+if [ "${VALIDATE_ONLY,,}" = "true" ]; then
+    echo "Gemma 4 launcher preflight and training-engine audit validation passed"
+    exit 0
+fi
 
 cd "${PROJECT_ROOT}/rl-distill-scripts"
 if [ "${NNODES}" = "1" ]; then
