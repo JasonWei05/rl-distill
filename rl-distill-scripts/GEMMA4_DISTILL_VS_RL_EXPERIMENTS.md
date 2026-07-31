@@ -14,8 +14,10 @@ bundles are now public on Hugging Face at independently verified commits: E2B-ba
 `JWei05/gemma4-e2b-base-topk128-traces@e32aaa02681ae83b3d7256b1b155c9084da2f289` and E4B-RL
 step-100 traces at `JWei05/gemma4-e4b-rl100-topk128-traces@2b6e49a0a456ee9d67b16a1dc61785562bee90c9`.
 The E2B-base-to-E4B validation contract is the deterministic clean 128-question subset recorded
-below, with one trace per question. The opposite distillation line, production benchmark matrix, and
-post-distillation RL remain unstarted and unauthorized.
+below, with one trace per question. The historical E4B-RL-to-E2B distillation and its three-model
+priority/OOD benchmark matrix are complete, although that training run predates the latest FSDP2
+safety contract. E2B-base-to-E4B distillation and the subsequent E4B RL phase remain unstarted and
+unauthorized.
 
 Last updated: 2026-07-31 UTC.
 
@@ -59,11 +61,14 @@ chunks, and lazy Parquet row-group ingestion. The resumable trace producer, vali
 identity-bound source-bundle preflight, 64-sample math evaluator, and pinned OOD wrapper are implemented.
 An E4B-generated trace has passed the complete path into a real E2B student update.
 
-Preparation is therefore at complete-generation and end-to-end gate status for both directions, not
-completed-experiment status. The E2B-base overlay, source+overlay preflight, and corrected real FSDP2
-sequential audit are complete; the next execution boundary is a clean-HEAD receipt and fresh
-three-step E4B smoke followed by the
-supervised 750-step run. The source
+Preparation is at complete-generation and end-to-end gate status for both directions. For the first
+experimental line, the E4B-RL-to-E2B unsharded-HF overlay and the 750-step production distillation
+run and its registered three-model priority/OOD evaluation are complete. That run predates the
+latest real-FSDP2 sequential-audit and deterministic-backward hardening, so it is a valid historical
+experimental result but must not be treated as a clean-HEAD validation of the newer training safety
+contract. For the second line, the E2B-base overlay, source+overlay preflight, and corrected real
+FSDP2 sequential audit are complete; the next execution boundary is a clean-HEAD receipt and fresh
+three-step E4B smoke followed by the supervised 750-step run. The source
 train file has 9,723 rows but only 9,543 distinct question texts, and seven of the 200 validation
 question texts also occur in train. The bundles deliberately preserve that historical roster for
 exact RL comparability; the overlap hashes and clean-193 evaluation requirement must remain visible
@@ -946,14 +951,16 @@ direction. Their current status is:
      only behind an explicit smoke-only override.
 10. `eval_math_passk.py`, `gemma4_eval_metrics.py`, and `eval_gemma4_math.py` — implemented and unit
    tested
-   - generation defaults to exactly 64 deterministic samples/question, streams finalized audit
-     JSONL one question at a time, and keeps only compact metric summaries in host memory;
-   - offline aggregation implements the requested unbiased pass@k and exposes the still-open
-     mean@k/maj@k conventions as explicit choices rather than silently fixing them.
+   - the registered production manifest uses the smallest power-of-two samples/question that makes
+     each dataset exceed 2,000 requests, streams finalized audit JSONL one question at a time, and
+     keeps only compact metric summaries in host memory;
+   - offline aggregation implements unbiased pass@k and the resolved full-sample mean@k/maj@k
+     convention with semantic answer classes and conservative tie handling.
 11. `eval_gemma4_ood.py` — implemented and unit tested
-   - pinned lm-eval invocation for MMLU, WinoGrande, TriviaQA, HellaSwag, and ARC-Challenge;
-   - the harness submodule/environment is not initialized in this workspace, so no real OOD
-     benchmark has been launched.
+   - pinned lm-eval invocation for the continuity matrix and the registered Gemma 4 MMLU-Pro,
+     GPQA-Diamond, and reduced 14,042-item MMMLU profile;
+   - the pinned harness environment is initialized, and the complete three-model OOD matrix has
+     finished with result/sample coverage audits.
 
 Each expensive entry point supports a tiny bounded smoke configuration and records or prints its
 resolved configuration before work begins. The runbook is deliberately fail-closed:
@@ -968,18 +975,21 @@ resolved configuration before work begins. The runbook is deliberately fail-clos
    SHA-256, and non-LFS Git blob SHA-1.
 3. **Optional diagnostic:** rerun the integrated cross-engine audit if a final committed-script
    report is required, then review its explicit pass/fail JSON.
-4. **Authorized for E2B-to-E4B:** run the native-forward parity gate and bulk unsharded-HF target
-   rescore into a separate output root.
-5. After the complete overlay exists, run the overlay-specific preflight
-   and launcher route with both `DATASET_INDEX` and `SOURCE_DATASET_INDEX`; only its emitted shard
-   lists may reach the trainer.
-6. Run the authorized one-step, no-upload E4B student smoke.
-7. After smoke, code, and artifact review pass, launch the authorized 750-step E2B-to-E4B run.
-8. Generate immutable evaluation traces, aggregate math metrics offline, then run the full pinned OOD
-   matrix without `--limit`.
+4. **Complete for E2B-to-E4B:** native-forward parity, bulk unsharded-HF target rescoring, overlay
+   finalization, source+overlay preflight, and the real sequential FSDP2 audit.
+5. **Next E2B-to-E4B boundary:** create a clean-HEAD receipt and run the fresh three-step, no-upload
+   E4B student smoke using the audited singleton-microbatch contract.
+6. After smoke, code, and artifact review pass, launch the separately authorized 750-step
+   E2B-to-E4B run.
+7. **Complete for the historical E4B-to-E2B result:** the 750-step checkpoint and registered
+   three-model priority/OOD matrix. Treat this run as predating, not validating, the newer FSDP2
+   safety contract.
+8. Keep post-distillation E4B RL as a future phase requiring repaired NeMoRL provenance and explicit
+   launch authorization.
 
-Source-bundle publication is complete. E2B target rescoring, its E4B smoke, and its 750-step run are
-authorized. The opposite direction, benchmark production, and post-distillation RL remain future work.
+Source-bundle publication, both target overlays, the first distillation line, and its current
+benchmark matrix are complete. The second distillation line and post-distillation RL remain future
+execution work.
 
 ### Historical/resume-only trace commands — DO NOT RUN
 
@@ -1026,6 +1036,37 @@ test "${GEMMA4_TRACE_RESUME_AUTHORIZED}" = YES && \
     --hf-repo-id JWei05/gemma4-e2b-base-topk128-traces \
     --gpus 0,1,2,3,4,5,6,7
 ```
+
+### Historical E4B-RL-step-100-to-E2B four-H100 run
+
+The dedicated setup uses the immutable E4B-RL source bundle, writes HF BF16+SDPA targets to a
+separate overlay, initializes the student from the immutable E2B base snapshot, and never
+re-tokenizes. Bulk overlay scoring assigns one worker to each local GPU `0,1,2,3`; the completed
+historical distillation used four FSDP2 ranks, microbatch 2 per GPU, global batch 128, two epochs
+capped at 750 steps, AdamW `(0.9, 0.98)`, weight decay `0.1`, 100 warmup steps, peak LR `2e-6`,
+linear decay to ratio `0.1`, validation every 10 steps, and saves/uploads at steps 250, 500, and 750.
+
+The retained overlay-preparation helper remains useful for inspecting or reconstructing its immutable
+targets:
+
+```bash
+rl-distill-scripts/prepare_gemma4_e4b_rl_to_e2b_topk_overlay_4gpu.sh status
+
+GEMMA4_E4B_RL_TO_E2B_RESCORE_AUTHORIZED=YES \
+  rl-distill-scripts/prepare_gemma4_e4b_rl_to_e2b_topk_overlay_4gpu.sh all
+```
+
+The old dedicated four-GPU training wrapper is intentionally not retained: its microbatch-2/world-4
+contract cannot satisfy the current enforced world-8 singleton-microbatch FSDP2 safety receipt. Any
+reproduction must use the canonical `gemma4_topk_distill_fsdp2.sh` path and pass the current audit;
+the historical run must not be cited as evidence that the newer contract passed.
+
+This production run completed successfully on July 31, 2026. It used overlay dataset identity
+`0946707d512fef4b215da5bc5041a1c9cbac081ae75e19cbbade0933e33e8e03`, W&B run `4mqiot01`, and
+finished all 750 steps without a crash, OOM, NaN, or restart. Validation top-128 KL fell from
+`0.302710` before training to `0.119463` at step 750. Complete 64 GB resumable checkpoints were
+saved at steps 250, 500, and 750, and directly loadable public HF snapshots are available in the
+corresponding `step_000250`, `step_000500`, and `step_000750` directories of the repository above.
 
 ### E2B-base-to-E4B production distillation
 
@@ -1105,10 +1146,11 @@ Evaluation remains similarly held. After D33-D40 are resolved, use `eval_math_pa
    tested; production upload is performed only after complete trace validation. Training-checkpoint
    uploads are also fail-closed: `HFPusher.wait()` re-raises background upload failure or timeout,
    while preserving an already-active training exception as the primary failure.
-10. **Implemented and focused-test verified:** unbiased pass@k exact combinatorics, stable sample
-    grouping, semantic majority classes, invalid/tie handling, and predictive-entropy summaries.
-    The scientific mean@k/maj@k choices remain open even though the code exposes them.
-11. **Pending:** reproduce a known base-model math and OOD score before reporting new checkpoints.
+10. **Implemented and production exercised:** unbiased pass@k exact combinatorics, stable sample
+    grouping, semantic majority classes, invalid/tie handling, full-sample mean/majority reporting,
+    and predictive-entropy summaries.
+11. **Passed:** all three registered models completed the priority math and OOD matrix; results and
+    sampling protocols are recorded in `GEMMA4_THREE_MODEL_EVALS.md`.
 12. **Passed for trace generation:** both teachers loaded with the 12,288 context contract and
     generated naturally stopped responses under an 8,192-token cap. This is separate from the RL
     rollout boundary, whose 512-token verl smoke remains the verified RL configuration.
@@ -1118,13 +1160,12 @@ Evaluation remains similarly held. After D33-D40 are resolved, use `eval_math_pa
 14. **Cross-engine diagnostic passed:** expanded E2B and E4B reports cover 32 traces each and pass the
     calibrated top-1/top-k/log-probability thresholds. Native HF versus manual projection is exact;
     vLLM versus HF is close but non-identical, motivating a disjoint training-target overlay.
-15. **Prepared and authorized for E2B-to-E4B:** the unsharded-HF rescorer, parity receipt,
-    source+overlay preflight, and launcher routing are focused-test verified. Bulk scoring and
-    complete overlay finalization remain unstarted. A real finalized overlay must pass that preflight
-    before the E4B student smoke.
-16. **Final preparation gate:** complete the consolidated test/lint review, inspect the full diff for
-    secrets or artifacts, commit with AI-assistance attribution, and push the reviewed branch before
-    starting the authorized E2B target rescore and E4B distillation.
+15. **Passed for E2B-to-E4B preparation:** the complete unsharded-HF overlay, parity receipt,
+    source+overlay preflight, launcher routing, and real sequential FSDP2 audit are finalized. The
+    next execution boundary is a clean-HEAD receipt and fresh three-step E4B student smoke.
+16. **Repository review gate:** complete consolidated tests/lint, inspect the full diff for secrets
+    or artifacts, commit with AI-assistance attribution, and push the reviewed branch. Do not infer
+    authorization to launch the remaining experimental line from this repository-only step.
 
 ## Decision and ambiguity ledger
 
@@ -1141,12 +1182,12 @@ defaults are proposals, not silently adopted decisions.
   vLLM-ready artifact at `/tmp/verl/models/nemorl-gemma4-e4b-step100-vllm`, content SHA256
   `830d47f78008b56787798a21a5e53d4e402a405bb899a9db5e18b7b83371110f`. No E4B model upload is
   needed or authorized for these local production workers.
-- **D03 — Distilled checkpoint selection.** Should complete evaluations cover steps 250, 500, and
-  750, only step 750, or the best held-out-loss checkpoint as well? Recommended: inexpensive held-out
-  loss for all; full generation/OOD for 250/500/750 and any distinct best checkpoint.
-- **D04 — Definition of “better” in line 1.** What is the primary dataset/metric and how are mixed
-  benchmark wins aggregated? Recommended: declare strict validation mean@64 as the primary,
-  with pass@k/maj@k, OOD math, and non-math reported separately rather than collapsed into one score.
+- **D03 — Distilled checkpoint selection: resolved for the current comparison.** Evaluate the final
+  step-750 checkpoint. Step-250/500 or best-validation ablations require a separately registered
+  follow-up matrix.
+- **D04 — Definition of “better” in line 1: resolved for reporting.** Report each dataset's
+  full-sample mean@k, maj@k, and pass@k separately, plus OOD scores; do not collapse mixed benchmark
+  wins into one scalar.
 - **D05 — Fairness axis.** Is the headline comparison endpoint quality, equal optimizer steps,
   equal generated sequences/tokens, equal wall-clock, or estimated compute? Recommended: report the
   requested endpoint comparison and add example-, token-, and GPU-hour-normalized curves; do not
@@ -1267,61 +1308,50 @@ defaults are proposals, not silently adopted decisions.
 
 ### Evaluation metrics and datasets
 
-- **D33 — k values.** Which k values should be reported from 64 samples? Recommended:
-  `[1, 2, 4, 8, 16, 32, 64]`.
-- **D34 — mean@k convention.** Since expected mean accuracy is invariant to k, should we report only
-  `mean@64`, repeat the same unbiased estimate at every k, use fixed prefixes, or Monte Carlo
-  subsets? Recommended: report `mean@64` once as the primary mean metric; if `mean@k` labels are
-  required, use deterministic Monte Carlo subsets and clearly identify the estimator.
-- **D35 — maj@k convention.** For k < 64, use fixed prefixes or expected majority accuracy over
-  random without-replacement subsets? Recommended: deterministic Monte Carlo subsets from the 64
-  samples, with enough resamples to make Monte Carlo error negligible and a recorded seed.
-- **D36 — Majority answer equivalence.** Vote by raw boxed string, normalized string, or semantic
-  math equivalence? Recommended: form semantic equivalence classes using the same math verifier,
-  with a stable normalized-string fallback when verification fails.
-- **D37 — Invalid/no-box votes.** Should invalid responses all vote as one `<none>` class, each count
-  separately, or abstain? Recommended: count each as an invalid abstention for majority selection,
-  but keep them in the denominator and mark the result wrong if every response abstains.
-- **D38 — Majority ties.** How should tied answer classes be scored? Recommended: conservative wrong
-  unless one deterministic, predeclared tie-breaker is selected; never first-occurrence order.
-- **D39 — Entropy definition.** Which entropy is required? Recommended: report both response-token
-  predictive entropy (response-only, before sampling temperature, token- and sequence-weighted) and
-  empirical normalized-answer entropy across 64 samples. State whether predictive entropy is exact
-  full vocab or a top-k-plus-residual approximation.
+- **D33 — k values: resolved.** Report mean@k, maj@k, and pass@k at each dataset's full registered
+  sample count only. Smaller-k curves are outside the current production report.
+- **D34 — mean@k convention: resolved.** Report the observed mean correctness over all registered
+  samples for that dataset.
+- **D35 — maj@k convention: resolved.** Report unique-plurality accuracy over all registered samples;
+  no prefix or Monte Carlo subset estimator is used in the current matrix.
+- **D36 — Majority answer equivalence: resolved.** Form correctness-stratified semantic equivalence
+  classes with bidirectional `math_verify`; timeouts, asymmetry, or correctness conflicts fail closed
+  as non-equivalent rather than falling back to lexical merging.
+- **D37 — Invalid/no-box votes: resolved.** Treat them as abstentions for winner selection, retain
+  them in the denominator, and score all-abstain questions wrong.
+- **D38 — Majority ties: resolved.** Ties are wrong; response order is never a tie-breaker.
+- **D39 — Entropy definition: resolved for the current matrix.** Report response-token predictive
+  entropy using the top-128 probabilities plus one residual bucket, explicitly labeled a lower-bound
+  approximation, with sequence- and token-weighted summaries.
 - **D40 — Equivalence criterion.** What numerical standard establishes that E2B base and
   E2B-to-E4B are “the same”? Recommended: declare per-metric equivalence margins before evaluation and use paired
   bootstrap 95% confidence intervals over questions; the margins themselves require user values.
 - **D41 — Confidence intervals.** Should all sampled math comparisons include paired bootstrap CIs?
   Recommended: yes, with a fixed bootstrap seed and at least 10,000 question-level resamples.
-- **D42 — 64 samples scope.** Is 64 required only on the 200-question in-distribution validation set
-  or on every math benchmark? Recommended: 64 on ID, MATH500, and all AIME sets; use a lower but
-  declared count for full GSM8K/OlympiadBench/MinervaMath if compute is constrained. If the goal is
-  one uniform protocol and budget permits, use 64 everywhere.
-- **D43 — Math decoding.** Confirm sampled math uses temperature 1.0, top-p 1.0, top-k disabled,
-  max new tokens 8,192, and Gemma stop strings. Recommended: yes.
-- **D44 — Greedy secondary evaluation.** Required for every math model/checkpoint or only final
-  checkpoints? Recommended: all saved checkpoints; it is cheap and detects distributional shifts.
-- **D45 — MATH500 source.** Use `HuggingFaceH4/MATH-500` or the older converted parquet?
-  Recommended: pin `HuggingFaceH4/MATH-500` and preserve a mapping to the historical parquet for
-  continuity.
-- **D46 — OlympiadBench scope.** Use all 674 text-only questions or the older 500-question subset?
-  Recommended: all 674 text-only questions.
-- **D47 — AIME sources.** Confirm LLM360 for AIME 2024 and MathArena for 2025/2026, with immutable
-  revisions. Recommended: yes.
+- **D42 — Math sample scope: resolved.** Use the smallest power-of-two samples/question that makes
+  each dataset strictly exceed 2,000 requests: ID 16, MATH500 8, GSM8K 2, OlympiadBench 4,
+  MinervaMath 8, and AIME25/26 128.
+- **D43 — Math decoding: resolved.** Temperature 1.0, top-p 1.0, sampling top-k disabled, maximum
+  8,192 response tokens, and the registered Gemma stop strings.
+- **D44 — Greedy secondary evaluation: resolved.** Do not run a greedy math matrix.
+- **D45 — MATH500 source: resolved.** Pin `HuggingFaceH4/MATH-500` at the revision in the evaluation
+  manifest.
+- **D46 — OlympiadBench scope: resolved.** Use all 674 pinned English, text-only, open-ended rows.
+- **D47 — AIME sources: resolved for the current matrix.** Use pinned MathArena AIME 2025 and 2026;
+  AIME 2024 is not part of this registered run.
 - **D48 — BeyondAIME.** Include it in addition to AIME 2024/25/26? Recommended: include as an
   optional secondary set because prior repo evaluations already use it, but do not replace an AIME
   set with it.
-- **D49 — OOD harness path.** Direct `lm_eval --model vllm` or OpenAI-compatible server?
-  Recommended: direct vLLM if Gemma 4 support is verified; otherwise server with
-  `tokenized_requests=False`.
-- **D50 — Harness/task revisions.** Pin historical lm-eval 0.4.13 for continuity or a newer verified
-  commit? Recommended: pin an exact current commit after reproducing one historical baseline; record
-  task YAML hashes.
+- **D49 — OOD harness path: resolved.** Use direct `lm_eval --model vllm` with task-native inference
+  settings and no chat template.
+- **D50 — Harness/task revisions: resolved.** Pin lm-evaluation-harness commit
+  `f4d4b3de3ee6741a7151a9fe74945ee515262f4c` (`0.4.13.dev0`) plus exact dataset revisions and
+  SHA256-bound custom MMMLU task files.
 - **D51 — Response diagnostics.** Make response length, finish reason, stop rate, strict-format rate,
   and truncation rate mandatory for every sampled math evaluation? Recommended: yes.
-- **D52 — Evaluation seeds.** One fixed 64-sample batch or multiple independent 64-sample runs?
-  Recommended: one fixed batch for the full matrix plus a second seed on the primary ID comparison
-  if budget permits.
+- **D52 — Evaluation seeds: resolved for the current matrix.** Use one deterministic seed schedule
+  derived from global seed 0, dataset, UID, and sample index. Additional seeds are separate follow-up
+  runs.
 
 ### Post-distillation E4B RL
 
@@ -1410,12 +1440,13 @@ defaults are proposals, not silently adopted decisions.
   into a disjoint unsharded-HF overlay over the exact same token IDs. Never re-tokenize and never load
   an online teacher in student training. This diagnostic does not establish FSDP2 numerical
   equivalence; that requires a separate real-engine audit.
-- **2026-07-31 — E2B-to-E4B production authorized after repository push.** The rescorer, audit,
-  focused CPU tests, and guarded operator documentation are prepared. After the training-engine
-  overlay passes parity, complete preflight, and a three-step no-upload E4B gate, launch the 750-step
-  SFT with W&B logging and private HF checkpoint uploads.
-  The opposite distillation direction, benchmark production, and post-distillation RL remain future
-  work.
+- **2026-07-31 — E2B-to-E4B preparation reached the clean-HEAD smoke boundary.** The complete
+  training-engine overlay, parity, source+overlay preflight, sequential real-FSDP2 audit, focused CPU
+  tests, and guarded operator documentation are prepared. The next action is a fresh clean-HEAD
+  receipt and three-step no-upload E4B gate; the 750-step run has not started.
+- **2026-07-31 — Historical E4B-RL-to-E2B run and three-model evaluation completed.** The final
+  step-750 student was compared against base E2B and direct E2B RL on the priority math and OOD
+  matrix. This training run predates the newest FSDP2 safety contract and remains labeled as such.
 - **2026-07-31 — Initial `5e-6` production schedule stopped at step 130.** W&B run `yswil8j8`
   completed through validation step 130 without OOM or a checkpoint save. The operator judged the
   peak learning rate too high and stopped the run before its first step-250 upload. Restart from the

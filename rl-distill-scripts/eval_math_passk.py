@@ -31,6 +31,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -58,6 +59,15 @@ DEFAULT_PREDICTIVE_TOPK_WIDTH = 128
 PREDICTIVE_ENTROPY_KIND = "topk_plus_residual_bucket_lower_bound"
 STOP_STRINGS = ("<end_of_turn>", "<start_of_turn>")
 IMMUTABLE_REVISION_PATTERN = re.compile(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}")
+EXPECTED_SAMPLING_PROTOCOL = {
+    "temperature": 1.0,
+    "top_k": -1,
+    "top_p": 1.0,
+    "max_response_tokens": 8192,
+    "max_prompt_tokens": 4096,
+    "max_model_len": 12288,
+    "predictive_topk_width": 128,
+}
 
 
 @dataclass(frozen=True)
@@ -77,6 +87,90 @@ class EvalRequest:
 
 def _canonical_json_bytes(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+
+
+def _ensure_python_bin_on_path() -> None:
+    """Expose venv console tools (notably ninja) to vLLM worker subprocesses."""
+
+    python_bin = str((Path(sys.prefix) / "bin").resolve())
+    path_entries = os.environ.get("PATH", "").split(os.pathsep)
+    if python_bin not in path_entries:
+        os.environ["PATH"] = os.pathsep.join([python_bin, *path_entries])
+
+
+def _sha256_file(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        for chunk in iter(lambda: source.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_dataset_protocol_manifest(path: str | Path) -> dict[str, dict[str, Any]]:
+    """Load and validate the pinned per-dataset sampling plan."""
+
+    manifest_path = Path(path).expanduser().resolve()
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot read dataset protocol manifest {manifest_path}: {error}") from error
+    if manifest.get("schema_version") != 1 or manifest.get("protocol") != "gemma4_three_model_math_eval_v1":
+        raise ValueError(f"unsupported dataset protocol manifest: {manifest_path}")
+    repetition_rule = manifest.get("repetition_rule")
+    if not isinstance(repetition_rule, dict):
+        raise ValueError("dataset protocol manifest has no repetition_rule")
+    threshold = repetition_rule.get("threshold")
+    if isinstance(threshold, bool) or not isinstance(threshold, int) or threshold < 0:
+        raise ValueError("dataset protocol repetition threshold must be a non-negative integer")
+    if repetition_rule.get("comparison") != "strictly_greater_than":
+        raise ValueError("dataset protocol repetition comparison must be strictly_greater_than")
+    if repetition_rule.get("allowed_factors") != "powers_of_two":
+        raise ValueError("dataset protocol repetition factors must be powers_of_two")
+    if manifest.get("sampling") != EXPECTED_SAMPLING_PROTOCOL:
+        raise ValueError("dataset protocol manifest does not use the registered Gemma 4 sampling settings")
+    datasets = manifest.get("datasets")
+    if not isinstance(datasets, list) or not datasets:
+        raise ValueError("dataset protocol manifest must contain a non-empty datasets list")
+    by_path: dict[str, dict[str, Any]] = {}
+    names: set[str] = set()
+    for entry in datasets:
+        if not isinstance(entry, dict):
+            raise ValueError("every dataset protocol entry must be an object")
+        name = entry.get("name")
+        if not isinstance(name, str) or not name or name in names:
+            raise ValueError(f"invalid or duplicate dataset name in protocol manifest: {name!r}")
+        names.add(name)
+        raw_output_path = entry.get("output_path")
+        if not isinstance(raw_output_path, str) or not raw_output_path:
+            raise ValueError(f"invalid output_path for dataset {name!r}")
+        output_path = Path(raw_output_path).expanduser().resolve()
+        sample_count = entry.get("samples_per_question")
+        unique_questions = entry.get("unique_questions")
+        expected_requests = entry.get("total_requests")
+        expected_sha256 = entry.get("output_sha256")
+        if isinstance(sample_count, bool) or not isinstance(sample_count, int) or sample_count <= 0:
+            raise ValueError(f"invalid samples_per_question for {output_path}")
+        if sample_count & (sample_count - 1):
+            raise ValueError(f"samples_per_question must be a power of two for {output_path}")
+        if isinstance(unique_questions, bool) or not isinstance(unique_questions, int) or unique_questions <= 0:
+            raise ValueError(f"invalid unique_questions for {output_path}")
+        expected_sample_count = 1
+        while unique_questions * expected_sample_count <= threshold:
+            expected_sample_count *= 2
+        if sample_count != expected_sample_count:
+            raise ValueError(
+                f"samples_per_question is not the smallest registered power of two for {output_path}: "
+                f"expected {expected_sample_count}, found {sample_count}"
+            )
+        if expected_requests != unique_questions * sample_count:
+            raise ValueError(f"total_requests is inconsistent for {output_path}")
+        if not isinstance(expected_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+            raise ValueError(f"invalid output_sha256 for {output_path}")
+        key = str(output_path)
+        if key in by_path:
+            raise ValueError(f"duplicate dataset path in protocol manifest: {output_path}")
+        by_path[key] = dict(entry)
+    return by_path
 
 
 def qtext(prompt_col: Any) -> str:
@@ -177,25 +271,27 @@ def derive_sampling_seed(global_seed: int, dataset_name: str, question_id: str, 
     return seed or 1
 
 
-def _semantic_equivalent(left: str, right: str, grader: Any) -> bool:
+def _semantic_equivalent(left: str, right: str, grader: Any) -> tuple[bool, str | None]:
     if left == right:
-        return True
+        return True, None
 
-    def score(prediction: str, gold: str) -> float:
+    def score(prediction: str, gold: str) -> float | None:
         boxed_prediction = f"\\boxed{{{prediction}}}"
         try:
             value = float(grader.compute_score(boxed_prediction, gold, timeout_score=-1.0))
         except TypeError:
             value = float(grader.compute_score(boxed_prediction, gold))
-        if value < 0:
-            raise RuntimeError(f"math equivalence verification timed out for {prediction!r} versus {gold!r}")
-        return value
+        return None if value < 0 else value
 
-    left_to_right = score(left, right) > 0.5
-    right_to_left = score(right, left) > 0.5
+    left_score = score(left, right)
+    right_score = score(right, left)
+    if left_score is None or right_score is None:
+        return False, "timeout"
+    left_to_right = left_score > 0.5
+    right_to_left = right_score > 0.5
     if left_to_right != right_to_left:
-        raise RuntimeError(f"math equivalence verifier is asymmetric for {left!r} and {right!r}")
-    return left_to_right
+        return False, "asymmetric"
+    return left_to_right, None
 
 
 def assign_semantic_answer_classes(traces: Sequence[dict[str, Any]], grader: Any) -> None:
@@ -204,8 +300,11 @@ def assign_semantic_answer_classes(traces: Sequence[dict[str, Any]], grader: Any
     Invalid/no-box predictions remain abstentions. Every non-empty prediction is
     compared against existing class representatives in sample-index order using
     the same ``compute_score`` semantics as correctness grading. Verification
-    timeout or asymmetric results fail closed instead of silently falling back
-    to lexical majority voting.
+    Timeout, asymmetric comparisons, or equivalence claims that conflict with
+    the independently computed correctness label fail closed by treating the
+    candidate as non-equivalent and recording the verifier condition on the
+    trace. This prevents an uncertain comparison from merging two answer
+    classes while allowing the registered evaluation to continue.
     """
 
     by_question: dict[str, list[dict[str, Any]]] = {}
@@ -213,7 +312,7 @@ def assign_semantic_answer_classes(traces: Sequence[dict[str, Any]], grader: Any
         by_question.setdefault(str(trace["uid"]), []).append(trace)
 
     for question_id in sorted(by_question):
-        representatives: list[str] = []
+        representatives: list[tuple[str, bool]] = []
         ordered = sorted(by_question[question_id], key=lambda trace: int(trace["sample_index"]))
         for trace in ordered:
             prediction = trace.get("pred")
@@ -222,17 +321,32 @@ def assign_semantic_answer_classes(traces: Sequence[dict[str, Any]], grader: Any
                 trace["answer_class_representative"] = None
                 continue
             prediction = str(prediction).strip()
-            representative = next(
-                (existing for existing in representatives if _semantic_equivalent(prediction, existing, grader)),
-                None,
-            )
+            representative = None
+            fail_closed_conditions = set()
+            correct = bool(trace["acc"])
+            for existing, existing_correct in representatives:
+                if correct != existing_correct:
+                    fail_closed_conditions.add("correctness_mismatch")
+                    continue
+                equivalent, condition = _semantic_equivalent(prediction, existing, grader)
+                if condition is not None:
+                    fail_closed_conditions.add(condition)
+                if equivalent:
+                    representative = existing
+                    break
             if representative is None:
                 representative = prediction
-                representatives.append(representative)
-            class_digest = hashlib.sha256(representative.encode()).hexdigest()[:16]
+                representatives.append((representative, correct))
+            class_digest = hashlib.sha256(
+                _canonical_json_bytes({"representative": representative, "correct": correct})
+            ).hexdigest()[:16]
             trace["answer_class"] = f"math_verify:{class_digest}"
             trace["answer_class_representative"] = representative
-            trace["answer_class_method"] = "pairwise strict math_verify.compute_score; timeout/asymmetry fail closed"
+            trace["answer_class_method"] = (
+                "correctness-stratified bidirectional pairwise strict math_verify.compute_score; "
+                "timeout/asymmetry/correctness mismatch treated as non-equivalent"
+            )
+            trace["answer_class_fail_closed_conditions"] = sorted(fail_closed_conditions)
 
 
 def _render_prompt(tokenizer: Any, question_text: str, chat_template: str) -> list[int]:
@@ -543,6 +657,14 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tag", required=True)
     parser.add_argument("--chat_template", required=True)
     parser.add_argument("--datasets", nargs="+", required=True)
+    parser.add_argument(
+        "--dataset_manifest",
+        default=None,
+        help=(
+            "pinned math_eval_manifest.json containing per-dataset samples/question; "
+            "this is the production path for the variable >2,000-request protocol"
+        ),
+    )
     parser.add_argument("--out", required=True)
     parser.add_argument("--trace_dir", required=True, help="required audit JSONL output directory")
     parser.add_argument("--samples_per_question", type=int, default=REQUIRED_SAMPLES_PER_QUESTION)
@@ -590,10 +712,16 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
-    if args.samples_per_question != REQUIRED_SAMPLES_PER_QUESTION and not args.allow_nonstandard_sample_count:
+    _ensure_python_bin_on_path()
+    if (
+        args.dataset_manifest is None
+        and args.samples_per_question != REQUIRED_SAMPLES_PER_QUESTION
+        and not args.allow_nonstandard_sample_count
+    ):
         raise ValueError(
             f"production evaluation requires exactly {REQUIRED_SAMPLES_PER_QUESTION} samples/question; "
-            "use --allow_nonstandard_sample_count only for an explicit smoke test"
+            "use --dataset_manifest for the registered variable-count protocol, or "
+            "--allow_nonstandard_sample_count only for an explicit smoke test"
         )
     if args.max_prompt_tokens + args.max_tokens > args.max_model_len:
         raise ValueError("max_prompt_tokens + max_tokens exceeds max_model_len")
@@ -632,10 +760,40 @@ def main(argv: Sequence[str] | None = None) -> None:
         if args.exclude_overlap_hashes_from_index
         else frozenset()
     )
+    dataset_manifest_path = Path(args.dataset_manifest).expanduser().resolve() if args.dataset_manifest else None
+    dataset_protocol = load_dataset_protocol_manifest(dataset_manifest_path) if dataset_manifest_path else None
+    dataset_manifest_sha256 = None
+    if dataset_protocol is not None:
+        manifest = json.loads(dataset_manifest_path.read_text(encoding="utf-8"))
+        dataset_manifest_sha256 = _sha256_file(dataset_manifest_path)
+        registered_template = manifest.get("chat_template", {})
+        expected_template_sha256 = registered_template.get("sha256")
+        actual_template_sha256 = _sha256_file(args.chat_template)
+        if expected_template_sha256 != actual_template_sha256:
+            raise ValueError(
+                "chat template does not match the dataset protocol manifest: "
+                f"expected {expected_template_sha256}, found {actual_template_sha256}"
+            )
+        cli_sampling = {
+            "temperature": args.temperature,
+            "top_k": args.top_k,
+            "top_p": args.top_p,
+            "max_response_tokens": args.max_tokens,
+            "max_prompt_tokens": args.max_prompt_tokens,
+            "max_model_len": args.max_model_len,
+            "predictive_topk_width": args.predictive_topk_width,
+        }
+        if cli_sampling != manifest["sampling"]:
+            raise ValueError(
+                "CLI sampling settings do not match the dataset protocol manifest: "
+                f"expected {manifest['sampling']}, found {cli_sampling}"
+            )
     resolved_config = vars(args).copy()
     resolved_config["predictive_entropy_kind"] = PREDICTIVE_ENTROPY_KIND
     resolved_config["model_identity"] = model_identity
     resolved_config["excluded_question_sha256s"] = sorted(excluded_question_sha256s)
+    resolved_config["dataset_protocol_entries"] = dataset_protocol
+    resolved_config["dataset_protocol_manifest_sha256"] = dataset_manifest_sha256
     print(json.dumps({"resolved_config": resolved_config}, indent=2, sort_keys=True), flush=True)
     llm_kwargs: dict[str, Any] = {
         "model": args.model,
@@ -658,7 +816,22 @@ def main(argv: Sequence[str] | None = None) -> None:
     Path(args.trace_dir).mkdir(parents=True, exist_ok=True)
     results = {}
     for dataset_path in args.datasets:
-        name = Path(dataset_path).stem
+        resolved_dataset_path = str(Path(dataset_path).expanduser().resolve())
+        protocol_entry = dataset_protocol.get(resolved_dataset_path) if dataset_protocol is not None else None
+        if dataset_protocol is not None and protocol_entry is None:
+            raise ValueError(f"dataset is not registered in --dataset_manifest: {resolved_dataset_path}")
+        if protocol_entry is not None:
+            actual_sha256 = _sha256_file(resolved_dataset_path)
+            if actual_sha256 != protocol_entry["output_sha256"]:
+                raise ValueError(
+                    f"dataset SHA256 mismatch for {resolved_dataset_path}: "
+                    f"expected {protocol_entry['output_sha256']}, found {actual_sha256}"
+                )
+            samples_per_question = int(protocol_entry["samples_per_question"])
+            name = str(protocol_entry["name"])
+        else:
+            samples_per_question = args.samples_per_question
+            name = Path(dataset_path).stem
         dataframe = pd.read_parquet(dataset_path)
         questions = prepare_eval_questions(
             dataframe.to_dict(orient="records"),
@@ -666,9 +839,14 @@ def main(argv: Sequence[str] | None = None) -> None:
             max_questions=args.max_questions,
             excluded_question_sha256s=excluded_question_sha256s,
         )
+        if protocol_entry is not None and len(questions) != int(protocol_entry["unique_questions"]):
+            raise ValueError(
+                f"dataset unique-question count mismatch for {name}: "
+                f"expected {protocol_entry['unique_questions']}, found {len(questions)}"
+            )
         print(
             f"[{args.tag}] {name}: {len(dataframe)} source rows -> {len(questions)} unique questions; "
-            f"generating {len(questions) * args.samples_per_question} seeded samples",
+            f"generating {len(questions) * samples_per_question} seeded samples",
             flush=True,
         )
         trace_path = Path(args.trace_dir) / f"{args.tag}__{name}.jsonl"
@@ -687,9 +865,9 @@ def main(argv: Sequence[str] | None = None) -> None:
                 questions=questions,
                 dataset_name=name,
                 chat_template=chat_template,
-                samples_per_question=args.samples_per_question,
+                samples_per_question=samples_per_question,
                 global_seed=args.seed,
-                k_values=args.ks,
+                k_values=[k for k in args.ks if k <= samples_per_question],
                 subset_strategy=args.subset_strategy,
                 monte_carlo_resamples=args.monte_carlo_resamples,
                 metric_seed=args.metric_seed,
@@ -706,9 +884,9 @@ def main(argv: Sequence[str] | None = None) -> None:
                 retain_traces=False,
             )
         partial_trace_path.replace(trace_path)
-        full_metrics = aggregation["by_k"][str(args.samples_per_question)]
+        full_metrics = aggregation["by_k"][str(samples_per_question)]
         results[name] = {
-            "k": args.samples_per_question,
+            "k": samples_per_question,
             "n_questions": aggregation["n_questions"],
             "mean@k": round(100 * full_metrics["mean_at_k"], 2),
             "pass@k": round(100 * full_metrics["pass_at_k"], 2),
@@ -716,7 +894,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             **aggregation,
         }
         print(
-            f"[{args.tag}] {name}: wrote {len(questions) * args.samples_per_question} traces -> {trace_path}",
+            f"[{args.tag}] {name}: wrote {len(questions) * samples_per_question} traces -> {trace_path}",
             flush=True,
         )
 

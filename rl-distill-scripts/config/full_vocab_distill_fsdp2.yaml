@@ -30,6 +30,11 @@ data:
   max_padded_tokens_per_microbatch: 0
   train_files: ${oc.env:TRAIN_FILE,/home/tiger/verl/data/dapo_gemma3_4b_pt_teacher_v7_independent/train.parquet}
   val_files: ${oc.env:VAL_FILE,/home/tiger/verl/data/dapo_gemma3_4b_pt_teacher_v7_independent/validation.parquet}
+  # Indexed production launches pass large validated shard lists through this
+  # content-bound local manifest to avoid Linux's per-argument size limit.
+  validated_file_list: null
+  validated_dataset_index_sha256: null
+  validated_file_list_sha256: null
   input_ids_key: input_ids
   response_mask_key: response_mask
   use_precomputed_topk: ${oc.decode:${oc.env:PRECOMPUTED_TOPK,false}}

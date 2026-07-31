@@ -436,6 +436,14 @@ class _SemanticFakeGrader(_FakeGrader):
         return float(cls._normalize(prediction) == cls._normalize(gold))
 
 
+class _AsymmetricFakeGrader(_FakeGrader):
+    @classmethod
+    def compute_score(cls, text: str, gold: str, timeout_score: float = 0.0) -> float:
+        del timeout_score
+        prediction = text[len("\\boxed{") : -1] if text.startswith("\\boxed{") and text.endswith("}") else None
+        return float(prediction == "expanded" and gold == "compact")
+
+
 class _FakeLLM:
     def __init__(self) -> None:
         self.sampling_params: list[_FakeSamplingParams] = []
@@ -618,6 +626,34 @@ def test_semantic_answer_classes_prevent_equivalent_correct_forms_from_splitting
     assert result["by_k"]["5"]["maj_at_k"] == 1.0
     answer_ambiguity = next(item for item in result["scientific_ambiguities"] if item["id"] == "answer_equivalence")
     assert answer_ambiguity["resolved"] is True
+
+
+def test_asymmetric_semantic_comparison_fails_closed_without_aborting() -> None:
+    traces = [
+        {"uid": "q", "sample_index": 0, "acc": False, "pred": "compact", "answer_class": None},
+        {"uid": "q", "sample_index": 1, "acc": False, "pred": "expanded", "answer_class": None},
+    ]
+    assign_semantic_answer_classes(traces, _AsymmetricFakeGrader())
+    assert traces[0]["answer_class"] != traces[1]["answer_class"]
+    assert traces[1]["answer_class_fail_closed_conditions"] == ["asymmetric"]
+
+
+def test_semantic_equivalence_conflicting_with_correctness_fails_closed() -> None:
+    traces = [
+        {"uid": "q", "sample_index": 0, "acc": True, "pred": "0.5", "answer_class": None},
+        {"uid": "q", "sample_index": 1, "acc": False, "pred": "1/2", "answer_class": None},
+    ]
+    assign_semantic_answer_classes(traces, _SemanticFakeGrader())
+    assert traces[0]["answer_class"] != traces[1]["answer_class"]
+    assert traces[1]["answer_class_fail_closed_conditions"] == ["correctness_mismatch"]
+
+    result = aggregate_math_traces(
+        traces,
+        k_values=[2],
+        expected_samples_per_question=2,
+        prediction_field="answer_class",
+    )
+    assert result["by_k"]["2"]["mean_at_k"] == 0.5
 
 
 def test_ood_wrapper_builds_exact_five_task_shot_matrix(tmp_path: Path) -> None:

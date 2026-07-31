@@ -317,6 +317,31 @@ def test_preflight_accepts_split_specific_sample_counts(tmp_path):
     )
 
 
+def test_preflight_accepts_original_equal_sample_count_experiment_hash(tmp_path):
+    fixture = _build_fixture(tmp_path)
+    legacy_common = preflight._common_generation_config(fixture["semantics"]["train"])
+    legacy_common["samples_per_question"] = 5
+    fixture["index"]["experiment_sha256"] = schema.hash_json(legacy_common)
+    _rehash_index(fixture)
+
+    preflight.run_preflight(**_preflight_kwargs(fixture))
+
+
+def test_preflight_rejects_legacy_hash_for_split_specific_sample_counts(tmp_path):
+    sample_counts = {"train": 5, "validation": 1}
+    fixture = _build_fixture(tmp_path, sample_counts=sample_counts)
+    legacy_common = preflight._common_generation_config(fixture["semantics"]["train"])
+    legacy_common["samples_per_question"] = 5
+    fixture["index"]["experiment_sha256"] = schema.hash_json(legacy_common)
+    _rehash_index(fixture)
+
+    with pytest.raises(preflight.PreflightError, match="common generation identity mismatch"):
+        preflight.run_preflight(
+            **_preflight_kwargs(fixture),
+            expected_samples_per_question=sample_counts,
+        )
+
+
 def test_preflight_rejects_unexpected_direction(tmp_path):
     fixture = _build_fixture(tmp_path)
     kwargs = _preflight_kwargs(fixture)

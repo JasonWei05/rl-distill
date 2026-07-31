@@ -13,13 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Run the pinned five-task Gemma 4 out-of-domain lm-eval matrix.
+"""Run a pinned Gemma 4 out-of-domain lm-eval profile.
 
-The continuity default is the repository's pinned lm-evaluation-harness
-submodule commit (package version 0.4.13.dev0). A different exact package
-version and/or git commit can be provided explicitly. The wrapper fails closed
-on identity mismatches, never uses ``--limit``, and writes a command/identity
-manifest before execution.
+The default preserves the prior five-task Gemma 3 continuity matrix. The
+``gemma4-report`` profile runs MMLU-Pro, GPQA-Diamond, and the registered
+14,042-item MMMLU subset using the repository's pinned lm-evaluation-harness
+submodule commit (package version 0.4.13.dev0). The wrapper fails closed on
+identity/revision mismatches, never uses ``--limit``, and writes a
+command/identity manifest before execution.
 
 Initialize the submodule, install it in a dedicated uv environment, and pass
 that environment's ``lm_eval`` executable with ``--lm-eval-executable``.
@@ -28,7 +29,9 @@ that environment's ``lm_eval`` executable with ``--lm-eval-executable``.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -48,11 +51,42 @@ PINNED_HARNESS_VERSION = "0.4.13.dev0"
 PINNED_HARNESS_GIT_REVISION = "f4d4b3de3ee6741a7151a9fe74945ee515262f4c"
 PINNED_HARNESS_REPO = REPO_ROOT / "lm-evaluation-harness"
 IMMUTABLE_REVISION_PATTERN = re.compile(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}")
-OOD_GROUPS = (
-    (5, ("mmlu", "winogrande", "triviaqa")),
-    (10, ("hellaswag",)),
-    (25, ("arc_challenge",)),
+CONTINUITY_OOD_GROUPS = (
+    ("5shot", 5, ("mmlu", "winogrande", "triviaqa")),
+    ("10shot", 10, ("hellaswag",)),
+    ("25shot", 25, ("arc_challenge",)),
 )
+OOD_GROUPS = tuple((shots, tasks) for _, shots, tasks in CONTINUITY_OOD_GROUPS)
+GEMMA4_REPORT_GPQA_TASKS = (
+    "gpqa_diamond_cot_n_shot",
+    "gpqa_diamond_n_shot",
+)
+GEMMA4_MMMLU_TASK_GROUP = "gemma4_mmmlu14k"
+GEMMA4_REPORT_BENCHMARKS = ("mmlu_pro", "gpqa", "mmmlu14k")
+DEFAULT_GEMMA4_MMMLU_TASK_DIR = Path("/lambda/nfs/Jason-scale/rl-distill-evals/gemma4-three-model/data/mmmlu14k_tasks")
+DEFAULT_GEMMA4_MMMLU_MANIFEST = DEFAULT_GEMMA4_MMMLU_TASK_DIR / "manifest.json"
+GEMMA4_REPORT_DATASET_REVISIONS = {
+    "TIGER-Lab/MMLU-Pro": "b189ec765aa7ed75c8acfea42df31fdae71f97be",
+    "Idavidrein/gpqa": "633f5ee89ab8ad4522a9f850766b73f62147ffdd",
+    "openai/MMMLU": "325a01dc3e173cac1578df94120499aaca2e2504",
+}
+MMMLU_LOCALES = (
+    "AR_XY",
+    "BN_BD",
+    "DE_DE",
+    "ES_LA",
+    "FR_FR",
+    "HI_IN",
+    "ID_ID",
+    "IT_IT",
+    "JA_JP",
+    "KO_KR",
+    "PT_BR",
+    "SW_KE",
+    "YO_NG",
+    "ZH_CN",
+)
+EXPECTED_MMMLU_TASK_FILES = 14 * 57 + 14 + 3
 
 
 @dataclass(frozen=True)
@@ -66,10 +100,32 @@ class OODEvalConfig:
     max_model_len: int = 4096
     batch_size: str = "auto"
     seed: int = 0
+    profile: str = "gemma3-continuity"
+    gpqa_task: str = "gpqa_diamond_cot_n_shot"
+    mmmlu_task_dir: str | None = str(DEFAULT_GEMMA4_MMMLU_TASK_DIR)
+    benchmarks: tuple[str, ...] = GEMMA4_REPORT_BENCHMARKS
+
+
+def _profile_groups(config: OODEvalConfig) -> tuple[tuple[str, int, tuple[str, ...]], ...]:
+    if config.profile == "gemma3-continuity":
+        return CONTINUITY_OOD_GROUPS
+    if config.profile == "gemma4-report":
+        if config.gpqa_task not in GEMMA4_REPORT_GPQA_TASKS:
+            raise ValueError(f"unsupported GPQA task: {config.gpqa_task}")
+        invalid = set(config.benchmarks) - set(GEMMA4_REPORT_BENCHMARKS)
+        if invalid:
+            raise ValueError(f"unsupported Gemma 4 report benchmarks: {sorted(invalid)}")
+        groups = {
+            "mmlu_pro": ("mmlu_pro_5shot_cot", 5, ("mmlu_pro",)),
+            "gpqa": (f"{config.gpqa_task}_5shot", 5, (config.gpqa_task,)),
+            "mmmlu14k": ("mmmlu14k_5shot", 5, (GEMMA4_MMMLU_TASK_GROUP,)),
+        }
+        return tuple(groups[name] for name in GEMMA4_REPORT_BENCHMARKS if name in config.benchmarks)
+    raise ValueError(f"unsupported OOD profile: {config.profile}")
 
 
 def build_ood_commands(config: OODEvalConfig, *, lm_eval_executable: str) -> list[list[str]]:
-    """Build shell-free commands for the exact five-task/shot matrix."""
+    """Build shell-free commands for the selected exact task/shot matrix."""
 
     model_args = [
         f"pretrained={config.model}",
@@ -83,28 +139,153 @@ def build_ood_commands(config: OODEvalConfig, *, lm_eval_executable: str) -> lis
         model_args.append(f"revision={config.model_revision}")
 
     commands = []
-    for shots, tasks in OOD_GROUPS:
-        commands.append(
-            [
-                lm_eval_executable,
-                "--model",
-                "vllm",
-                "--model_args",
-                ",".join(model_args),
-                "--tasks",
-                ",".join(tasks),
-                "--num_fewshot",
-                str(shots),
-                "--batch_size",
-                config.batch_size,
-                "--output_path",
-                str(Path(config.output_dir) / f"{shots}shot"),
-                "--log_samples",
-                "--seed",
-                str(config.seed),
-            ]
-        )
+    for output_name, shots, tasks in _profile_groups(config):
+        command = [
+            lm_eval_executable,
+            "--model",
+            "vllm",
+            "--model_args",
+            ",".join(model_args),
+            "--tasks",
+            ",".join(tasks),
+            "--num_fewshot",
+            str(shots),
+            "--batch_size",
+            config.batch_size,
+            "--output_path",
+            str(Path(config.output_dir) / output_name),
+            "--log_samples",
+            "--seed",
+            str(config.seed),
+        ]
+        if GEMMA4_MMMLU_TASK_GROUP in tasks:
+            if config.mmmlu_task_dir is None:
+                raise ValueError("the reduced-MMMLU task requires mmmlu_task_dir")
+            command.extend(["--include_path", config.mmmlu_task_dir])
+        commands.append(command)
     return commands
+
+
+def resolve_mmmlu14k_manifest(manifest_path: str | Path, task_dir: str | Path) -> dict[str, Any]:
+    """Validate the generated reduced-MMMLU task tree before lm-eval starts."""
+
+    manifest_file = Path(manifest_path).expanduser().resolve()
+    root = Path(task_dir).expanduser().resolve()
+    try:
+        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot read reduced-MMMLU manifest {manifest_file}: {error}") from error
+    if manifest.get("protocol") != "gemma4_mmmlu14k_v1":
+        raise ValueError("unexpected reduced-MMMLU manifest protocol")
+    if manifest.get("schema_version") != 1:
+        raise ValueError("unexpected reduced-MMMLU manifest schema version")
+    if manifest.get("task_group") != GEMMA4_MMMLU_TASK_GROUP:
+        raise ValueError("unexpected reduced-MMMLU task group")
+    if Path(str(manifest.get("task_dir", ""))).expanduser().resolve() != root:
+        raise ValueError("reduced-MMMLU manifest task_dir does not match the selected task directory")
+    if manifest.get("harness_revision") != PINNED_HARNESS_GIT_REVISION:
+        raise ValueError("reduced-MMMLU manifest was not generated from the pinned harness revision")
+    source = manifest.get("source")
+    if source != {
+        "repo_id": "openai/MMMLU",
+        "revision": GEMMA4_REPORT_DATASET_REVISIONS["openai/MMMLU"],
+        "rows_per_locale": 14_042,
+    }:
+        raise ValueError("reduced-MMMLU manifest has an unexpected pinned source")
+    assignment = manifest.get("assignment", {})
+    if assignment.get("total_evaluation_rows") != 14_042:
+        raise ValueError("reduced-MMMLU must contain exactly 14,042 evaluation rows")
+    locale_counts = assignment.get("locale_counts", {})
+    if set(locale_counts) != set(MMMLU_LOCALES) or set(locale_counts.values()) != {1003}:
+        raise ValueError("reduced-MMMLU must assign exactly 1,003 rows to each of 14 locales")
+    subjects = assignment.get("subjects", [])
+    if not isinstance(subjects, list) or len(subjects) != 57 or len(set(subjects)) != 57:
+        raise ValueError("reduced-MMMLU must contain all 57 MMLU subjects")
+    if assignment.get("locales") != list(MMMLU_LOCALES):
+        raise ValueError("reduced-MMMLU locale order does not match the registered allocation")
+    disagreements = assignment.get("answer_key_disagreements_vs_first_locale")
+    if not isinstance(disagreements, dict) or set(disagreements) != set(MMMLU_LOCALES):
+        raise ValueError("reduced-MMMLU manifest has incomplete answer-key agreement records")
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 14_042
+        for value in disagreements.values()
+    ):
+        raise ValueError("reduced-MMMLU manifest has invalid cross-locale answer-key disagreement counts")
+    files = manifest.get("files")
+    if not isinstance(files, list) or len(files) != EXPECTED_MMMLU_TASK_FILES:
+        raise ValueError(f"reduced-MMMLU manifest must register {EXPECTED_MMMLU_TASK_FILES} task files")
+    registered_paths: set[str] = set()
+    for entry in files:
+        if not isinstance(entry, dict):
+            raise ValueError("reduced-MMMLU file manifest entries must be objects")
+        relative = Path(str(entry.get("path", "")))
+        if relative.is_absolute() or ".." in relative.parts or str(relative) in registered_paths:
+            raise ValueError(f"invalid or duplicate reduced-MMMLU task path: {relative}")
+        registered_paths.add(str(relative))
+        if not isinstance(entry.get("size"), int) or entry["size"] < 0:
+            raise ValueError(f"invalid reduced-MMMLU task file size: {relative}")
+        if not re.fullmatch(r"[0-9a-f]{64}", str(entry.get("sha256", ""))):
+            raise ValueError(f"invalid reduced-MMMLU task file SHA256: {relative}")
+        path = (root / relative).resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            raise ValueError(f"missing reduced-MMMLU task file: {path}")
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != entry.get("sha256") or path.stat().st_size != entry.get("size"):
+            raise ValueError(f"reduced-MMMLU task file identity mismatch: {path}")
+    actual_paths = {
+        str(path.relative_to(root))
+        for path in root.rglob("*")
+        if path.is_file()
+        and path.name != "manifest.json"
+        and "__pycache__" not in path.relative_to(root).parts
+        and path.suffix != ".pyc"
+    }
+    if actual_paths != registered_paths:
+        raise ValueError("reduced-MMMLU task tree contains unregistered or missing files")
+    return {
+        "manifest": str(manifest_file),
+        "task_dir": str(root),
+        "task_group": manifest["task_group"],
+        "total_evaluation_rows": assignment["total_evaluation_rows"],
+        "locale_counts": locale_counts,
+        "subject_count": len(assignment["subjects"]),
+        "registered_file_count": len(files),
+    }
+
+
+def resolve_dataset_revisions(
+    expected: dict[str, str],
+    *,
+    require_current: frozenset[str] = frozenset(),
+) -> dict[str, str]:
+    """Fail closed if a harness dataset's current Hub revision has drifted."""
+
+    from huggingface_hub import HfApi, hf_hub_download
+
+    api = HfApi()
+    resolved = {}
+    for repo_id, expected_revision in expected.items():
+        actual_revision = str(api.dataset_info(repo_id, revision=expected_revision).sha)
+        if actual_revision != expected_revision:
+            raise RuntimeError(
+                f"dataset revision mismatch for {repo_id}: expected {expected_revision}, found {actual_revision}"
+            )
+        if repo_id in require_current:
+            current_revision = str(api.dataset_info(repo_id).sha)
+            if current_revision != expected_revision:
+                raise RuntimeError(
+                    f"the native harness task for {repo_id} would load current revision {current_revision}, "
+                    f"not pinned revision {expected_revision}"
+                )
+        if repo_id == "Idavidrein/gpqa":
+            hf_hub_download(
+                repo_id=repo_id,
+                repo_type="dataset",
+                revision=expected_revision,
+                filename="gpqa_diamond.csv",
+            )
+        resolved[repo_id] = actual_revision
+    return resolved
 
 
 def _executable_package_identity(executable: Path) -> dict[str, str]:
@@ -224,12 +405,39 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-model-len", type=int, default=4096)
     parser.add_argument("--batch-size", default="auto")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--profile",
+        choices=("gemma3-continuity", "gemma4-report"),
+        default="gemma3-continuity",
+    )
+    parser.add_argument(
+        "--gpqa-task",
+        choices=GEMMA4_REPORT_GPQA_TASKS,
+        default="gpqa_diamond_cot_n_shot",
+        help="the CoT variant is recommended; the likelihood variant preserves direct-answer continuity",
+    )
+    parser.add_argument("--mmmlu-task-dir", type=Path, default=DEFAULT_GEMMA4_MMMLU_TASK_DIR)
+    parser.add_argument("--mmmlu-manifest", type=Path, default=DEFAULT_GEMMA4_MMMLU_MANIFEST)
+    parser.add_argument(
+        "--benchmarks",
+        nargs="+",
+        choices=GEMMA4_REPORT_BENCHMARKS,
+        default=list(GEMMA4_REPORT_BENCHMARKS),
+    )
+    parser.add_argument(
+        "--skip-dataset-revision-check",
+        action="store_true",
+        help="disable Hub revision checks (offline diagnostics only)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
+    from dotenv import load_dotenv
+
+    load_dotenv(REPO_ROOT / ".env")
     model_is_local = Path(args.model).exists()
     if not model_is_local and not (args.model_revision and IMMUTABLE_REVISION_PATTERN.fullmatch(args.model_revision)):
         raise ValueError("a remote model requires an immutable 40/64-hex --model-revision")
@@ -268,21 +476,50 @@ def main(argv: Sequence[str] | None = None) -> None:
         max_model_len=args.max_model_len,
         batch_size=args.batch_size,
         seed=args.seed,
+        profile=args.profile,
+        gpqa_task=args.gpqa_task,
+        mmmlu_task_dir=str(args.mmmlu_task_dir.resolve()) if args.profile == "gemma4-report" else None,
+        benchmarks=tuple(args.benchmarks),
     )
     commands = build_ood_commands(config, lm_eval_executable=identity["executable"])
+    dataset_revisions = None
+    mmmlu14k_identity = None
+    if args.profile == "gemma4-report" and not args.skip_dataset_revision_check:
+        repos_by_benchmark = {
+            "mmlu_pro": "TIGER-Lab/MMLU-Pro",
+            "gpqa": "Idavidrein/gpqa",
+            "mmmlu14k": "openai/MMMLU",
+        }
+        selected_repos = {repos_by_benchmark[benchmark] for benchmark in args.benchmarks}
+        expected_revisions = {
+            repo_id: revision
+            for repo_id, revision in GEMMA4_REPORT_DATASET_REVISIONS.items()
+            if repo_id in selected_repos
+        }
+        native_repos = frozenset(selected_repos & {"TIGER-Lab/MMLU-Pro", "Idavidrein/gpqa"})
+        dataset_revisions = resolve_dataset_revisions(expected_revisions, require_current=native_repos)
+    if args.profile == "gemma4-report" and "mmmlu14k" in args.benchmarks:
+        mmmlu14k_identity = resolve_mmmlu14k_manifest(args.mmmlu_manifest, args.mmmlu_task_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
         "harness": identity,
         "model_identity": model_identity,
         "config": asdict(config),
-        "tasks": [{"num_fewshot": shots, "tasks": list(tasks)} for shots, tasks in OOD_GROUPS],
+        "tasks": [
+            {"output_name": output_name, "num_fewshot": shots, "tasks": list(tasks)}
+            for output_name, shots, tasks in _profile_groups(config)
+        ],
+        "dataset_revisions": dataset_revisions,
+        "mmmlu14k_identity": mmmlu14k_identity,
         "commands": commands,
         "dry_run": args.dry_run,
         "notes": [
             "direct lm_eval vllm path; no chat template",
             "full benchmark splits only; --limit is intentionally unsupported",
             "raw PT evaluation uses add_bos_token=True for continuity with the Gemma 3 replication",
+            "task-native generation/likelihood settings are preserved; only num_fewshot is explicit",
+            "MMMLU is the pinned 14,042-item subject/locale-balanced task, never the full 196,588-row group",
         ],
     }
     manifest_path = output_dir / "ood_eval_manifest.json"
@@ -290,8 +527,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(json.dumps(manifest, indent=2, sort_keys=True), flush=True)
     if args.dry_run:
         return
+    child_env = os.environ.copy()
+    executable_bin = str(Path(identity["executable"]).parent)
+    path_entries = child_env.get("PATH", "").split(os.pathsep)
+    if executable_bin not in path_entries:
+        child_env["PATH"] = os.pathsep.join([executable_bin, *path_entries])
     for command in commands:
-        subprocess.run(command, check=True)
+        subprocess.run(command, check=True, env=child_env)
 
 
 if __name__ == "__main__":

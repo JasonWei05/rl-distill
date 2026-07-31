@@ -17,9 +17,15 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
+import pytest
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS_DIR = REPOSITORY_ROOT / "rl-distill-scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 LAUNCHER = REPOSITORY_ROOT / "rl-distill-scripts" / "gemma4_topk_distill_fsdp2.sh"
 TEACHER_IDENTITY = "a" * 64
 STUDENT_IDENTITY = "b" * 64
@@ -52,6 +58,7 @@ def _base_environment(tmp_path: Path) -> tuple[dict[str, str], Path]:
             "PATH": f"{fake_bin}:{environment['PATH']}",
             "PREFLIGHT_LOCAL_FILES_ONLY": "true",
             "TRAIN_LOGGER": '["console"]',
+            "VALIDATED_FILE_LIST_ROOT": str(tmp_path / "validated-file-lists"),
             "VENV": str(tmp_path / "missing-venv"),
         }
     )
@@ -136,8 +143,14 @@ def test_launcher_uses_preflight_hydra_lists_without_eval(tmp_path: Path) -> Non
     assert result.returncode == 0, result.stderr
     assert not sentinel.exists()
     argv = result.stdout.splitlines()
-    assert f"data.train_files={json.dumps(train_files, separators=(',', ':'))}" in argv
-    assert f"data.val_files={json.dumps(validation_files, separators=(',', ':'))}" in argv
+    manifest_override = next(value for value in argv if value.startswith("data.validated_file_list="))
+    manifest = json.loads(Path(manifest_override.split("=", maxsplit=1)[1]).read_text(encoding="utf-8"))
+    assert manifest["train_files"] == train_files
+    assert manifest["validation_files"] == validation_files
+    assert manifest["dataset_index_sha256"] == "c" * 64
+    assert f"data.validated_file_list_sha256={manifest['file_list_sha256']}" in argv
+    assert not any(value.startswith("data.train_files=") for value in argv)
+    assert not any(value.startswith("data.val_files=") for value in argv)
     assert "teacher_model.top_k=128" in argv
     assert "teacher_model.chunk_size=4096" in argv
     assert "data.teacher_topk_validation_tolerance=0.0025" in argv
@@ -396,7 +409,10 @@ def test_launcher_routes_overlay_schema_to_strict_overlay_preflight(tmp_path: Pa
     for flag, expected in expected_verifier_arguments.items():
         flag_index = verifier_argv.index(flag)
         assert verifier_argv[flag_index + 1] == expected
-    assert 'data.train_files=["/tmp/overlay-train.parquet"]' in result.stdout.splitlines()
+    torchrun_argv = result.stdout.splitlines()
+    manifest_override = next(value for value in torchrun_argv if value.startswith("data.validated_file_list="))
+    manifest = json.loads(Path(manifest_override.split("=", maxsplit=1)[1]).read_text(encoding="utf-8"))
+    assert manifest["train_files"] == ["/tmp/overlay-train.parquet"]
 
 
 def test_launcher_can_force_overlay_receipt_refresh(tmp_path: Path) -> None:
@@ -468,3 +484,40 @@ def test_launcher_rejects_source_index_for_vllm_bundle(tmp_path: Path) -> None:
 
     assert result.returncode == 2
     assert "valid only for an unsharded-HF overlay" in result.stderr
+
+
+def test_trainer_loads_only_launcher_bound_validated_file_manifest(tmp_path: Path) -> None:
+    import hashlib
+
+    from main_full_vocab_distill_fsdp2 import FullVocabDistillTrainer
+    from omegaconf import OmegaConf
+
+    value = {
+        "schema_version": "gemma4-validated-file-list-v1",
+        "dataset_index_sha256": "a" * 64,
+        "train_files": ["/tmp/train.parquet"],
+        "validation_files": ["/tmp/validation.parquet"],
+    }
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    value["file_list_sha256"] = hashlib.sha256(canonical).hexdigest()
+    manifest = tmp_path / "validated-files.json"
+    manifest.write_text(json.dumps(value))
+
+    trainer = object.__new__(FullVocabDistillTrainer)
+    trainer.config = OmegaConf.create(
+        {
+            "data": {
+                "validated_file_list": str(manifest),
+                "validated_dataset_index_sha256": "a" * 64,
+                "validated_file_list_sha256": value["file_list_sha256"],
+                "train_files": [],
+                "val_files": [],
+            }
+        }
+    )
+    trainer._load_validated_file_list()
+    assert list(trainer.config.data.train_files) == ["/tmp/train.parquet"]
+
+    trainer.config.data.validated_file_list_sha256 = "b" * 64
+    with pytest.raises(ValueError, match="launcher-bound file-list identity"):
+        trainer._load_validated_file_list()

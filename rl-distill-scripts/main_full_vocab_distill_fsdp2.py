@@ -14,8 +14,10 @@
 
 """FSDP2 full-vocabulary off-policy distillation entry point."""
 
+import hashlib
 import json
 import os
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -86,6 +88,61 @@ class FullVocabDistillTrainer(SFTTrainer):
         random.seed(seed)
         np.random.seed(seed)
         print(f"[FullVocabDistill] DistributedSampler + torch/numpy/random seeded with {seed}", flush=True)
+
+    def _load_validated_file_list(self):
+        manifest_path = self.config.data.get("validated_file_list", None)
+        if not manifest_path:
+            return
+        expected_dataset_sha256 = self.config.data.get("validated_dataset_index_sha256", None)
+        if not isinstance(expected_dataset_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_dataset_sha256):
+            raise ValueError("validated_dataset_index_sha256 must be a SHA256 digest")
+        expected_file_list_sha256 = self.config.data.get("validated_file_list_sha256", None)
+        if not isinstance(expected_file_list_sha256, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", expected_file_list_sha256
+        ):
+            raise ValueError("validated_file_list_sha256 must be a SHA256 digest")
+        path = Path(str(manifest_path)).expanduser().resolve(strict=True)
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict) or value.get("schema_version") != "gemma4-validated-file-list-v1":
+            raise ValueError(f"unsupported validated file-list manifest: {path}")
+        claimed = value.get("file_list_sha256")
+        if not isinstance(claimed, str) or not re.fullmatch(r"[0-9a-f]{64}", claimed):
+            raise ValueError("validated file-list manifest has no valid self-hash")
+        unhashed = dict(value)
+        del unhashed["file_list_sha256"]
+        canonical = json.dumps(unhashed, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        actual = hashlib.sha256(canonical).hexdigest()
+        if actual != claimed:
+            raise ValueError(f"validated file-list manifest self-hash mismatch: {actual} != {claimed}")
+        if claimed != expected_file_list_sha256:
+            raise ValueError("validated file-list manifest does not match the launcher-bound file-list identity")
+        if value.get("dataset_index_sha256") != expected_dataset_sha256:
+            raise ValueError("validated file-list manifest does not match the preflight dataset identity")
+        train_files = value.get("train_files")
+        validation_files = value.get("validation_files")
+        if (
+            not isinstance(train_files, list)
+            or not train_files
+            or not all(isinstance(item, str) for item in train_files)
+        ):
+            raise ValueError("validated train file list is malformed")
+        if (
+            not isinstance(validation_files, list)
+            or not validation_files
+            or not all(isinstance(item, str) for item in validation_files)
+        ):
+            raise ValueError("validated validation file list is malformed")
+        self.config.data.train_files = train_files
+        self.config.data.val_files = validation_files
+        print(
+            f"[FullVocabDistill] loaded validated file list: train={len(train_files)} "
+            f"validation={len(validation_files)} dataset={expected_dataset_sha256}",
+            flush=True,
+        )
+
+    def _build_dataset(self):
+        self._load_validated_file_list()
+        super()._build_dataset()
 
     def _build_ckpt_handler(self):
         super()._build_ckpt_handler()

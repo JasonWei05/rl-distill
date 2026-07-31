@@ -51,6 +51,7 @@ fi
 : "${MODEL_PATH:?Set MODEL_PATH to the Gemma 4 student initialization}"
 
 PYTHON_BIN=${PYTHON_BIN:-python}
+FILE_LIST_PYTHON_BIN=${FILE_LIST_PYTHON_BIN:-python3}
 SMOKE_ONLY_ALLOW_DIRECT_FILES=${SMOKE_ONLY_ALLOW_DIRECT_FILES:-false}
 ALLOW_QUESTION_OVERLAP=${ALLOW_QUESTION_OVERLAP:-false}
 PREFLIGHT_LOCAL_FILES_ONLY=${PREFLIGHT_LOCAL_FILES_ONLY:-true}
@@ -102,6 +103,7 @@ TRAIN_FILES_HYDRA=""
 VAL_FILES_HYDRA=""
 PREFLIGHT_TOPK_WIDTH=""
 PREFLIGHT_TOPK_TOLERANCE=""
+PREFLIGHT_DATASET_INDEX_SHA256=""
 
 if [ -n "${DATASET_INDEX:-}" ]; then
     if [ "${SMOKE_ONLY_ALLOW_DIRECT_FILES,,}" = "true" ]; then
@@ -210,7 +212,8 @@ print(schema)
             VAL_FILES_HYDRA) VAL_FILES_HYDRA=${value} ;;
             TOPK_WIDTH) PREFLIGHT_TOPK_WIDTH=${value} ;;
             TOPK_VALIDATION_TOLERANCE) PREFLIGHT_TOPK_TOLERANCE=${value} ;;
-            DATASET_INDEX_SHA256|GENERATION_EXPERIMENT_SHA256|STUDENT_TOKENIZER_SHA256) ;;
+            DATASET_INDEX_SHA256) PREFLIGHT_DATASET_INDEX_SHA256=${value} ;;
+            GENERATION_EXPERIMENT_SHA256|STUDENT_TOKENIZER_SHA256) ;;
             DIRECTION)
                 [ "${value}" = "${DISTILL_DIRECTION}" ] || {
                     echo "Preflight returned an unexpected direction: ${value}" >&2
@@ -242,7 +245,8 @@ print(schema)
         fi
     done
     if [ -z "${TRAIN_FILES_HYDRA}" ] || [ -z "${VAL_FILES_HYDRA}" ] || \
-       [ -z "${PREFLIGHT_TOPK_WIDTH}" ] || [ -z "${PREFLIGHT_TOPK_TOLERANCE}" ]; then
+       [ -z "${PREFLIGHT_TOPK_WIDTH}" ] || [ -z "${PREFLIGHT_TOPK_TOLERANCE}" ] || \
+       [ -z "${PREFLIGHT_DATASET_INDEX_SHA256}" ]; then
         echo "Preflight returned an empty trainer input" >&2
         exit 2
     fi
@@ -257,6 +261,58 @@ print(schema)
     fi
     export TEACHER_TOP_K=${PREFLIGHT_TOPK_WIDTH}
     export TEACHER_TOPK_VALIDATION_TOLERANCE=${PREFLIGHT_TOPK_TOLERANCE}
+
+    VALIDATED_FILE_LIST_ROOT=${VALIDATED_FILE_LIST_ROOT:-/tmp/verl/gemma4-validated-file-lists}
+    if ! VALIDATED_FILE_LIST_OUTPUT=$(
+        printf '%s\n%s\n' "${TRAIN_FILES_HYDRA}" "${VAL_FILES_HYDRA}" | \
+            "${FILE_LIST_PYTHON_BIN}" -c '
+import hashlib
+import json
+import os
+import sys
+from pathlib import Path
+
+dataset_sha256, output_root = sys.argv[1:]
+lines = sys.stdin.read().splitlines()
+if len(lines) != 2:
+    raise SystemExit("validated file-list input must contain exactly two JSON lines")
+train_files, validation_files = (json.loads(line) for line in lines)
+if not isinstance(train_files, list) or not train_files or not all(isinstance(path, str) for path in train_files):
+    raise SystemExit("validated train file list is malformed")
+if not isinstance(validation_files, list) or not validation_files or not all(
+    isinstance(path, str) for path in validation_files
+):
+    raise SystemExit("validated validation file list is malformed")
+value = {
+    "schema_version": "gemma4-validated-file-list-v1",
+    "dataset_index_sha256": dataset_sha256,
+    "train_files": train_files,
+    "validation_files": validation_files,
+}
+canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+value["file_list_sha256"] = hashlib.sha256(canonical).hexdigest()
+root = Path(output_root)
+root.mkdir(parents=True, exist_ok=True)
+destination = root / f"{dataset_sha256}.json"
+temporary = root / f".{dataset_sha256}.tmp-{os.getpid()}"
+temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+os.replace(temporary, destination)
+print("{}\t{}".format(destination, value["file_list_sha256"]))
+' "${PREFLIGHT_DATASET_INDEX_SHA256}" "${VALIDATED_FILE_LIST_ROOT}"
+    ); then
+        echo "Could not materialize the validated trainer file list" >&2
+        exit 2
+    fi
+    IFS=$'\t' read -r VALIDATED_FILE_LIST VALIDATED_FILE_LIST_SHA256 <<< "${VALIDATED_FILE_LIST_OUTPUT}"
+    if [ -z "${VALIDATED_FILE_LIST}" ] || ! [[ "${VALIDATED_FILE_LIST_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+        echo "Validated trainer file-list helper returned malformed output" >&2
+        exit 2
+    fi
+    DATA_FILE_OVERRIDES=(
+        data.validated_file_list="${VALIDATED_FILE_LIST}"
+        data.validated_dataset_index_sha256="${PREFLIGHT_DATASET_INDEX_SHA256}"
+        data.validated_file_list_sha256="${VALIDATED_FILE_LIST_SHA256}"
+    )
 else
     if [ -n "${SOURCE_DATASET_INDEX:-}" ]; then
         echo "SOURCE_DATASET_INDEX requires DATASET_INDEX" >&2
@@ -275,6 +331,13 @@ else
     fi
     TRAIN_FILES_HYDRA=${TRAIN_FILE}
     VAL_FILES_HYDRA=${VAL_FILE}
+    DATA_FILE_OVERRIDES=(
+        data.train_files="${TRAIN_FILES_HYDRA}"
+        data.val_files="${VAL_FILES_HYDRA}"
+        data.validated_file_list=null
+        data.validated_dataset_index_sha256=null
+        data.validated_file_list_sha256=null
+    )
 fi
 
 HF_PUSH_ENABLE=${HF_PUSH_ENABLE:-false}
@@ -490,8 +553,7 @@ COMMON_OVERRIDES=(
     teacher_model.temperature=1.0
     teacher_model.clamp_min_kl="${CLAMP_MIN_TOPK_KL}"
     teacher_model.checkpoint_student_chunks="${CHECKPOINT_DISTILL_CHUNKS}"
-    data.train_files="${TRAIN_FILES_HYDRA}"
-    data.val_files="${VAL_FILES_HYDRA}"
+    "${DATA_FILE_OVERRIDES[@]}"
     data.train_batch_size="${TRAIN_BATCH_SIZE}"
     data.micro_batch_size_per_gpu="${MICRO_BATCH_SIZE_PER_GPU}"
     data.max_token_len_per_gpu="${MAX_TOKEN_LEN_PER_GPU}"

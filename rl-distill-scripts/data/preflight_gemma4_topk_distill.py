@@ -188,6 +188,21 @@ def _common_generation_config(semantic: Mapping[str, Any]) -> dict[str, Any]:
     return {key: semantic[key] for key in required}
 
 
+def _experiment_hash_candidates(
+    common: Mapping[str, Any],
+    samples_per_question: Mapping[str, int],
+) -> set[str]:
+    """Accept current indexes and the original equal-sample-count index identity."""
+
+    candidates = {hash_json(common)}
+    sample_counts = set(samples_per_question.values())
+    if len(sample_counts) == 1:
+        legacy_common = dict(common)
+        legacy_common["samples_per_question"] = next(iter(sample_counts))
+        candidates.add(hash_json(legacy_common))
+    return candidates
+
+
 def _normalize_split_counts(value: int | Mapping[str, int], *, field_name: str) -> dict[str, int]:
     if isinstance(value, bool):
         raise PreflightError(f"{field_name} must contain positive integers")
@@ -679,10 +694,13 @@ def run_preflight(
 
     if common_configs["train"] != common_configs["validation"]:
         raise PreflightError("train and validation use mixed generation/teacher configurations")
-    common_hash = hash_json(common_configs["train"])
     experiment_sha256 = _require_sha256(index.get("experiment_sha256"), "experiment_sha256")
-    if common_hash != experiment_sha256:
-        raise PreflightError(f"common generation identity mismatch: {common_hash} != {experiment_sha256}")
+    experiment_hash_candidates = _experiment_hash_candidates(common_configs["train"], expected_sample_counts)
+    if experiment_sha256 not in experiment_hash_candidates:
+        raise PreflightError(
+            "common generation identity mismatch: "
+            f"{experiment_sha256} is not one of {sorted(experiment_hash_candidates)}"
+        )
 
     common = common_configs["train"]
     if (

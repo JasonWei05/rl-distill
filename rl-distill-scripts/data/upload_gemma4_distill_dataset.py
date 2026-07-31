@@ -238,7 +238,13 @@ def _compare_regenerated_index(
     regenerated: Mapping[str, Any],
     regenerated_path: Path,
 ) -> None:
-    ignored_top_level = {"created_at", "decode_check_performed", "dataset_index_sha256", "splits"}
+    ignored_top_level = {
+        "created_at",
+        "decode_check_performed",
+        "experiment_sha256",
+        "dataset_index_sha256",
+        "splits",
+    }
     for key in sorted(_INDEX_KEYS.difference(ignored_top_level)):
         _assert_equal(original[key], regenerated[key], f"dataset index {key}")
 
@@ -428,7 +434,7 @@ def validate_upload_bundle(
         preflight._verify_generation_contract(common)
     except preflight.PreflightError as error:
         raise DatasetUploadError(str(error)) from error
-    if trace_schema.hash_json(common) != index["experiment_sha256"]:
+    if index["experiment_sha256"] not in preflight._experiment_hash_candidates(common, expected_samples):
         raise DatasetUploadError("dataset experiment_sha256 does not match the split run configurations")
 
     upload_files: dict[str, Path] = {}
