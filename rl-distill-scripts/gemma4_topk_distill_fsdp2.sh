@@ -299,10 +299,20 @@ export MAX_TOKEN_LEN_PER_GPU=${MAX_TOKEN_LEN_PER_GPU:-${MAX_LENGTH}}
 export TOTAL_TRAINING_STEPS
 export LR=${LR:-5e-6}
 export LR_WARMUP_STEPS=${LR_WARMUP_STEPS:-100}
+export LR_SCHEDULER_TYPE=${LR_SCHEDULER_TYPE:-cosine}
+case "${LR_SCHEDULER_TYPE}" in
+    constant|cosine|linear) ;;
+    *) echo "LR_SCHEDULER_TYPE must be constant, cosine, or linear" >&2; exit 2 ;;
+esac
 export MIN_LR_RATIO=${MIN_LR_RATIO:-0.1}
 export SAVE_FREQ=${SAVE_FREQ:-250}
 export TEST_FREQ=${TEST_FREQ:-10}
 export VAL_BEFORE_TRAIN=${VAL_BEFORE_TRAIN:-true}
+export TOTAL_EPOCHS=${TOTAL_EPOCHS:-100}
+if ! [[ "${TOTAL_EPOCHS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "TOTAL_EPOCHS must be a positive integer" >&2
+    exit 2
+fi
 export REQUIRE_EXACT_VAL_COVERAGE=${REQUIRE_EXACT_VAL_COVERAGE:-true}
 export PARQUET_ROW_GROUP_CACHE_SIZE=${PARQUET_ROW_GROUP_CACHE_SIZE:-2}
 export PARQUET_ROW_GROUP_CACHE_MAX_BYTES=${PARQUET_ROW_GROUP_CACHE_MAX_BYTES:-1073741824}
@@ -357,14 +367,14 @@ COMMON_OVERRIDES=(
     optim.lr="${LR}"
     optim.lr_warmup_steps="${LR_WARMUP_STEPS}"
     optim.total_training_steps="${TOTAL_TRAINING_STEPS}"
-    optim.lr_scheduler_type=cosine
+    optim.lr_scheduler_type="${LR_SCHEDULER_TYPE}"
     optim.min_lr_ratio="${MIN_LR_RATIO}"
     optim.weight_decay=0.1
     'optim.betas=[0.9,0.98]'
     trainer.project_name="${PROJECT_NAME}"
     trainer.experiment_name="${EXP_NAME}"
     trainer.default_local_dir="${CKPTS_DIR}"
-    trainer.total_epochs=100
+    trainer.total_epochs="${TOTAL_EPOCHS}"
     trainer.total_training_steps="${TOTAL_TRAINING_STEPS}"
     trainer.logger="${TRAIN_LOGGER}"
     trainer.save_freq="${SAVE_FREQ}"

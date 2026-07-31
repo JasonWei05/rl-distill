@@ -136,6 +136,61 @@ def test_launcher_uses_preflight_hydra_lists_without_eval(tmp_path: Path) -> Non
     assert "data.micro_batch_size_per_gpu=2" in argv
 
 
+def test_launcher_forwards_explicit_schedule_and_epoch_contract(tmp_path: Path) -> None:
+    environment, fake_bin = _base_environment(tmp_path)
+    fake_python = fake_bin / "preflight-python"
+    _write_fake_preflight_python(
+        fake_python,
+        _preflight_output(["/tmp/train.parquet"], ["/tmp/validation.parquet"]),
+    )
+    environment.update(
+        {
+            "PYTHON_BIN": str(fake_python),
+            "LR": "2e-6",
+            "LR_SCHEDULER_TYPE": "linear",
+            "MIN_LR_RATIO": "0.1",
+            "TOTAL_EPOCHS": "2",
+            "TOTAL_TRAINING_STEPS": "750",
+            "TRAIN_BATCH_SIZE": "128",
+        }
+    )
+
+    result = _run_launcher(environment)
+
+    assert result.returncode == 0, result.stderr
+    argv = result.stdout.splitlines()
+    assert "data.train_batch_size=128" in argv
+    assert "optim.lr=2e-6" in argv
+    assert "optim.lr_scheduler_type=linear" in argv
+    assert "optim.min_lr_ratio=0.1" in argv
+    assert "optim.total_training_steps=750" in argv
+    assert "trainer.total_epochs=2" in argv
+    assert "trainer.total_training_steps=750" in argv
+
+
+def test_launcher_rejects_invalid_schedule_or_epoch(tmp_path: Path) -> None:
+    environment, fake_bin = _base_environment(tmp_path)
+    fake_python = fake_bin / "preflight-python"
+    _write_fake_preflight_python(
+        fake_python,
+        _preflight_output(["/tmp/train.parquet"], ["/tmp/validation.parquet"]),
+    )
+    environment["PYTHON_BIN"] = str(fake_python)
+    environment["LR_SCHEDULER_TYPE"] = "polynomial"
+
+    result = _run_launcher(environment)
+
+    assert result.returncode == 2
+    assert "LR_SCHEDULER_TYPE must be constant, cosine, or linear" in result.stderr
+
+    environment["LR_SCHEDULER_TYPE"] = "linear"
+    environment["TOTAL_EPOCHS"] = "0"
+    result = _run_launcher(environment)
+
+    assert result.returncode == 2
+    assert "TOTAL_EPOCHS must be a positive integer" in result.stderr
+
+
 def test_launcher_rejects_identity_changed_after_preflight(tmp_path: Path) -> None:
     environment, fake_bin = _base_environment(tmp_path)
     fake_python = fake_bin / "preflight-python"

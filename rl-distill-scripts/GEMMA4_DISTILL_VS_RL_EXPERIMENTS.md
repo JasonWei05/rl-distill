@@ -375,12 +375,12 @@ The E4B teacher content/model/registered-identity hashes are respectively
 `bde9e800223cdd62228ce39e0305398f6ada05b98adaf438b0b3d3d3c3015561`, and
 `2d48d343709dcae087d6ff2def9f09d2950ca66dc2183a8bee38850c4ddbbb36`.
 
-At global batch size 64, 750 optimizer steps consume 48,000 sequence examples. Under the selected
-row-preserving plan this is 98.74% of the 48,615-row training trace set and leaves 615 traces unseen.
-If train were deduplicated by question text instead, it would yield 47,715 traces and 750 steps would
-require a 285-trace wrap. If only the seven leaked train rows were removed, it would yield 48,580
-traces and leave 580 unseen. Those are possible future clean-roster ablations, not the primary trace
-artifact registered here.
+At global batch size 128, 750 optimizer steps consume 96,000 sequence examples across almost two
+passes over the 48,615-row training trace set. With eight data-parallel ranks, the drop-last sampler
+and loader produce 379 optimizer steps per epoch, so two epochs expose 758 available steps and the
+750-step cap stops eight updates before the end of epoch two. The exact trace IDs skipped by the two
+independently shuffled epoch tails must be recorded after the run. Possible future clean-roster or
+text-deduplicated ablations need separate coverage calculations and run identities.
 
 The validator, production preflight, dataset supervisor, and uploader accept explicit split-specific
 contracts while retaining 9,723 x 5 train and 200 x 5 validation as backward-compatible defaults. The
@@ -994,10 +994,11 @@ test "${GEMMA4_TRACE_RESUME_AUTHORIZED}" = YES && \
 The primary experiment must use the finalized unsharded-HF overlay, not the immutable source's vLLM
 targets. Set `DATASET_INDEX` to the overlay index and `SOURCE_DATASET_INDEX` to the exact vLLM source
 index so the launcher selects the strict overlay preflight. After the overlay passes preflight and a
-one-step no-upload gate, launch the 750-step run with
-microbatch 2 and a 4,096-token vocabulary-projection chunk. Validation runs over all 128 registered
-rows with no distributed padding. Save and upload directly loadable HF checkpoints at steps 250, 500,
-and 750.
+one-step no-upload gate, launch the 750-step run with global batch 128, microbatch 2, and a
+4,096-token vocabulary-projection chunk. Train for at most two epochs, warm up to `2e-6` over 100
+optimizer steps, then decay linearly to `2e-7` at step 750. Validation runs over all 128 registered
+rows with no distributed padding. Save and upload directly loadable HF checkpoints at steps 250,
+500, and 750.
 
 ```bash
 GEMMA4_E2B_TO_E4B_PRODUCTION_AUTHORIZED=YES
@@ -1010,9 +1011,10 @@ test "${GEMMA4_E2B_TO_E4B_PRODUCTION_AUTHORIZED}" = YES && \
   EXPECTED_STUDENT_IDENTITY_SHA256=acdc0d2bcb8f676593b5387807da1cd1b84a9e26fa279db4a86f54a211055b2d \
   EXPECTED_TRAIN_QUESTIONS=9723 EXPECTED_VALIDATION_QUESTIONS=128 \
   EXPECTED_TRAIN_SAMPLES_PER_QUESTION=5 EXPECTED_VALIDATION_SAMPLES_PER_QUESTION=1 \
-  MICRO_BATCH_SIZE_PER_GPU=2 FULL_VOCAB_KL_CHUNK_SIZE=4096 TRAIN_BATCH_SIZE=64 \
-  TOTAL_TRAINING_STEPS=750 SAVE_FREQ=250 TEST_FREQ=10 \
-  PROJECT_NAME=gemma4-distill-vs-rl EXP_NAME=e2b-base-to-e4b-topk128-750-v128-seed42 \
+  MICRO_BATCH_SIZE_PER_GPU=2 FULL_VOCAB_KL_CHUNK_SIZE=4096 TRAIN_BATCH_SIZE=128 \
+  LR=2e-6 LR_WARMUP_STEPS=100 LR_SCHEDULER_TYPE=linear MIN_LR_RATIO=0.1 \
+  TOTAL_EPOCHS=2 TOTAL_TRAINING_STEPS=750 SAVE_FREQ=250 TEST_FREQ=10 \
+  PROJECT_NAME=gemma4-distill-vs-rl EXP_NAME=e2b-base-to-e4b-topk128-lr2e6-linear-b128-2ep-750-v128-seed42 \
   HF_PUSH_ENABLE=true HF_PUSH_REPO=JWei05/gemma4-e2b-base-to-e4b-topk128-distill \
   rl-distill-scripts/gemma4_topk_distill_fsdp2.sh
 ```
@@ -1177,8 +1179,9 @@ defaults are proposals, not silently adopted decisions.
 - **D18 — Loss aggregation.** Response-token mean, sequence mean, or another weighting?
   Recommended: response-token mean to match the existing RL token-level loss convention, while
   reporting sequence-weighted validation metrics as diagnostics.
-- **D19 — Batch interpretation.** Does batch size 64 mean global sequences per optimizer update or
-  64 per device? Recommended: global 64.
+- **D19 — Batch interpretation: resolved.** Use global batch 128 sequences per optimizer update,
+  split across eight data-parallel ranks. With microbatch 2, each rank accumulates eight
+  microbatches per optimizer step.
 - **D20 — Gradient clipping and epsilon.** These were not specified. Recommended: global grad norm
   1.0 and AdamW epsilon `1e-8`.
 - **D21 — Precision/offload.** Confirm BF16 model/compute, FP32 optimizer states, activation
@@ -1190,13 +1193,11 @@ defaults are proposals, not silently adopted decisions.
   Recommended: yes, matching the RL runs.
 - **D23 — Sequence overflow in training.** Fail rather than truncate any stored 12,288-token trace?
   Recommended: yes; generation should already enforce the contract.
-- **D24 — Shuffle seed and coverage.** Keep exactly 750 steps even though 615 train traces remain
-  unseen under the row-preserving roster? Recommended: keep 750 steps and seed 42 because both were
-  explicit, then record the exact 615 unseen trace IDs from the now-fixed 48,615-row roster. A future
-  leak-removed or text-deduplicated ablation would need its own coverage calculation.
-- **D25 — Scheduler endpoint.** Confirm warmup reaches peak at optimizer step 100 and the update at
-  step 750 uses/reaches `5e-7`. Recommended: yes; add a scheduler unit test for steps 0, 1, 100,
-  101, and 750.
+- **D24 — Shuffle seed and coverage: resolved.** Keep seed 42, global batch 128, two epochs, and a
+  750-step cap. This consumes 96,000 sequence draws and stops eight optimizer updates before the end
+  of epoch two; record the exact trace IDs omitted by both shuffled epoch tails.
+- **D25 — Scheduler endpoint: resolved.** Warm up linearly to `2e-6` over 100 optimizer steps, then
+  decay linearly to `2e-7` at step 750 (`MIN_LR_RATIO=0.1`).
 
 ### During-training validation, logging, and artifacts
 
@@ -1369,3 +1370,8 @@ defaults are proposals, not silently adopted decisions.
   SFT with W&B logging and private HF checkpoint uploads.
   The opposite distillation direction, benchmark production, and post-distillation RL remain future
   work.
+- **2026-07-31 — Initial `5e-6` production schedule stopped at step 130.** W&B run `yswil8j8`
+  completed through validation step 130 without OOM or a checkpoint save. The operator judged the
+  peak learning rate too high and stopped the run before its first step-250 upload. Restart from the
+  immutable E4B base with global batch 128, two epochs capped at 750 steps, 100-step warmup to
+  `2e-6`, and linear decay to `2e-7`.
