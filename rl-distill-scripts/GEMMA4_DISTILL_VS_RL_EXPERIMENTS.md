@@ -8,7 +8,10 @@ The immutable vLLM bundles remain the generation record; the primary training pa
 identity-bound unsharded-HF target overlay over the exact stored token sequences. A real eight-GPU
 FSDP2 train/checkpoint/backward audit now passes only with FP32 stored/master parameters, BF16 FSDP
 forward parameter views, and FP32 reductions/buffers. Production is fail-closed on that exact audit
-receipt before an E2B-base-to-E4B student launch. Both immutable vLLM source
+receipt before an E2B-base-to-E4B student launch. The prior production attempt `25f52162` was
+stopped without a checkpoint after residual cuDNN backward nondeterminism produced gradient norm
+`47.828`; production is held pending a clean report-v5 deterministic-cuDNN receipt and a 10-step
+smoke. Both immutable vLLM source
 bundles are now public on Hugging Face at independently verified commits: E2B-base traces at
 `JWei05/gemma4-e2b-base-topk128-traces@e32aaa02681ae83b3d7256b1b155c9084da2f289` and E4B-RL
 step-100 traces at `JWei05/gemma4-e4b-rl100-topk128-traces@2b6e49a0a456ee9d67b16a1dc61785562bee90c9`.
@@ -216,6 +219,12 @@ histories.
   sequential audit reproducing validation at steps 0/1/2/3 passed at `14.78`, `21.20`, and `14.95`
   with exact ordered top-128 support and sub-`0.001` sampled-token drift p95. Production also retains
   singleton microbatches and the defensive 4,096 padded-token ceiling.
+- The first clean production launch after validation isolation, W&B `25f52162`, still produced
+  gradient norms `14.799`, `21.572`, `47.828`, and `17.493`. It was stopped without a checkpoint.
+  Three independent replays showed that deterministic cuDNN algorithms preserve target parity and
+  keep the opening sequence in the `12.95`-to-`21.13` range. Report v5 therefore binds
+  `torch.backends.cudnn.deterministic=True` and lowers the maximum pre-clip gradient norm from `50`
+  to `40`; the engine context restores the previous global setting when it exits.
 - Deterministic trace-contract failures now return a distinct generator status, and the supervisor
   refuses identical-seed retries for that status instead of looping on an unrecoverable row.
 - The validation loader retains a final partial batch only when exact distillation coverage is
@@ -1435,3 +1444,9 @@ defaults are proposals, not silently adopted decisions.
   plus non-cuDNN validation passed the full sequential audit at gradient norms `14.78`, `21.20`, and
   `14.95`. The production contract now binds the train/eval backend split and real optimizer,
   scheduler, and validation sequence.
+- **2026-07-31 — Residual cuDNN algorithm nondeterminism rejected.** Production W&B `25f52162`
+  reached gradient norm `47.828` on its third optimizer step despite safe validation isolation. It
+  has no checkpoint and is permanently non-resumable. Scoped deterministic cuDNN produced three
+  independent safe eight-GPU replays while preserving exact ordered top-128 target support. Audit
+  report v5 now binds deterministic cuDNN and the stricter `40` pre-clip gradient ceiling. A clean
+  receipt and 10-step smoke are required before relaunch.

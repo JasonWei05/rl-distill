@@ -119,6 +119,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
             "clamp_min_topk_kl": False,
             "cudnn_sdpa": True,
             "eval_cudnn_sdpa": False,
+            "cudnn_deterministic": True,
             "model_dtype": "fp32",
             "fsdp_param_dtype": "bf16",
             "fsdp_reduce_dtype": "fp32",
@@ -142,6 +143,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
             "weight_decay": 0.1,
             "betas": [0.9, 0.98],
             "total_training_steps": 750,
+            "max_preclip_grad_norm": 40.0,
         },
         "dataset": {
             "index_path": str(dataset_index),
@@ -254,6 +256,8 @@ def test_verifier_binds_receipt_to_runtime_contract(tmp_path: Path) -> None:
         (lambda report: report["contract"].update(gradient_checkpointing=False), "gradient_checkpointing"),
         (lambda report: report["contract"].update(checkpoint_student_chunks=False), "checkpoint_student_chunks"),
         (lambda report: report["contract"].update(sequential_optimizer_steps=False), "sequential_optimizer_steps"),
+        (lambda report: report["contract"].update(cudnn_deterministic=False), "cudnn_deterministic"),
+        (lambda report: report["contract"].update(max_preclip_grad_norm=50.0), "max_preclip_grad_norm"),
         (lambda report: report["selection"].update(position_count=510), "16 traces and 511"),
         (
             lambda report: report["aggregate"]["stored_support_weighted_abs_logprob_delta"].update(mean=0.01),

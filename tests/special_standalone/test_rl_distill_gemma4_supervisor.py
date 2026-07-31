@@ -70,6 +70,8 @@ def test_completion_receipt_requires_matching_run_and_upload_contract(tmp_path: 
         "hf_repo": "test/repo",
         "cudnn_sdpa": "1",
         "eval_cudnn_sdpa": "0",
+        "cudnn_deterministic": "1",
+        "max_preclip_grad_norm": "40.0",
     }
     (tmp_path / "run_complete.json").write_text(json.dumps(receipt), encoding="utf-8")
 
@@ -89,6 +91,14 @@ def test_completion_receipt_requires_matching_run_and_upload_contract(tmp_path: 
         wandb_run_id="different",
         hf_push=True,
         hf_repo="test/repo",
+    )
+    assert "max_preclip_grad_norm" in supervisor.completion_receipt_error(
+        tmp_path,
+        expected_step=750,
+        wandb_run_id="run1234",
+        hf_push=True,
+        hf_repo="test/repo",
+        max_grad_norm=50.0,
     )
 
 
@@ -117,9 +127,10 @@ def test_child_environment_pins_verified_gemma4_batching_contract(tmp_path: Path
         max_checkpoints_to_keep=4,
         hf_push=False,
         hf_repo="unused",
-        max_grad_norm=50.0,
+        max_grad_norm=40.0,
         cudnn_sdpa=0,
         eval_cudnn_sdpa=0,
+        cudnn_deterministic=1,
         grad_diagnostics=True,
         supervisor_dir=tmp_path / "supervisor",
         gpus=8,
@@ -132,8 +143,9 @@ def test_child_environment_pins_verified_gemma4_batching_contract(tmp_path: Path
     assert environment["MAX_PADDED_TOKENS_PER_MICROBATCH"] == "4096"
     assert environment["VERL_GEMMA4_CUDNN_SDPA"] == "0"
     assert environment["VERL_GEMMA4_EVAL_CUDNN_SDPA"] == "0"
+    assert environment["VERL_GEMMA4_CUDNN_DETERMINISTIC"] == "1"
     assert environment["FSDP_CAST_FORWARD_INPUTS"] == "true"
-    assert environment["VERL_MAX_PRECLIP_GRAD_NORM"] == "50.0"
+    assert environment["VERL_MAX_PRECLIP_GRAD_NORM"] == "40.0"
 
 
 def test_default_receipt_is_the_three_batch_production_audit():
@@ -157,9 +169,10 @@ def test_dry_run_executes_full_launcher_validation(monkeypatch: pytest.MonkeyPat
         max_checkpoints_to_keep=4,
         hf_push=False,
         hf_repo="unused",
-        max_grad_norm=50.0,
+        max_grad_norm=40.0,
         cudnn_sdpa=1,
         eval_cudnn_sdpa=0,
+        cudnn_deterministic=1,
         grad_diagnostics=False,
         supervisor_dir=tmp_path / "supervisor",
         gpus=8,

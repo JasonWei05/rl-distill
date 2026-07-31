@@ -388,7 +388,8 @@ if ! [[ "${MAX_PADDED_TOKENS_PER_MICROBATCH}" =~ ^[1-9][0-9]*$ ]]; then
 fi
 export VERL_GEMMA4_CUDNN_SDPA=${VERL_GEMMA4_CUDNN_SDPA:-1}
 export VERL_GEMMA4_EVAL_CUDNN_SDPA=${VERL_GEMMA4_EVAL_CUDNN_SDPA:-0}
-for backend_name in VERL_GEMMA4_CUDNN_SDPA VERL_GEMMA4_EVAL_CUDNN_SDPA; do
+export VERL_GEMMA4_CUDNN_DETERMINISTIC=${VERL_GEMMA4_CUDNN_DETERMINISTIC:-1}
+for backend_name in VERL_GEMMA4_CUDNN_SDPA VERL_GEMMA4_EVAL_CUDNN_SDPA VERL_GEMMA4_CUDNN_DETERMINISTIC; do
     case "${!backend_name}" in
         0|1) ;;
         *) echo "${backend_name} must be 0 or 1" >&2; exit 2 ;;
@@ -408,8 +409,9 @@ if [ "${DATASET_SCHEMA_VERSION:-}" = "gemma4-hf-bf16-sdpa-topk-overlay-v1" ]; th
        [ "${MAX_LENGTH}" != "12288" ] || [ "${MAX_TOKEN_LEN_PER_GPU}" != "12288" ] || \
        [ "${CLAMP_MIN_TOPK_KL,,}" != "false" ] || \
        [ "${CHECKPOINT_DISTILL_CHUNKS,,}" != "true" ] || \
+       [ "${VERL_GEMMA4_CUDNN_DETERMINISTIC}" != "1" ] || \
        [ "${NPROC_PER_NODE}" != "8" ]; then
-        echo "The audited overlay contract requires 8 GPUs, global batch 128, singleton microbatches, a 4096 padded-token ceiling/chunk size, max lengths 12288, the unclamped checkpointed distillation objective, MODEL_DTYPE=fp32, BF16 FSDP forward parameters, FP32 reductions/buffers, FSDP input casting, activation checkpointing, and Gemma4TextDecoderLayer wrapping" >&2
+        echo "The audited overlay contract requires 8 GPUs, global batch 128, singleton microbatches, a 4096 padded-token ceiling/chunk size, max lengths 12288, the unclamped checkpointed distillation objective, MODEL_DTYPE=fp32, BF16 FSDP forward parameters, FP32 reductions/buffers, FSDP input casting, activation checkpointing, Gemma4TextDecoderLayer wrapping, and deterministic cuDNN algorithms" >&2
         exit 2
     fi
     "${PYTHON_BIN}" "${PROJECT_ROOT}/rl-distill-scripts/data/verify_gemma4_fsdp2_training_audit.py" \
@@ -423,8 +425,10 @@ if [ "${DATASET_SCHEMA_VERSION:-}" = "gemma4-hf-bf16-sdpa-topk-overlay-v1" ]; th
         --expected-max-padded-tokens-per-microbatch "${MAX_PADDED_TOKENS_PER_MICROBATCH}" \
         --expected-kl-chunk-size "${FULL_VOCAB_KL_CHUNK_SIZE}" \
         --expected-max-length "${MAX_LENGTH}" \
+        --expected-max-grad-norm "${VERL_MAX_PRECLIP_GRAD_NORM:-40}" \
         --expected-cudnn-sdpa "${VERL_GEMMA4_CUDNN_SDPA}" \
-        --expected-eval-cudnn-sdpa "${VERL_GEMMA4_EVAL_CUDNN_SDPA}"
+        --expected-eval-cudnn-sdpa "${VERL_GEMMA4_EVAL_CUDNN_SDPA}" \
+        --expected-cudnn-deterministic "${VERL_GEMMA4_CUDNN_DETERMINISTIC}"
 fi
 
 # A bad Gemma 4 training forward can have a plausible loss while its backward
@@ -432,11 +436,17 @@ fi
 # can distinguish numerical corruption from restartable infrastructure loss.
 export VERL_FAIL_ON_NONFINITE_LOSS=${VERL_FAIL_ON_NONFINITE_LOSS:-1}
 export VERL_FAIL_ON_NONFINITE_GRAD=${VERL_FAIL_ON_NONFINITE_GRAD:-1}
-export VERL_MAX_PRECLIP_GRAD_NORM=${VERL_MAX_PRECLIP_GRAD_NORM:-50}
+export VERL_MAX_PRECLIP_GRAD_NORM=${VERL_MAX_PRECLIP_GRAD_NORM:-40}
 if ! [[ "${VERL_MAX_PRECLIP_GRAD_NORM}" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
    [ "${VERL_MAX_PRECLIP_GRAD_NORM}" = "0" ] || \
    [ "${VERL_MAX_PRECLIP_GRAD_NORM}" = "0.0" ]; then
     echo "VERL_MAX_PRECLIP_GRAD_NORM must be a positive decimal number" >&2
+    exit 2
+fi
+if [ "${DATASET_SCHEMA_VERSION:-}" = "gemma4-hf-bf16-sdpa-topk-overlay-v1" ] && \
+   [ "${VERL_MAX_PRECLIP_GRAD_NORM}" != "40" ] && \
+   [ "${VERL_MAX_PRECLIP_GRAD_NORM}" != "40.0" ]; then
+    echo "The audited Gemma 4 production contract requires VERL_MAX_PRECLIP_GRAD_NORM=40" >&2
     exit 2
 fi
 export TOTAL_TRAINING_STEPS

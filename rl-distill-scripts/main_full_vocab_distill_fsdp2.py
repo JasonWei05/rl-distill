@@ -179,6 +179,8 @@ class FullVocabDistillTrainer(SFTTrainer):
             "wandb_run_id": os.environ.get("WANDB_RUN_ID"),
             "cudnn_sdpa": os.environ.get("VERL_GEMMA4_CUDNN_SDPA"),
             "eval_cudnn_sdpa": os.environ.get("VERL_GEMMA4_EVAL_CUDNN_SDPA"),
+            "cudnn_deterministic": os.environ.get("VERL_GEMMA4_CUDNN_DETERMINISTIC"),
+            "max_preclip_grad_norm": os.environ.get("VERL_MAX_PRECLIP_GRAD_NORM"),
         }
         receipt = checkpoint_root / "run_complete.json"
         temporary = receipt.with_name(f".{receipt.name}.tmp.{os.getpid()}")
