@@ -106,7 +106,6 @@ def _common_experiment_config(semantic: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": semantic["schema_version"],
         "direction": semantic["direction"],
-        "samples_per_question": semantic["samples_per_question"],
         "topk_width": semantic["topk_width"],
         "global_seed": semantic["global_seed"],
         "teacher": semantic["teacher"],
@@ -117,6 +116,23 @@ def _common_experiment_config(semantic: Mapping[str, Any]) -> dict[str, Any]:
         "generator": semantic["generator"],
         "environment_versions": semantic["environment_versions"],
     }
+
+
+def _expected_samples_by_split(value: int | Mapping[str, int]) -> dict[str, int]:
+    if isinstance(value, bool):
+        raise TraceValidationError("expected samples/question must be positive integers")
+    if isinstance(value, int):
+        values = {split: value for split in ("train", "validation")}
+    elif isinstance(value, Mapping):
+        if set(value) != {"train", "validation"}:
+            raise TraceValidationError("expected samples/question must contain exactly train and validation")
+        values = dict(value)
+    else:
+        raise TraceValidationError("expected samples/question must be an integer or split mapping")
+    for split, count in values.items():
+        if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+            raise TraceValidationError(f"expected {split} samples/question must be a positive integer")
+    return values
 
 
 def _relative_path(path: Path, parent: Path) -> str:
@@ -131,7 +147,7 @@ def validate_dataset(
     output_index: str | Path,
     decoder: Callable[[Sequence[int]], str] | None,
     expected_questions: Mapping[str, int | None],
-    expected_samples_per_question: int,
+    expected_samples_per_question: int | Mapping[str, int],
     allow_incomplete: bool = False,
     allow_empty_responses: bool = False,
     fail_on_question_overlap: bool = False,
@@ -143,6 +159,7 @@ def validate_dataset(
         raise TraceValidationError(f"unsupported split names: {unknown_splits}")
 
     normalized_dirs = {split: Path(path) for split, path in split_dirs.items()}
+    expected_samples = _expected_samples_by_split(expected_samples_per_question)
     run_configs = {split: load_run_config(path) for split, path in normalized_dirs.items()}
     common_configs = {
         _split: _common_experiment_config(config["semantic_config"]) for _split, config in run_configs.items()
@@ -161,6 +178,7 @@ def validate_dataset(
     total_response_tokens = 0
 
     for split, split_dir in sorted(normalized_dirs.items()):
+        split_expected_samples = expected_samples[split]
         run_config = run_configs[split]
         semantic = run_config["semantic_config"]
         if semantic["split"] != split:
@@ -223,20 +241,19 @@ def validate_dataset(
                 }
             )
 
-        expected_sample_indices = set(range(expected_samples_per_question))
+        expected_sample_indices = set(range(split_expected_samples))
         bad_samples = {
             uid: sorted(indices) for uid, indices in source_samples.items() if indices != expected_sample_indices
         }
         if bad_samples and not allow_incomplete:
             first_items = list(bad_samples.items())[:3]
             raise TraceValidationError(
-                f"{split} questions do not have exact sample indices 0..{expected_samples_per_question - 1}: "
-                f"{first_items}"
+                f"{split} questions do not have exact sample indices 0..{split_expected_samples - 1}: {first_items}"
             )
         run_samples = int(semantic["samples_per_question"])
-        if run_samples != expected_samples_per_question:
+        if run_samples != split_expected_samples:
             raise TraceValidationError(
-                f"{split} run declares {run_samples} samples/question, expected {expected_samples_per_question}"
+                f"{split} run declares {run_samples} samples/question, expected {split_expected_samples}"
             )
         question_count = len(source_samples)
         declared_questions = int(semantic["unique_question_count"])
@@ -254,7 +271,7 @@ def validate_dataset(
                 "dataset rejects zero-response-token rows. Regenerate/filter them, or use "
                 "--allow-empty-responses only for a non-training archival index."
             )
-        expected_rows = question_count * expected_samples_per_question
+        expected_rows = question_count * split_expected_samples
         if not allow_incomplete and stats["row_count"] != expected_rows:
             raise TraceValidationError(f"{split} has {stats['row_count']} rows, expected {expected_rows}")
         split_uid_questions[split] = uid_to_question
@@ -289,6 +306,9 @@ def validate_dataset(
             )
 
     first_semantic = next(iter(run_configs.values()))["semantic_config"]
+    sample_counts = set(expected_samples.values())
+    sample_contract: int | dict[str, int]
+    sample_contract = next(iter(sample_counts)) if len(sample_counts) == 1 else expected_samples
     index: dict[str, Any] = {
         "manifest_version": MANIFEST_VERSION,
         "schema_version": SCHEMA_VERSION,
@@ -297,7 +317,7 @@ def validate_dataset(
         "direction": first_semantic["direction"],
         "topk_width": TOPK_WIDTH,
         "recommended_training_topk_validation_tolerance": FP16_TOPK_MASS_TOLERANCE,
-        "samples_per_question": expected_samples_per_question,
+        "samples_per_question": sample_contract,
         "decode_check_performed": decoder is not None,
         "teacher": first_semantic["teacher"],
         "tokenizer": first_semantic["tokenizer"],
@@ -335,6 +355,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--expected-train-questions", type=int, default=EXPECTED_QUESTIONS["train"])
     parser.add_argument("--expected-validation-questions", type=int, default=EXPECTED_QUESTIONS["validation"])
     parser.add_argument("--expected-samples-per-question", type=int, default=EXPECTED_SAMPLES_PER_QUESTION)
+    parser.add_argument("--expected-train-samples-per-question", type=int, default=None)
+    parser.add_argument("--expected-validation-samples-per-question", type=int, default=None)
     return parser.parse_args(argv)
 
 
@@ -355,6 +377,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 local_files_only=args.local_files_only,
             )
         decoder = None if tokenizer is None else lambda ids: normalized_decode(tokenizer, ids)
+        expected_samples = {
+            "train": (
+                args.expected_train_samples_per_question
+                if args.expected_train_samples_per_question is not None
+                else args.expected_samples_per_question
+            ),
+            "validation": (
+                args.expected_validation_samples_per_question
+                if args.expected_validation_samples_per_question is not None
+                else args.expected_samples_per_question
+            ),
+        }
         index = validate_dataset(
             split_dirs,
             output_index=args.output_index,
@@ -363,7 +397,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "train": args.expected_train_questions,
                 "validation": args.expected_validation_questions,
             },
-            expected_samples_per_question=args.expected_samples_per_question,
+            expected_samples_per_question=expected_samples,
             allow_incomplete=args.allow_incomplete,
             allow_empty_responses=args.allow_empty_responses,
             fail_on_question_overlap=args.fail_on_question_overlap,

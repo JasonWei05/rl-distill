@@ -5,13 +5,15 @@ bundles now exist and validate: 48,615 train plus 1,000 validation traces in eac
 exact token IDs, response masks, and stored vLLM top-128 targets. Expanded cross-engine diagnostics
 show that vLLM and an unsharded HF BF16+SDPA training-shaped forward are close but not bit-identical.
 The immutable vLLM bundles remain the generation record; the intended primary training path derives a
-separate, identity-bound unsharded-HF target overlay over the exact stored token sequences. That rescore is prepared
-but has not been run and is not authorized by the current instruction. Both immutable vLLM source
+separate, identity-bound unsharded-HF target overlay over the exact stored token sequences. That
+rescore and the E2B-base-to-E4B student run are now authorized, subject to the parity, preflight, and
+one-step smoke gates below. Both immutable vLLM source
 bundles are now public on Hugging Face at independently verified commits: E2B-base traces at
 `JWei05/gemma4-e2b-base-topk128-traces@e32aaa02681ae83b3d7256b1b155c9084da2f289` and E4B-RL
 step-100 traces at `JWei05/gemma4-e4b-rl100-topk128-traces@2b6e49a0a456ee9d67b16a1dc61785562bee90c9`.
-The two 750-step distillation lines, production benchmark matrix, and post-distillation RL remain
-unstarted and unauthorized.
+The E2B-base-to-E4B validation contract is the deterministic clean 128-question subset recorded
+below, with one trace per question. The opposite distillation line, production benchmark matrix, and
+post-distillation RL remain unstarted and unauthorized.
 
 Last updated: 2026-07-31 UTC.
 
@@ -40,9 +42,12 @@ the response mask. Distillation must consume those stored IDs directly and must 
 trace. Before primary training, the exact sequences are intended to be teacher-forced through an
 unsharded HF BF16+SDPA path, using the model class selected by verl, into a separate top-128 overlay;
 the original vLLM targets remain immutable for
-provenance and engine-difference analysis. The artifacts preserve the historical 9,723-row training
-roster and all 200 validation UIDs. Their indexes explicitly record the seven overlapping question
-texts; clean evaluation must additionally report the uncontaminated 193-question subset.
+provenance and engine-difference analysis. The immutable artifacts preserve the historical 9,723-row
+training roster and all 200 validation UIDs, including seven overlapping question texts. For the
+E2B-base-to-E4B run, reuse the complete training split and use one response from each of 128
+deterministically selected, unique, train-disjoint validation prompts. The full 200 validation UIDs
+and clean 193-question roster remain provenance/evaluation pools rather than this run's in-loop
+validation payload.
 
 The framework-critical pieces now run end to end at smoke scale. Gemma 4 verl completes rollout,
 strict reward, FSDP2 update, vLLM weight sync, checkpoint save, and checkpoint resume. The former
@@ -166,6 +171,11 @@ histories.
   8,192-response-token gate used FP32 master parameters with BF16 compute, processed 16,384 active
   response tokens, produced finite loss/gradient values, ran step-zero and step-one validation, and
   saved a resumable checkpoint.
+- Ragged hidden-state selection now supports multiple sequences per microbatch. An eight-H100 E4B
+  gate completed three optimizer steps at microbatch size 2 and KL chunk size 4,096 using the full
+  4,096-prompt-plus-8,192-response contract, then passed a smaller final validation microbatch and
+  saved model, optimizer, dataloader, and directly loadable HF state. Peak device memory was 65,394
+  MiB and steady-state step time averaged 109.45 seconds for 786,432 global tokens.
 - A live E4B-RL step-100 trace was generated through vLLM 0.25.1 with exact rank-1-through-128
   full-vocabulary-normalized log probabilities and stored token IDs. That trace then passed a real
   two-rank E2B update, step-zero/step-one validation, checkpoint save, resume, and serving check.
@@ -311,12 +321,12 @@ exactly as the trace generator does.
 |---|---|---:|---:|---:|---|
 | Source pool | `deepscaler_acc4of4_strict.parquet` | 9,923 recorded historically | not re-audited locally | not re-audited locally | provenance only |
 | Train | `deepscaler_4of4strict_rl_train.parquet` | 9,723 | 9,723 row-level units | 9,543 | row-faithful trace generation and distillation train |
-| Validation | `deepscaler_4of4strict_rl_val200_x16.parquet` | 3,200 | 200 UID-deduplicated units | 200 | trace generation/evaluation |
+| Validation source | `deepscaler_4of4strict_rl_val200_x16.parquet` | 3,200 | 200 UID-deduplicated units | 200 | provenance/evaluation pool |
+| E2B-to-E4B validation | `deepscaler_4of4strict_rl_val128_clean_seed42.parquet` | 128 | 128 UID-deduplicated units | 128 | one-trace in-loop validation |
 
-The split was shuffled with seed 42. The validation parquet repeats each question 16 times for the
-legacy RL validator. This project must generate from the **200 validation UIDs**, not from all 3,200
-repeated rows. The training parquet has no UID, so the implemented generator gives every source row
-a deterministic row-derived UID and currently preserves all 9,723 rows. That preserves the historical
+The split was shuffled with seed 42. The source validation parquet repeats each question 16 times for
+the legacy RL validator. The training parquet has no UID, so the implemented generator gives every
+source row a deterministic row-derived UID and preserves all 9,723 rows. That preserves the historical
 schedule but means 180 repeated question-text rows receive duplicate trace multiplicity.
 
 The audit also found **seven validation question texts in train**. Each leaked text occurs once in
@@ -325,17 +335,22 @@ Across the current unmodified train and validation files there are only 9,736 di
 not 9,923. The trace-artifact policy is to preserve the exact historical files because the existing
 RL checkpoints trained on that roster. The dataset index records the seven overlap hashes, and both
 preflight and upload reject the dataset unless `--allow-question-overlap` is explicitly supplied.
-That deliberate override is used for these artifacts; evaluation must report both full-200 continuity
-and the uncontaminated 193-question subset rather than presenting the full 200 as clean held-out data.
+The E2B-to-E4B production bundle avoids the exception: it excludes those seven prompts, samples 128
+of the 193 clean validation UIDs with Python's seeded sampler at seed 42, and then restores source
+validation order. Its Parquet SHA256 is
+`934f53eebf08775899b9705628324f1cd3e4c17dc6e9064774b1ee49587dbb99`, its selection-file SHA256 is
+`9443e38436669498e1404e3cc20142ef8c54024cebcc943939f9f42f0c56c976`, and its ordered roster SHA256
+is `173b2da5af12e12d264fa0346b8641b058b04078df6621868078f9d1c7fca921`.
 
-With five traces per row-level train unit and five per validation UID, both completed source bundles
-contain:
+Each immutable source bundle contains five traces per row-level train unit and five per validation
+UID. The E2B-to-E4B derivative reuses all source training traces and selects one trace per clean
+validation UID:
 
 | Split | Generation units | Distinct texts | Traces/unit | Distillation rows |
 |---|---:|---:|---:|---:|
 | Train | 9,723 | 9,543 | 5 | 48,615 |
-| Validation | 200 | 200 | 5 | 1,000 |
-| Total | 9,923 | 9,736 after cross-split deduplication | 5 | 49,615 |
+| Validation | 128 | 128 | 1 | 128 |
+| Total | 9,851 | 9,671 after cross-split deduplication | split-specific | 48,743 |
 
 The exact immutable bundle registrations are:
 
@@ -367,10 +382,10 @@ require a 285-trace wrap. If only the seven leaked train rows were removed, it w
 traces and leave 580 unseen. Those are possible future clean-roster ablations, not the primary trace
 artifact registered here.
 
-The validator, production preflight, dataset supervisor, and uploader register exactly 9,723 x 5 train
-rows and 200 x 5 validation rows. A repaired or text-deduplicated variant must use a separately named
-dataset, updated count constants/tests, and a new immutable roster hash; it must never reuse or weaken
-the primary artifact's count checks.
+The validator, production preflight, dataset supervisor, and uploader accept explicit split-specific
+contracts while retaining 9,723 x 5 train and 200 x 5 validation as backward-compatible defaults. The
+authorized E2B-to-E4B contract is exactly 9,723 x 5 train and 128 x 1 validation. A different roster
+must use a separately named dataset and new immutable roster hash; it must never weaken these checks.
 
 ### Prompt, tokenization, sampling, and reward contract
 
@@ -515,9 +530,8 @@ Before a shard is accepted:
    the top 128.
 8. Re-decoding the stored response IDs matches the stored response text under an explicitly defined
    normalization.
-9. Train and validation UIDs are disjoint, validation contains exactly 200 UIDs x 5 samples, and
-   train/validation question-text hashes do not overlap unless an explicitly approved exception is
-   recorded. The current source files fail the last condition for seven texts.
+9. Train and validation UIDs are disjoint, the E2B-to-E4B validation split contains exactly 128 UIDs
+   x 1 sample, and train/validation question-text hashes do not overlap.
 10. The manifest records row counts, token counts, truncation counts, shard hashes, and distribution
     quantiles for response length and teacher top-k mass.
 
@@ -583,13 +597,14 @@ because scheduler endpoints can otherwise differ by one update.
   or fail with an actionable error.
 - Log teacher top-k mass, student mass on teacher support, loss quantiles, active response-token count,
   gradient norm, learning rate, sequence lengths, throughput, and memory.
-- Validation must include every trace in the selected held-out roster: 1,000 for all 200 questions
-  or 965 for the clean 193-question subset. The SFT validation loader retains a final partial batch
-  only for exact distillation coverage and computes a token-weighted aggregate. With distributed
-  validation, require the row count to be divisible by data-parallel size so `DistributedSampler`
-  cannot pad with duplicate rows, or use an exact non-padding sampler.
-- Precomputed hidden-state projection currently requires microbatch size one. The launcher rejects
-  larger values until per-sample ragged response indices are implemented and tested.
+- Validation must include every trace in the selected held-out roster: 128 for the authorized
+  E2B-to-E4B run. The SFT validation loader retains a final partial batch only for exact distillation
+  coverage and computes a token-weighted aggregate. The selected row count is divisible by all eight
+  data-parallel ranks, so `DistributedSampler` does not pad with duplicate rows.
+- Precomputed hidden-state projection supports ragged microbatches by mapping packed response
+  positions back to per-sample padded coordinates. Training batches remain strictly divisible by
+  the configured microbatch size; forward-only validation permits a smaller final microbatch while
+  preserving any configured force-group boundary. The verified eight-H100 default is microbatch 2.
 - Vocabulary projection chunks must use activation checkpointing during training; otherwise each
   chunk's full-vocabulary autograd intermediates remain live until backward and defeat the memory
   bound at 8,192 response tokens.
@@ -879,7 +894,7 @@ direction. Their current status is:
    - emits only verified overlay train/validation paths through the existing no-`eval` launcher
      contract. The combined source/overlay/launcher suite passed 48 tests.
 8. `data/preflight_gemma4_topk_distill.py` — implemented and unit tested for source vLLM bundles
-   - verifies index/config/shard hashes, complete 9,723 x 5 and 200 x 5 rosters, prompt/sampling
+   - verifies index/config/shard hashes, explicit split-specific roster/sample counts, prompt/sampling
      contracts, tokenizer identity, top-k integrity, teacher identity, student identity, and
      cross-split leakage before a production launcher receives file lists;
    - the launcher automatically selects the overlay preflight instead for the overlay schema.
@@ -913,20 +928,20 @@ resolved configuration before work begins. The runbook is deliberately fail-clos
    `8b5712e0f5dea3388340a9bc91a6ceee40ff2ff990e66b7238090e240daeda6c`. Each commit contains
    exactly 2,485 registered files. Remote verification compared every path and size, Parquet LFS
    SHA-256, and non-LFS Git blob SHA-1.
-3. **Prepared, not authorized:** rerun the integrated cross-engine audit if a final committed-script
+3. **Optional diagnostic:** rerun the integrated cross-engine audit if a final committed-script
    report is required, then review its explicit pass/fail JSON.
-4. **Prepared, not authorized:** run the native-forward parity gate and bulk unsharded-HF target rescore
-   into separate output roots.
-5. **Prepared, not authorized:** after a complete overlay exists, run the overlay-specific preflight
+4. **Authorized for E2B-to-E4B:** run the native-forward parity gate and bulk unsharded-HF target
+   rescore into a separate output root.
+5. After the complete overlay exists, run the overlay-specific preflight
    and launcher route with both `DATASET_INDEX` and `SOURCE_DATASET_INDEX`; only its emitted shard
    lists may reach the trainer.
-6. Resolve D03-D05A and D15-D40, then run a separately authorized one-step, no-upload student smoke.
-7. Only after smoke, code, and artifact review may either 750-step production line be authorized.
+6. Run the authorized one-step, no-upload E4B student smoke.
+7. After smoke, code, and artifact review pass, launch the authorized 750-step E2B-to-E4B run.
 8. Generate immutable evaluation traces, aggregate math metrics offline, then run the full pinned OOD
    matrix without `--limit`.
 
-Source-bundle publication is complete. GPU audit/rescoring, a distillation smoke, either 750-step
-line, benchmark production, and post-distillation RL are not authorized by this turn.
+Source-bundle publication is complete. E2B target rescoring, its E4B smoke, and its 750-step run are
+authorized. The opposite direction, benchmark production, and post-distillation RL remain future work.
 
 ### Historical/resume-only trace commands — DO NOT RUN
 
@@ -957,47 +972,48 @@ E2B-base to E4B trace bundle:
 ```bash
 GEMMA4_TRACE_RESUME_AUTHORIZED=NO
 test "${GEMMA4_TRACE_RESUME_AUTHORIZED}" = YES && \
-  PYTHON_BIN=/tmp/.venv-gemma4-e2e/bin/python \
+  PYTHON_BIN=/home/ubuntu/rl-distill/.venv-gemma4/bin/python \
   TRAIN_PARQUET=/tmp/verl/data/deepscaler_4of4strict_rl_train.parquet \
-  VALIDATION_PARQUET=/tmp/verl/data/deepscaler_4of4strict_rl_val200_x16.parquet \
+  VALIDATION_PARQUET=/tmp/verl/data/deepscaler_4of4strict_rl_val128_clean_seed42.parquet \
+  VALIDATION_SOURCE_DATASET=deepscaler_4of4strict_rl_val128_clean_seed42 \
+  EXPECTED_TRAIN_QUESTIONS=9723 \
+  EXPECTED_VALIDATION_QUESTIONS=128 \
+  TRAIN_SAMPLES_PER_QUESTION=5 \
+  VALIDATION_SAMPLES_PER_QUESTION=1 \
   rl-distill-scripts/data/run_gemma4_trace_dataset.sh \
-    --teacher-model /tmp/hf_cache/models--google--gemma-4-E2B/snapshots/d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f \
+    --teacher-model /tmp/hf_cache/hub/models--google--gemma-4-E2B/snapshots/d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f \
     --teacher-content-sha256 76dc84a5a805a2c8b91e9ccc00b8dbf8f4a99bf0d56ab25832f6e6addd4f7f57 \
     --direction e2b_base_to_e4b \
-    --output-root /lambda/nfs/Jason-scale/rl-distill-traces/gemma4-e2b-base-topk128 \
+    --output-root /tmp/verl/gemma4-e2b-base-topk128-v128 \
     --hf-repo-id JWei05/gemma4-e2b-base-topk128-traces \
-    --gpus 2,3 \
-    --allow-question-overlap
+    --gpus 0,1,2,3,4,5,6,7
 ```
 
-### Future distillation templates — DO NOT RUN
+### E2B-base-to-E4B production distillation
 
-The corresponding one-step, no-upload student gates below are the already verified source-vLLM-target
-smoke path, not the intended primary unsharded-HF-overlay path. They remain useful regression commands but
-must not be relabeled as the production experiment. For the primary path, set `DATASET_INDEX` to the
-finalized overlay index and `SOURCE_DATASET_INDEX` to its exact immutable vLLM source index; the
-launcher selects the strict overlay preflight by schema. No concrete overlay path exists until the
-separately authorized rescore completes. Any one-step execution is unauthorized here; any 750-step
-variant is additionally blocked on D15 and the other unresolved scientific/run-identity decisions.
+The primary experiment must use the finalized unsharded-HF overlay, not the immutable source's vLLM
+targets. Set `DATASET_INDEX` to the overlay index and `SOURCE_DATASET_INDEX` to the exact vLLM source
+index so the launcher selects the strict overlay preflight. After the overlay passes preflight and a
+one-step no-upload gate, launch the 750-step run with
+microbatch 2 and a 4,096-token vocabulary-projection chunk. Validation runs over all 128 registered
+rows with no distributed padding. Save and upload directly loadable HF checkpoints at steps 250, 500,
+and 750.
 
 ```bash
-GEMMA4_EXPERIMENTS_AUTHORIZED=NO
-test "${GEMMA4_EXPERIMENTS_AUTHORIZED}" = YES && \
-  MODEL_PATH=/tmp/hf_cache/models--google--gemma-4-E2B/snapshots/d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f \
-  DATASET_INDEX=/tmp/verl/gemma4-e4b-rl100-topk128-traces/dataset_index.json \
-  DISTILL_DIRECTION=e4b_rl100_to_e2b \
-  EXPECTED_TEACHER_IDENTITY_SHA256=46c469dc4e59ffad57d8889c1b6f0a7ce822192610819197e615a720dc591bf3 \
-  EXPECTED_STUDENT_IDENTITY_SHA256=bde9e800223cdd62228ce39e0305398f6ada05b98adaf438b0b3d3d3c3015561 \
-  ALLOW_QUESTION_OVERLAP=true TOTAL_TRAINING_STEPS=1 HF_PUSH_ENABLE=false \
-  rl-distill-scripts/gemma4_topk_distill_fsdp2.sh
-
-test "${GEMMA4_EXPERIMENTS_AUTHORIZED}" = YES && \
-  MODEL_PATH=/home/ubuntu/.cache/huggingface/hub/models--google--gemma-4-E4B/snapshots/411aa17b749aa952df1359d2dcea73917a544d9a \
-  DATASET_INDEX=/tmp/verl/gemma4-e2b-base-topk128-traces/dataset_index.json \
+GEMMA4_E2B_TO_E4B_PRODUCTION_AUTHORIZED=YES
+test "${GEMMA4_E2B_TO_E4B_PRODUCTION_AUTHORIZED}" = YES && \
+  MODEL_PATH=/home/ubuntu/.cache/huggingface/models--google--gemma-4-E4B/snapshots/411aa17b749aa952df1359d2dcea73917a544d9a \
+  DATASET_INDEX=/tmp/verl/datasets/gemma4-e2b-base-topk128-hf-overlay-v128-seed42/dataset_index.json \
+  SOURCE_DATASET_INDEX=/tmp/verl/datasets/gemma4-e2b-base-topk128-traces-e32aaa02681a-val128-seed42/dataset_index.json \
   DISTILL_DIRECTION=e2b_base_to_e4b \
   EXPECTED_TEACHER_IDENTITY_SHA256=2d48d343709dcae087d6ff2def9f09d2950ca66dc2183a8bee38850c4ddbbb36 \
   EXPECTED_STUDENT_IDENTITY_SHA256=acdc0d2bcb8f676593b5387807da1cd1b84a9e26fa279db4a86f54a211055b2d \
-  ALLOW_QUESTION_OVERLAP=true TOTAL_TRAINING_STEPS=1 HF_PUSH_ENABLE=false \
+  EXPECTED_TRAIN_QUESTIONS=9723 EXPECTED_VALIDATION_QUESTIONS=128 \
+  EXPECTED_TRAIN_SAMPLES_PER_QUESTION=5 EXPECTED_VALIDATION_SAMPLES_PER_QUESTION=1 \
+  MICRO_BATCH_SIZE_PER_GPU=2 FULL_VOCAB_KL_CHUNK_SIZE=4096 TRAIN_BATCH_SIZE=64 \
+  TOTAL_TRAINING_STEPS=750 SAVE_FREQ=250 TEST_FREQ=10 \
+  PROJECT_NAME=gemma4-distill-vs-rl EXP_NAME=e2b-base-to-e4b-topk128-750-v128-seed42 \
+  HF_PUSH_ENABLE=true HF_PUSH_REPO=JWei05/gemma4-e2b-base-to-e4b-topk128-distill \
   rl-distill-scripts/gemma4_topk_distill_fsdp2.sh
 ```
 
@@ -1048,20 +1064,19 @@ Evaluation remains similarly held. After D33-D40 are resolved, use `eval_math_pa
 12. **Passed for trace generation:** both teachers loaded with the 12,288 context contract and
     generated naturally stopped responses under an 8,192-token cap. This is separate from the RL
     rollout boundary, whose 512-token verl smoke remains the verified RL configuration.
-13. **Explicitly registered:** preserve the 180 duplicate-text row occurrences and the seven
-    train/validation overlaps for historical-roster comparability. The supervisor must pass the
-    explicit overlap exception, and evaluation must report the clean 193-question subset.
+13. **Explicitly registered:** preserve the 180 duplicate-text train-row occurrences. The immutable
+    source registers seven train/validation overlaps, while the E2B-to-E4B derivative excludes them
+    and validates the clean 128 x 1 roster without an overlap exception.
 14. **Cross-engine diagnostic passed:** expanded E2B and E4B reports cover 32 traces each and pass the
     calibrated top-1/top-k/log-probability thresholds. Native HF versus manual projection is exact;
     vLLM versus HF is close but non-identical, motivating a disjoint training-target overlay.
-15. **Prepared, not executed:** the unsharded-HF rescorer, parity receipt, source+overlay preflight, and
-    launcher routing are focused-test verified. Bulk scoring, complete overlay finalization, and any
-    overlay upload remain unstarted and require separate authorization. A real finalized overlay must
-    pass that preflight before a student smoke.
+15. **Prepared and authorized for E2B-to-E4B:** the unsharded-HF rescorer, parity receipt,
+    source+overlay preflight, and launcher routing are focused-test verified. Bulk scoring and
+    complete overlay finalization remain unstarted. A real finalized overlay must pass that preflight
+    before the E4B student smoke.
 16. **Final preparation gate:** complete the consolidated test/lint review, inspect the full diff for
-    secrets or artifacts, commit with AI-assistance attribution, and push the reviewed branch. That
-    completes repository preparation only; both source bundles are already public and independently
-    verified, but rescoring and every experimental stage remain separately unauthorized.
+    secrets or artifacts, commit with AI-assistance attribution, and push the reviewed branch before
+    starting the authorized E2B target rescore and E4B distillation.
 
 ## Decision and ambiguity ledger
 
@@ -1097,11 +1112,11 @@ defaults are proposals, not silently adopted decisions.
   9,723 historical row-level generation units, including the 180 repeated-text occurrences. Report
   row-weighted and distinct-text-weighted analyses later; any deduplicated experiment needs a new
   dataset name and roster hash.
-- **D05C — Seven-question train/validation leak: resolved for primary trace artifacts.** Preserve
-  the historical train and all 200 validation UIDs for direct comparability with existing RL runs,
-  record/pass the overlap exception explicitly, and report the uncontaminated 193-item subset as the
-  clean validation view. A truly untouched comparison remains a possible follow-up because the
-  existing RL checkpoints already saw those seven texts.
+- **D05C — E2B-to-E4B validation roster: resolved.** Preserve the historical training rows, but use
+  128 unique prompts sampled at seed 42 from the 193 validation prompts whose exact question hashes
+  are absent from train. Generate one validation trace per prompt. Retain the full-200 and clean-193
+  rosters for later continuity reporting, but do not use the seven leaked prompts for this run's
+  in-loop validation.
 
 ### Generation and trace data
 
@@ -1312,6 +1327,16 @@ defaults are proposals, not silently adopted decisions.
   but 9,543 distinct question texts. Validation has 200 distinct UIDs/texts repeated to 3,200 rows.
   Seven validation texts occur once in train. Primary traces preserve the exact historical roster;
   overlap is an explicit indexed exception and clean evaluation uses the remaining 193 questions.
+- **2026-07-31 — E2B-to-E4B validation reduced to a clean deterministic 128 x 1 roster.** Deduplicate
+  validation by UID, exclude the seven train-overlapping prompts, sample 128 of 193 at seed 42, and
+  preserve source order. The resulting Parquet and ordered roster hashes are registered above; the
+  production validator, uploader, and preflight enforce the split-specific counts.
+- **2026-07-31 — E2B trace corpus uploaded and production-preflighted.** Hub dataset revision
+  `e32aaa02681ae83b3d7256b1b155c9084da2f289` contains 48,615 train and 1,000 original validation
+  traces. The training split is reused byte-for-byte; sample index 0 from each selected clean
+  validation UID forms the 128-row derivative. Its combined local index SHA256 is
+  `efe76f5a53225e97081a750495ceb8ebe26b1a72a3ea8e0b74ea079a87828c0a`, and production preflight
+  passed against pinned E4B revision `411aa17b749aa952df1359d2dcea73917a544d9a`.
 - **2026-07-31 — Both production-length teacher gates passed.** E4B generated 149 tokens and E2B 40
   under the 8,192 cap; both naturally stopped on `<end_of_turn>`, stored exact `[response, 128]`
   targets, and passed bundle validation. vLLM retained the seven stop token IDs while omitting them
@@ -1338,7 +1363,9 @@ defaults are proposals, not silently adopted decisions.
   into a disjoint unsharded-HF overlay over the exact same token IDs. Never re-tokenize and never load
   an online teacher in student training. This diagnostic does not establish FSDP2 numerical
   equivalence; that requires a separate real-engine audit.
-- **2026-07-31 — Rescorer prepared; execution held.** The rescorer, audit, focused CPU tests, and
-  guarded operator documentation are prepared. Bulk GPU rescoring, overlay publication, student
-  smoke, both 750-step distillation lines, benchmark production, and post-distillation RL remain
-  unstarted and require separate explicit authorization.
+- **2026-07-31 — E2B-to-E4B production authorized after repository push.** The rescorer, audit,
+  focused CPU tests, and guarded operator documentation are prepared. After the training-engine
+  overlay passes parity, complete preflight, and a one-step no-upload E4B gate, launch the 750-step
+  SFT with W&B logging and private HF checkpoint uploads.
+  The opposite distillation direction, benchmark production, and post-distillation RL remain future
+  work.

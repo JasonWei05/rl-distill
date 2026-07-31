@@ -24,6 +24,7 @@ Focuses on verifying that:
 4. Token budget (max_token_len) is respected per micro-batch.
 """
 
+import pytest
 import torch
 from tensordict import TensorDict
 
@@ -239,3 +240,32 @@ def test_force_group_size_1_unchanged():
     # All samples covered exactly once.
     all_indices = [idx for indices in batch_idx_list for idx in indices]
     assert sorted(all_indices) == list(range(len(seq_lens)))
+
+
+def test_static_validation_allows_a_smaller_final_nested_microbatch():
+    tensors = [torch.arange(length) for length in [3, 5, 4, 6, 2]]
+    batch = TensorDict(
+        {
+            "input_ids": torch.nested.as_nested_tensor(tensors, layout=torch.jagged),
+            "loss_mask": torch.nested.as_nested_tensor(
+                [torch.ones_like(tensor) for tensor in tensors], layout=torch.jagged
+            ),
+        },
+        batch_size=[len(tensors)],
+    )
+    tu.assign_non_tensor_data(batch, "use_dynamic_bsz", False)
+    tu.assign_non_tensor_data(batch, "force_group_size", 1)
+    tu.assign_non_tensor_data(batch, "micro_batch_size_per_gpu", 2)
+
+    with pytest.raises(AssertionError, match="data size must be divisible"):
+        prepare_micro_batches(batch)
+
+    micro_batches, batch_idx_list = prepare_micro_batches(batch, allow_uneven_micro_batches=True)
+
+    assert batch_idx_list is None
+    assert [len(micro_batch) for micro_batch in micro_batches] == [2, 2, 1]
+    assert [micro_batch["input_ids"].offsets().diff().tolist() for micro_batch in micro_batches] == [
+        [3, 5],
+        [4, 6],
+        [2],
+    ]

@@ -260,13 +260,13 @@ class FullVocabKLLoss:
                 raise ValueError("student hidden-state distillation requires hidden states, LM head, and config")
             if student_hidden.dim() != 3 or student_hidden.shape[0] != 1:
                 raise ValueError(
-                    "hidden-state distillation currently requires one sequence per micro-batch; "
+                    "hidden-state distillation requires compacted [1, active_tokens, hidden_size] input; "
                     f"got student_hidden.shape={tuple(student_hidden.shape)}"
                 )
         else:
             if student_logits.dim() != 3 or student_logits.shape[0] != 1:
                 raise ValueError(
-                    "logit distillation currently requires one sequence per micro-batch; "
+                    "logit distillation requires packed [1, total_tokens, vocab_size] input; "
                     f"got student_logits.shape={tuple(student_logits.shape)}"
                 )
         sp_size = tu.get_non_tensor_data(data=data, key="sp_size", default=1)

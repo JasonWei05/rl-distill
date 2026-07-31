@@ -131,7 +131,9 @@ def test_launcher_uses_preflight_hydra_lists_without_eval(tmp_path: Path) -> Non
     assert f"data.train_files={json.dumps(train_files, separators=(',', ':'))}" in argv
     assert f"data.val_files={json.dumps(validation_files, separators=(',', ':'))}" in argv
     assert "teacher_model.top_k=128" in argv
+    assert "teacher_model.chunk_size=4096" in argv
     assert "data.teacher_topk_validation_tolerance=0.0025" in argv
+    assert "data.micro_batch_size_per_gpu=2" in argv
 
 
 def test_launcher_rejects_identity_changed_after_preflight(tmp_path: Path) -> None:

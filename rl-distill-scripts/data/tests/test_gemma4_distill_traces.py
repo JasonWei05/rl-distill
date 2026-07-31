@@ -609,6 +609,33 @@ def test_typed_shard_roundtrip_resume_hash_and_dataset_index(tmp_path):
         )
 
 
+def test_dataset_index_supports_split_specific_sample_counts(tmp_path):
+    _write_split(
+        tmp_path / "train",
+        "train",
+        [("train-0", "train question")],
+        samples_per_question=2,
+    )
+    _write_split(
+        tmp_path / "validation",
+        "validation",
+        [("validation-0", "validation question")],
+        samples_per_question=1,
+    )
+
+    index = validate.validate_dataset(
+        {"train": tmp_path / "train", "validation": tmp_path / "validation"},
+        output_index=tmp_path / "dataset_index.json",
+        decoder=lambda ids: FakeTokenizer().decode(ids),
+        expected_questions={"train": 1, "validation": 1},
+        expected_samples_per_question={"train": 2, "validation": 1},
+    )
+
+    assert index["samples_per_question"] == {"train": 2, "validation": 1}
+    assert index["splits"]["train"]["row_count"] == 2
+    assert index["splits"]["validation"]["row_count"] == 1
+
+
 def test_dataset_index_records_and_can_reject_train_validation_question_overlap(tmp_path):
     _write_split(tmp_path / "train", "train", [("train-0", "same question")])
     _write_split(tmp_path / "validation", "validation", [("validation-0", "same question")])

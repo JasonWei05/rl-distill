@@ -62,6 +62,7 @@ def prepare_micro_batches(
     same_micro_num_in_dp=True,
     min_num_micro_batch=None,
     use_dynamic_bsz_balance=True,
+    allow_uneven_micro_batches=False,
 ):
     """
     Prepare micro batches from data.
@@ -88,10 +89,19 @@ def prepare_micro_batches(
     else:
         total_data_size = len(data)
         micro_batch_size_per_gpu = data["micro_batch_size_per_gpu"]
-        assert total_data_size % (force_group_size * micro_batch_size_per_gpu) == 0, (
-            "data size must be divisible by force_group_size * micro_batch_size_per_gpu"
-        )
-        micro_batches = tu.chunk_tensordict(data, total_data_size // (micro_batch_size_per_gpu * force_group_size))
+        micro_batch_size = force_group_size * micro_batch_size_per_gpu
+        if allow_uneven_micro_batches:
+            assert total_data_size % force_group_size == 0, "partial micro-batches must preserve force_group_size"
+            full_micro_batches, remainder = divmod(total_data_size, micro_batch_size)
+            split_sizes = [micro_batch_size] * full_micro_batches
+            if remainder:
+                split_sizes.append(remainder)
+            micro_batches = tu.split_tensordict(data, split_sizes)
+        else:
+            assert total_data_size % micro_batch_size == 0, (
+                "data size must be divisible by force_group_size * micro_batch_size_per_gpu"
+            )
+            micro_batches = tu.chunk_tensordict(data, total_data_size // micro_batch_size)
         batch_idx_list = None
     return micro_batches, batch_idx_list
 

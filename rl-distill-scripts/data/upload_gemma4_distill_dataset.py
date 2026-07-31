@@ -338,11 +338,12 @@ def validate_upload_bundle(
     *,
     allow_question_overlap: bool = False,
     _expected_questions: Mapping[str, int] | None = None,
+    _expected_samples_per_question: int | Mapping[str, int] = preflight.EXPECTED_SAMPLES_PER_QUESTION,
 ) -> ValidatedUploadBundle:
     """Perform a full, read-only validation and return the exact upload set.
 
-    ``_expected_questions`` is private test plumbing.  The CLI exposes no way
-    to weaken the production 9,723-train/200-validation size contract.
+    The expected question and sample counts are explicit upload contracts. The
+    CLI defaults preserve the original 9,723x5 train and 200x5 validation roster.
     """
 
     dataset_root, index_path = _resolve_dataset_index(dataset_path)
@@ -363,10 +364,14 @@ def validate_upload_bundle(
         raise DatasetUploadError(f"unsupported dataset direction: {index['direction']!r}")
     if index["topk_width"] != trace_schema.TOPK_WIDTH:
         raise DatasetUploadError(f"dataset top-k width must be exactly {trace_schema.TOPK_WIDTH}")
-    if index["samples_per_question"] != preflight.EXPECTED_SAMPLES_PER_QUESTION:
-        raise DatasetUploadError(
-            f"dataset samples_per_question must be exactly {preflight.EXPECTED_SAMPLES_PER_QUESTION}"
-        )
+    expected_samples = preflight._normalize_split_counts(
+        _expected_samples_per_question, field_name="expected samples_per_question"
+    )
+    index_samples = preflight._normalize_split_counts(
+        index["samples_per_question"], field_name="dataset samples_per_question"
+    )
+    if index_samples != expected_samples:
+        raise DatasetUploadError("dataset samples_per_question does not match the upload contract")
     if index["recommended_training_topk_validation_tolerance"] != trace_schema.FP16_TOPK_MASS_TOLERANCE:
         raise DatasetUploadError("dataset top-k validation tolerance does not match the trace schema")
     if not isinstance(index["splits"], Mapping) or set(index["splits"]) != {"train", "validation"}:
@@ -398,7 +403,7 @@ def validate_upload_bundle(
                 output_index=regenerated_path,
                 decoder=None,
                 expected_questions=expected_questions,
-                expected_samples_per_question=preflight.EXPECTED_SAMPLES_PER_QUESTION,
+                expected_samples_per_question=expected_samples,
                 allow_incomplete=False,
                 allow_empty_responses=False,
                 fail_on_question_overlap=not allow_question_overlap,
@@ -792,9 +797,16 @@ def upload_dataset(
     token: str,
     allow_question_overlap: bool = False,
     private: bool = True,
+    expected_questions: Mapping[str, int] | None = None,
+    expected_samples_per_question: int | Mapping[str, int] = preflight.EXPECTED_SAMPLES_PER_QUESTION,
     api: Any | None = None,
 ) -> UploadResult:
-    bundle = validate_upload_bundle(dataset_path, allow_question_overlap=allow_question_overlap)
+    bundle = validate_upload_bundle(
+        dataset_path,
+        allow_question_overlap=allow_question_overlap,
+        _expected_questions=expected_questions,
+        _expected_samples_per_question=expected_samples_per_question,
+    )
     return upload_validated_bundle(
         bundle,
         repo_id=repo_id,
@@ -825,6 +837,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Explicitly make and verify the dataset repository public. The default is private.",
     )
+    parser.add_argument("--expected-train-questions", type=int, default=preflight.EXPECTED_QUESTIONS["train"])
+    parser.add_argument("--expected-validation-questions", type=int, default=preflight.EXPECTED_QUESTIONS["validation"])
+    parser.add_argument(
+        "--expected-train-samples-per-question", type=int, default=preflight.EXPECTED_SAMPLES_PER_QUESTION
+    )
+    parser.add_argument(
+        "--expected-validation-samples-per-question", type=int, default=preflight.EXPECTED_SAMPLES_PER_QUESTION
+    )
     return parser.parse_args(argv)
 
 
@@ -842,6 +862,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             token=token,
             allow_question_overlap=args.allow_question_overlap,
             private=not args.public,
+            expected_questions={
+                "train": args.expected_train_questions,
+                "validation": args.expected_validation_questions,
+            },
+            expected_samples_per_question={
+                "train": args.expected_train_samples_per_question,
+                "validation": args.expected_validation_samples_per_question,
+            },
         )
     except (OSError, RuntimeError, ValueError) as error:
         print(f"ERROR: {_redact_secret(str(error), token)}", file=sys.stderr)

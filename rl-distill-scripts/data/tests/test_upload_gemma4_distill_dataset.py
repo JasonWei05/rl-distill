@@ -57,7 +57,7 @@ def _position_logprobs(sampled_token_id: int):
     return entries
 
 
-def _semantic(split: str, tokenizer_sha256: str, vocab_size: int):
+def _semantic(split: str, tokenizer_sha256: str, vocab_size: int, *, samples_per_question: int = 5):
     teacher_revision = "a" * 40
     teacher = {
         "model": "example/teacher",
@@ -75,7 +75,7 @@ def _semantic(split: str, tokenizer_sha256: str, vocab_size: int):
         "prompt_roster_sha256": "3" * 64,
         "source_row_count": 1,
         "unique_question_count": 1,
-        "samples_per_question": 5,
+        "samples_per_question": samples_per_question,
         "topk_width": schema.TOPK_WIDTH,
         "global_seed": 42,
         "prompts_per_shard": 1,
@@ -118,8 +118,8 @@ def _semantic(split: str, tokenizer_sha256: str, vocab_size: int):
     }
 
 
-def _run_config(split: str, tokenizer_sha256: str, vocab_size: int):
-    semantic = _semantic(split, tokenizer_sha256, vocab_size)
+def _run_config(split: str, tokenizer_sha256: str, vocab_size: int, *, samples_per_question: int = 5):
+    semantic = _semantic(split, tokenizer_sha256, vocab_size, samples_per_question=samples_per_question)
     return {
         "manifest_version": schema.MANIFEST_VERSION,
         "schema_version": schema.SCHEMA_VERSION,
@@ -169,16 +169,26 @@ def _record(run_config, *, split: str, sample_index: int, row_index: int):
     )
 
 
-def _write_complete_dataset(root: Path) -> Path:
+def _write_complete_dataset(root: Path, *, sample_counts: dict[str, int] | None = None) -> Path:
+    sample_counts = sample_counts or {"train": 5, "validation": 5}
     tokenizer = FakeTokenizer()
     tokenizer_sha256, vocab_size = schema.tokenizer_fingerprint(tokenizer)
     split_dirs = {}
     for split in ("train", "validation"):
         split_dir = root / split
         split_dir.mkdir(parents=True)
-        run_config = _run_config(split, tokenizer_sha256, vocab_size)
+        samples_per_question = sample_counts[split]
+        run_config = _run_config(
+            split,
+            tokenizer_sha256,
+            vocab_size,
+            samples_per_question=samples_per_question,
+        )
         schema.atomic_write_json(split_dir / "run_config.json", run_config)
-        records = [_record(run_config, split=split, sample_index=index, row_index=index) for index in range(5)]
+        records = [
+            _record(run_config, split=split, sample_index=index, row_index=index)
+            for index in range(samples_per_question)
+        ]
         generate._write_validated_shard(
             records,
             parquet_path=split_dir / f"traces-{split}-000000.parquet",
@@ -196,7 +206,7 @@ def _write_complete_dataset(root: Path) -> Path:
         output_index=index_path,
         decoder=lambda ids: tokenizer.decode(ids),
         expected_questions={"train": 1, "validation": 1},
-        expected_samples_per_question=5,
+        expected_samples_per_question=sample_counts,
     )
     return index_path
 
@@ -324,6 +334,17 @@ def test_complete_bundle_preserves_index_run_configs_manifests_and_shards(tmp_pa
         _expected_questions={"train": 1, "validation": 1},
     )
     assert directory_bundle.dataset_index_sha256 == bundle.dataset_index_sha256
+
+
+def test_complete_bundle_accepts_split_specific_sample_counts(tmp_path):
+    sample_counts = {"train": 5, "validation": 1}
+    index_path = _write_complete_dataset(tmp_path, sample_counts=sample_counts)
+    bundle = uploader.validate_upload_bundle(
+        index_path,
+        _expected_questions={"train": 1, "validation": 1},
+        _expected_samples_per_question=sample_counts,
+    )
+    assert bundle.total_rows == 6
 
 
 def test_complete_bundle_remains_valid_after_directory_move(tmp_path):

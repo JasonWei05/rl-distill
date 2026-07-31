@@ -172,7 +172,6 @@ def _common_generation_config(semantic: Mapping[str, Any]) -> dict[str, Any]:
     required = (
         "schema_version",
         "direction",
-        "samples_per_question",
         "topk_width",
         "global_seed",
         "teacher",
@@ -187,6 +186,23 @@ def _common_generation_config(semantic: Mapping[str, Any]) -> dict[str, Any]:
     if missing:
         raise PreflightError(f"run semantic configuration is missing fields: {missing}")
     return {key: semantic[key] for key in required}
+
+
+def _normalize_split_counts(value: int | Mapping[str, int], *, field_name: str) -> dict[str, int]:
+    if isinstance(value, bool):
+        raise PreflightError(f"{field_name} must contain positive integers")
+    if isinstance(value, int):
+        values = {split: value for split in ("train", "validation")}
+    elif isinstance(value, Mapping):
+        if set(value) != {"train", "validation"}:
+            raise PreflightError(f"{field_name} must contain exactly train and validation")
+        values = dict(value)
+    else:
+        raise PreflightError(f"{field_name} must be an integer or split mapping")
+    for split, count in values.items():
+        if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+            raise PreflightError(f"{field_name}.{split} must be a positive integer")
+    return values
 
 
 def _verify_run_config(
@@ -518,6 +534,8 @@ def run_preflight(
     expected_student_identity_sha256: str,
     local_files_only: bool = False,
     allow_question_overlap: bool = False,
+    expected_questions: Mapping[str, int] | None = None,
+    expected_samples_per_question: int | Mapping[str, int] = EXPECTED_SAMPLES_PER_QUESTION,
     tokenizer_loader: Callable[[str, str | None, bool], Any] = _default_tokenizer_loader,
 ) -> PreflightResult:
     student_model = _normalize_student_model(student_model)
@@ -529,6 +547,15 @@ def run_preflight(
     )
     expected_student_identity_sha256 = _require_sha256(
         expected_student_identity_sha256, "expected_student_identity_sha256"
+    )
+    expected_question_counts = dict(expected_questions or EXPECTED_QUESTIONS)
+    if set(expected_question_counts) != {"train", "validation"}:
+        raise PreflightError("expected question counts must contain exactly train and validation")
+    for split_name, count in expected_question_counts.items():
+        if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+            raise PreflightError(f"expected {split_name} question count must be a positive integer")
+    expected_sample_counts = _normalize_split_counts(
+        expected_samples_per_question, field_name="expected samples_per_question"
     )
     index_path = Path(dataset_index).resolve()
     index = _load_json(index_path, "dataset index")
@@ -602,7 +629,7 @@ def run_preflight(
         )
         common_configs[split_name] = _common_generation_config(semantic)
         question_count = _require_int(split_index.get("question_count"), f"{split_name} question_count", minimum=1)
-        expected_question_count = EXPECTED_QUESTIONS[split_name]
+        expected_question_count = expected_question_counts[split_name]
         if question_count != expected_question_count:
             raise PreflightError(
                 f"{split_name} question_count must be exactly {expected_question_count}, got {question_count}"
@@ -619,9 +646,10 @@ def run_preflight(
             f"{split_name} semantic_config.samples_per_question",
             minimum=1,
         )
-        if samples_per_question != EXPECTED_SAMPLES_PER_QUESTION:
+        expected_split_samples = expected_sample_counts[split_name]
+        if samples_per_question != expected_split_samples:
             raise PreflightError(
-                f"{split_name} samples_per_question must be exactly {EXPECTED_SAMPLES_PER_QUESTION}, "
+                f"{split_name} samples_per_question must be exactly {expected_split_samples}, "
                 f"got {samples_per_question}"
             )
         verified_splits[split_name] = _verify_shards(
@@ -629,7 +657,7 @@ def run_preflight(
             split_name=split_name,
             split_index=split_index,
             expected_question_count=expected_question_count,
-            expected_samples_per_question=EXPECTED_SAMPLES_PER_QUESTION,
+            expected_samples_per_question=expected_split_samples,
         )
         split_rows_total += _require_int(split_index.get("row_count"), f"{split_name} row_count", minimum=1)
         stats = split_index["stats"]
@@ -671,10 +699,11 @@ def run_preflight(
         )
     if index.get("direction") != direction:
         raise PreflightError("dataset index direction does not match the run configurations")
-    if _require_int(index.get("samples_per_question"), "dataset index samples_per_question", minimum=1) != _require_int(
-        common["samples_per_question"], "run config samples_per_question", minimum=1
-    ):
-        raise PreflightError("dataset index samples_per_question does not match the run configurations")
+    index_sample_counts = _normalize_split_counts(
+        index.get("samples_per_question"), field_name="dataset index samples_per_question"
+    )
+    if index_sample_counts != expected_sample_counts:
+        raise PreflightError("dataset index samples_per_question does not match the expected split sample counts")
     for field_name in ("teacher", "tokenizer", "chat_template", "sampling"):
         if not isinstance(common[field_name], Mapping):
             raise PreflightError(f"run config {field_name} must be an object")
@@ -744,6 +773,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--expected-student-identity-sha256", required=True)
     parser.add_argument("--local-files-only", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--allow-question-overlap", action="store_true")
+    parser.add_argument("--expected-train-questions", type=int, default=EXPECTED_QUESTIONS["train"])
+    parser.add_argument("--expected-validation-questions", type=int, default=EXPECTED_QUESTIONS["validation"])
+    parser.add_argument("--expected-train-samples-per-question", type=int, default=EXPECTED_SAMPLES_PER_QUESTION)
+    parser.add_argument("--expected-validation-samples-per-question", type=int, default=EXPECTED_SAMPLES_PER_QUESTION)
     return parser.parse_args(argv)
 
 
@@ -759,6 +792,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             expected_student_identity_sha256=args.expected_student_identity_sha256,
             local_files_only=args.local_files_only,
             allow_question_overlap=args.allow_question_overlap,
+            expected_questions={
+                "train": args.expected_train_questions,
+                "validation": args.expected_validation_questions,
+            },
+            expected_samples_per_question={
+                "train": args.expected_train_samples_per_question,
+                "validation": args.expected_validation_samples_per_question,
+            },
         )
     except (OSError, RuntimeError, ValueError, PreflightError) as error:
         print(f"ERROR: {error}", file=sys.stderr)

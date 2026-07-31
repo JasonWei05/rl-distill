@@ -53,6 +53,10 @@ SMOKE_ONLY_ALLOW_DIRECT_FILES=${SMOKE_ONLY_ALLOW_DIRECT_FILES:-false}
 ALLOW_QUESTION_OVERLAP=${ALLOW_QUESTION_OVERLAP:-false}
 PREFLIGHT_LOCAL_FILES_ONLY=${PREFLIGHT_LOCAL_FILES_ONLY:-true}
 TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS:-750}
+EXPECTED_TRAIN_QUESTIONS=${EXPECTED_TRAIN_QUESTIONS:-9723}
+EXPECTED_VALIDATION_QUESTIONS=${EXPECTED_VALIDATION_QUESTIONS:-200}
+EXPECTED_TRAIN_SAMPLES_PER_QUESTION=${EXPECTED_TRAIN_SAMPLES_PER_QUESTION:-5}
+EXPECTED_VALIDATION_SAMPLES_PER_QUESTION=${EXPECTED_VALIDATION_SAMPLES_PER_QUESTION:-5}
 
 if [ "$#" -ne 0 ]; then
     echo "Positional Hydra overrides are disabled; use the launcher's validated environment variables" >&2
@@ -71,6 +75,13 @@ case "${PREFLIGHT_LOCAL_FILES_ONLY,,}" in
     true|false) ;;
     *) echo "PREFLIGHT_LOCAL_FILES_ONLY must be true or false" >&2; exit 2 ;;
 esac
+for count_name in EXPECTED_TRAIN_QUESTIONS EXPECTED_VALIDATION_QUESTIONS \
+    EXPECTED_TRAIN_SAMPLES_PER_QUESTION EXPECTED_VALIDATION_SAMPLES_PER_QUESTION; do
+    if ! [[ ${!count_name} =~ ^[1-9][0-9]*$ ]]; then
+        echo "${count_name} must be a positive integer" >&2
+        exit 2
+    fi
+done
 
 TRAIN_FILES_HYDRA=""
 VAL_FILES_HYDRA=""
@@ -136,6 +147,10 @@ print(schema)
         --expected-direction "${DISTILL_DIRECTION}"
         --expected-teacher-identity-sha256 "${EXPECTED_TEACHER_IDENTITY_SHA256}"
         --expected-student-identity-sha256 "${EXPECTED_STUDENT_IDENTITY_SHA256}"
+        --expected-train-questions "${EXPECTED_TRAIN_QUESTIONS}"
+        --expected-validation-questions "${EXPECTED_VALIDATION_QUESTIONS}"
+        --expected-train-samples-per-question "${EXPECTED_TRAIN_SAMPLES_PER_QUESTION}"
+        --expected-validation-samples-per-question "${EXPECTED_VALIDATION_SAMPLES_PER_QUESTION}"
     )
     if [ "${DATASET_SCHEMA_VERSION}" = "gemma4-hf-bf16-sdpa-topk-overlay-v1" ]; then
         PREFLIGHT_ARGS+=(--source-dataset-index "${SOURCE_DATASET_INDEX}")
@@ -265,7 +280,7 @@ export CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS:-1}
 
 export TEACHER_TOP_K=${TEACHER_TOP_K:-128}
 export TEACHER_TOPK_VALIDATION_TOLERANCE=${TEACHER_TOPK_VALIDATION_TOLERANCE:-0.0025}
-export FULL_VOCAB_KL_CHUNK_SIZE=${FULL_VOCAB_KL_CHUNK_SIZE:-16}
+export FULL_VOCAB_KL_CHUNK_SIZE=${FULL_VOCAB_KL_CHUNK_SIZE:-4096}
 # The historical Gemma 3 top-k objective is a truncated contribution to the
 # full-vocabulary forward KL and can legitimately be negative when the omitted
 # tail would supply the compensating positive term. Clamping would silently
@@ -274,9 +289,9 @@ export CLAMP_MIN_TOPK_KL=${CLAMP_MIN_TOPK_KL:-false}
 export CHECKPOINT_DISTILL_CHUNKS=${CHECKPOINT_DISTILL_CHUNKS:-true}
 export MODEL_DTYPE=${MODEL_DTYPE:-fp32}
 export TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-64}
-export MICRO_BATCH_SIZE_PER_GPU=${MICRO_BATCH_SIZE_PER_GPU:-1}
-if [ "${MICRO_BATCH_SIZE_PER_GPU}" -ne 1 ]; then
-    echo "Gemma 4 hidden-state distillation currently requires MICRO_BATCH_SIZE_PER_GPU=1" >&2
+export MICRO_BATCH_SIZE_PER_GPU=${MICRO_BATCH_SIZE_PER_GPU:-2}
+if ! [[ "${MICRO_BATCH_SIZE_PER_GPU}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "MICRO_BATCH_SIZE_PER_GPU must be a positive integer" >&2
     exit 2
 fi
 export MAX_LENGTH=${MAX_LENGTH:-12288}

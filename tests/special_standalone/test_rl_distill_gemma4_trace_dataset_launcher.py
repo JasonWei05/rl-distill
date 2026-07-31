@@ -22,7 +22,9 @@ def test_trace_dataset_launcher_pins_registered_generation_contract() -> None:
     source = LAUNCHER.read_text(encoding="utf-8")
 
     for required_argument in (
-        "--samples-per-question 5",
+        "TRAIN_SAMPLES_PER_QUESTION=${TRAIN_SAMPLES_PER_QUESTION:-5}",
+        "VALIDATION_SAMPLES_PER_QUESTION=${VALIDATION_SAMPLES_PER_QUESTION:-5}",
+        '--samples-per-question "$samples_per_question"',
         "--temperature 1.0",
         "--top-p 1.0",
         "--sampling-top-k -1",
@@ -41,8 +43,12 @@ def test_trace_dataset_launcher_validates_both_complete_splits_before_upload() -
     assert "run_split validation" in source
     assert '--split-dir "train=${output_root}/train"' in source
     assert '--split-dir "validation=${output_root}/validation"' in source
-    assert "--expected-train-questions 9723" in source
-    assert "--expected-validation-questions 200" in source
+    assert "EXPECTED_TRAIN_QUESTIONS=${EXPECTED_TRAIN_QUESTIONS:-9723}" in source
+    assert "EXPECTED_VALIDATION_QUESTIONS=${EXPECTED_VALIDATION_QUESTIONS:-200}" in source
+    assert '--expected-train-questions "$EXPECTED_TRAIN_QUESTIONS"' in source
+    assert '--expected-validation-questions "$EXPECTED_VALIDATION_QUESTIONS"' in source
+    assert '--expected-train-samples-per-question "$TRAIN_SAMPLES_PER_QUESTION"' in source
+    assert '--expected-validation-samples-per-question "$VALIDATION_SAMPLES_PER_QUESTION"' in source
     assert '"$uploader"' in source
     assert '--dataset-path "$output_root"' in source
 

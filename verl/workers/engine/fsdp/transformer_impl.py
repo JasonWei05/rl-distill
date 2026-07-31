@@ -83,6 +83,20 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 device_name = get_device_name()
 
 
+def _select_hidden_states_for_lm_head(hidden_states, token_indices, batch_indices=None):
+    """Select token hidden states, optionally from different samples, in packed order."""
+    if batch_indices is None:
+        slice_indices = slice(-token_indices, None) if isinstance(token_indices, int) else token_indices
+        return hidden_states[:, slice_indices, :]
+    if isinstance(token_indices, int):
+        raise ValueError("per-sample hidden-state selection requires tensor token indices")
+    if token_indices.ndim != 1 or batch_indices.ndim != 1:
+        raise ValueError("per-sample hidden-state token and batch indices must be one-dimensional")
+    if token_indices.shape != batch_indices.shape:
+        raise ValueError("per-sample hidden-state token and batch indices must have identical shapes")
+    return hidden_states[batch_indices, token_indices, :].unsqueeze(0)
+
+
 def _patch_gemma3_skip_lm_head():
     try:
         from transformers.models.gemma3.modeling_gemma3 import (
@@ -114,6 +128,7 @@ def _patch_gemma3_skip_lm_head():
         output_hidden_states=None,
         return_dict=None,
         logits_to_keep=0,
+        logits_to_keep_batch_indices=None,
         skip_lm_head=False,
         **lm_kwargs,
     ):
@@ -161,8 +176,7 @@ def _patch_gemma3_skip_lm_head():
         )
 
         hidden_states = outputs[0]
-        slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
-        hidden_states = hidden_states[:, slice_indices, :]
+        hidden_states = _select_hidden_states_for_lm_head(hidden_states, logits_to_keep, logits_to_keep_batch_indices)
 
         if not return_dict:
             return (hidden_states,) + outputs[1:]
@@ -212,14 +226,14 @@ def _patch_gemma4_skip_lm_head():
             return orig_forward(self, *args, **kwargs)
 
         logits_to_keep = kwargs.pop("logits_to_keep", 0)
+        logits_to_keep_batch_indices = kwargs.pop("logits_to_keep_batch_indices", None)
         return_dict = kwargs.pop("return_dict", True)
         if return_dict is False:
             raise ValueError("Gemma 4 skip_lm_head requires return_dict=True")
 
         outputs = self.model(*args, return_dict=True, **kwargs)
         hidden_states = outputs.last_hidden_state
-        slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
-        hidden_states = hidden_states[:, slice_indices, :]
+        hidden_states = _select_hidden_states_for_lm_head(hidden_states, logits_to_keep, logits_to_keep_batch_indices)
 
         output_kwargs = {"loss": None, "logits": hidden_states}
         for field in fields(Gemma4CausalLMOutputWithPast):
@@ -798,7 +812,10 @@ class FSDPEngine(BaseEngine):
         tu.assign_non_tensor(data, dp_size=self.get_data_parallel_size())
 
         micro_batches, indices = prepare_micro_batches(
-            data=data, dp_group=self.get_data_parallel_group(), same_micro_num_in_dp=True
+            data=data,
+            dp_group=self.get_data_parallel_group(),
+            same_micro_num_in_dp=True,
+            allow_uneven_micro_batches=forward_only,
         )
 
         output_lst = []
@@ -1443,13 +1460,16 @@ class FSDPEngineWithLMHead(FSDPEngine):
                 if end - start > 1:
                     active_mask[start : end - 1] = flat_loss_mask[start + 1 : end].to(torch.bool)
             student_active_flat_idx = active_mask.nonzero(as_tuple=True)[0]
+            student_active_batch_idx = torch.searchsorted(cu_seqlens[1:], student_active_flat_idx, right=True)
+            student_active_seq_idx = student_active_flat_idx - cu_seqlens[student_active_batch_idx]
             module = getattr(self.module, "module", self.module)
 
             with torch.autocast(device_type=device_name, dtype=torch.bfloat16):
                 raw_output = self.module(
                     **model_inputs,
                     use_cache=False,
-                    logits_to_keep=student_active_flat_idx,
+                    logits_to_keep=student_active_seq_idx,
+                    logits_to_keep_batch_indices=student_active_batch_idx,
                     skip_lm_head=True,
                     return_dict=True,
                 )

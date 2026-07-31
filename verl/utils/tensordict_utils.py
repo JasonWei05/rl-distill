@@ -273,6 +273,44 @@ def concat_tensordict(data: list[TensorDict]) -> TensorDict:
     return output
 
 
+def split_tensordict(td: TensorDict, split_sizes: list[int]) -> list[TensorDict]:
+    """Split a TensorDict by sample counts with special nested tensor handling."""
+    assert isinstance(td, TensorDict), f"expected TensorDict, got {type(td)}"
+    assert split_sizes and all(size > 0 for size in split_sizes), f"invalid split sizes: {split_sizes}"
+    assert sum(split_sizes) == len(td), f"split sizes {split_sizes} do not sum to TensorDict length {len(td)}"
+
+    nested_keys = {key for key, val in td.items() if isinstance(val, torch.Tensor) and val.is_nested}
+    new_td = TensorDict(
+        {k: v for k, v in td.items() if k not in nested_keys}, batch_size=td.batch_size, device=td.device
+    )
+    tds = list(new_td.split(split_sizes, dim=0))
+
+    for key in nested_keys:
+        nt = td[key]
+        try:
+            tensors = nt.unbind(dim=0)
+        except RuntimeError:
+            padded = nt.to_padded_tensor(0)
+            padded_chunks = padded.split(split_sizes, dim=0)
+            lengths = nt.offsets().diff().tolist()
+            sample_start = 0
+            for chunk_td, padded_chunk, split_size in zip(tds, padded_chunks, split_sizes, strict=True):
+                chunk_lengths = lengths[sample_start : sample_start + split_size]
+                chunk_tensors = [padded_chunk[j, :seq_len] for j, seq_len in enumerate(chunk_lengths)]
+                chunk_td[key] = torch.nested.as_nested_tensor(chunk_tensors, layout=torch.jagged)
+                sample_start += split_size
+            continue
+
+        sample_start = 0
+        for chunk_td, split_size in zip(tds, split_sizes, strict=True):
+            chunk_td[key] = torch.nested.as_nested_tensor(
+                tensors[sample_start : sample_start + split_size], layout=torch.jagged
+            )
+            sample_start += split_size
+
+    return tds
+
+
 def chunk_tensordict(td: TensorDict, chunks: int) -> list[TensorDict]:
     """Split a TensorDict into equal-sized chunks with special nested tensor handling.
 
@@ -316,33 +354,7 @@ def chunk_tensordict(td: TensorDict, chunks: int) -> list[TensorDict]:
         f"expecting td with length divisible by chunks, but got {len(td)} and {chunks}"
     )
     chunk_size = len(td) // chunks
-    nested_keys = {key for key, val in td.items() if isinstance(val, torch.Tensor) and val.is_nested}
-    new_td = TensorDict(
-        {k: v for k, v in td.items() if k not in nested_keys}, batch_size=td.batch_size, device=td.device
-    )
-
-    tds = new_td.chunk(chunks=chunks)
-    for key in nested_keys:
-        nt = td[key]
-        try:
-            tensors = nt.unbind(dim=0)
-        except RuntimeError:
-            padded = nt.to_padded_tensor(0)
-            padded_chunks = padded.chunk(chunks, dim=0)
-            offsets = nt.offsets()
-            lengths = offsets.diff().tolist()
-            for i, chunk_td in enumerate(tds):
-                chunk_lengths = lengths[i * chunk_size : (i + 1) * chunk_size]
-                chunk_tensors = [padded_chunks[i][j, :seq_len] for j, seq_len in enumerate(chunk_lengths)]
-                chunk_td[key] = torch.nested.as_nested_tensor(chunk_tensors, layout=torch.jagged)
-            continue
-
-        for i, chunk_td in enumerate(tds):
-            chunk_td[key] = torch.nested.as_nested_tensor(
-                tensors[i * chunk_size : (i + 1) * chunk_size], layout=torch.jagged
-            )
-
-    return tds
+    return split_tensordict(td, [chunk_size] * chunks)
 
 
 def get_tensordict(tensor_dict: dict[str, torch.Tensor | list], non_tensor_dict: dict = None) -> TensorDict:

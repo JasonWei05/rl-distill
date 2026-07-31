@@ -436,6 +436,57 @@ def test_overlay_preflight_emits_only_verified_overlay_files(tmp_path, monkeypat
     assert values["STUDENT_IDENTITY_SHA256"] == STUDENT_IDENTITY
 
 
+def test_overlay_preflight_forwards_split_specific_source_contract(tmp_path, monkeypatch):
+    fixture = _build_fixture(tmp_path, monkeypatch)
+    received = {}
+
+    def fake_source_preflight(**kwargs):
+        received.update(kwargs)
+        return fixture["source_result"]
+
+    monkeypatch.setattr(preflight.source_preflight, "run_preflight", fake_source_preflight)
+    preflight.run_preflight(
+        **_kwargs(fixture),
+        expected_questions={"train": 9723, "validation": 128},
+        expected_samples_per_question={"train": 5, "validation": 1},
+    )
+
+    assert received["expected_questions"] == {"train": 9723, "validation": 128}
+    assert received["expected_samples_per_question"] == {"train": 5, "validation": 1}
+
+
+def test_overlay_preflight_cli_accepts_split_specific_source_contract():
+    args = preflight.parse_args(
+        [
+            "--dataset-index",
+            "/overlay/dataset_index.json",
+            "--source-dataset-index",
+            "/source/dataset_index.json",
+            "--student-model",
+            "/models/student",
+            "--expected-direction",
+            DIRECTION,
+            "--expected-teacher-identity-sha256",
+            "a" * 64,
+            "--expected-student-identity-sha256",
+            "b" * 64,
+            "--expected-train-questions",
+            "9723",
+            "--expected-validation-questions",
+            "128",
+            "--expected-train-samples-per-question",
+            "5",
+            "--expected-validation-samples-per-question",
+            "1",
+        ]
+    )
+
+    assert args.expected_train_questions == 9723
+    assert args.expected_validation_questions == 128
+    assert args.expected_train_samples_per_question == 5
+    assert args.expected_validation_samples_per_question == 1
+
+
 def test_overlay_preflight_rejects_overlay_index_self_hash_mismatch(tmp_path, monkeypatch):
     fixture = _build_fixture(tmp_path, monkeypatch)
     fixture["overlay_index"]["total_rows"] += 1

@@ -50,18 +50,20 @@ def test_gemma4_skip_lm_head_returns_only_selected_hidden_states():
 
     model = object.__new__(Gemma4ForConditionalGeneration)
     torch.nn.Module.__init__(model)
-    hidden_states = torch.arange(30, dtype=torch.float32).reshape(1, 5, 6)
+    hidden_states = torch.arange(120, dtype=torch.float32).reshape(4, 5, 6)
     model.model = DummyBackbone(hidden_states)
 
-    selected = torch.tensor([0, 3], dtype=torch.long)
+    selected = torch.tensor([0, 3, 1, 4, 2], dtype=torch.long)
+    selected_batches = torch.tensor([0, 0, 1, 2, 3], dtype=torch.long)
     output = model(
-        input_ids=torch.ones((1, 5), dtype=torch.long),
+        input_ids=torch.ones((4, 5), dtype=torch.long),
         logits_to_keep=selected,
+        logits_to_keep_batch_indices=selected_batches,
         skip_lm_head=True,
         return_dict=True,
     )
 
-    torch.testing.assert_close(output.logits, hidden_states[:, selected, :])
+    torch.testing.assert_close(output.logits, hidden_states[selected_batches, selected, :].unsqueeze(0))
     assert output.loss is None
     assert output.past_key_values == "cache"
     assert output.shared_kv_states == {3: "shared"}
@@ -170,15 +172,22 @@ def test_precomputed_topk_hidden_projection_checkpoints_full_vocab_activations()
             "loss_mask": torch.tensor([0, 0, 1, 1]),
             "teacher_topk_token_ids": torch.tensor([[1, 2], [3, 4]], dtype=torch.int32).flatten(),
             "teacher_topk_logprobs": torch.tensor([[-0.1, -1.0], [-0.2, -1.2]], dtype=torch.float16).flatten(),
-        }
+        },
+        {
+            "input_ids": torch.tensor([1, 5, 6]),
+            "position_ids": torch.arange(3),
+            "loss_mask": torch.tensor([0, 1, 1]),
+            "teacher_topk_token_ids": torch.tensor([[5, 6], [7, 8]], dtype=torch.int32).flatten(),
+            "teacher_topk_logprobs": torch.tensor([[-0.3, -1.3], [-0.4, -1.4]], dtype=torch.float16).flatten(),
+        },
     ]
     collated = SFTTensorCollator("no_padding")(samples)
     data = tu.get_tensordict(
         collated,
         non_tensor_dict={"sp_size": 1, "pad_token_id": 0, "pad_mode": "no_padding"},
     )
-    active_indices = torch.tensor([1, 2])
-    hidden = torch.randn(1, 2, 8, requires_grad=True)
+    active_indices = torch.tensor([1, 2, 4, 5])
+    hidden = torch.randn(1, 4, 8, requires_grad=True)
     lm_head = torch.nn.Linear(8, vocab_size, bias=False)
     loss_impl = FullVocabKLLoss(
         precomputed_topk=True,
@@ -206,6 +215,105 @@ def test_precomputed_topk_hidden_projection_checkpoints_full_vocab_activations()
     output["full_vocab_kl"].sum().backward()
     assert hidden.grad is not None and torch.isfinite(hidden.grad).all()
     assert lm_head.weight.grad is not None and torch.isfinite(lm_head.weight.grad).all()
+
+
+def test_precomputed_topk_microbatch_two_matches_two_accumulated_microbatches():
+    scripts_dir = Path(__file__).parents[3] / "rl-distill-scripts"
+    sys.path.insert(0, str(scripts_dir))
+    from full_vocab_kl_loss import FullVocabKLLoss
+
+    torch.manual_seed(7)
+    top_k = 2
+    vocab_size = 11
+    hidden_size = 5
+    samples = [
+        {
+            "input_ids": torch.tensor([1, 2, 3, 4]),
+            "position_ids": torch.arange(4),
+            "loss_mask": torch.tensor([0, 0, 1, 1]),
+            "teacher_topk_token_ids": torch.tensor([[1, 2], [3, 4]], dtype=torch.int32).flatten(),
+            "teacher_topk_logprobs": torch.tensor([[-0.3, -1.1], [-0.4, -1.2]], dtype=torch.float16).flatten(),
+        },
+        {
+            "input_ids": torch.tensor([1, 5, 6]),
+            "position_ids": torch.arange(3),
+            "loss_mask": torch.tensor([0, 1, 1]),
+            "teacher_topk_token_ids": torch.tensor([[5, 6], [7, 8]], dtype=torch.int32).flatten(),
+            "teacher_topk_logprobs": torch.tensor([[-0.5, -1.3], [-0.6, -1.4]], dtype=torch.float16).flatten(),
+        },
+    ]
+    hidden_values = torch.randn(1, 4, hidden_size)
+    head_weight = torch.randn(vocab_size, hidden_size)
+
+    def make_data(selected_samples):
+        collated = SFTTensorCollator("no_padding")(selected_samples)
+        data = tu.get_tensordict(
+            collated,
+            non_tensor_dict={
+                "sp_size": 1,
+                "pad_token_id": 0,
+                "pad_mode": "no_padding",
+                "dp_size": 1,
+                "batch_num_tokens": 4,
+            },
+        )
+        return data
+
+    def reduce_output(loss_impl, output, data):
+        offsets = data["input_ids"].offsets()
+        model_output = {
+            key: torch.nested.nested_tensor_from_jagged(value.squeeze(0), offsets) for key, value in output.items()
+        }
+        return loss_impl(model_output=model_output, data=data)[0]
+
+    combined_data = make_data(samples)
+    combined_hidden = hidden_values.clone().requires_grad_(True)
+    combined_head = torch.nn.Linear(hidden_size, vocab_size, bias=False)
+    combined_head.weight.data.copy_(head_weight)
+    combined_loss_impl = FullVocabKLLoss(
+        precomputed_topk=True,
+        top_k=top_k,
+        chunk_size=3,
+        checkpoint_student_chunks=True,
+    )
+    combined_output = combined_loss_impl(
+        student_hidden=combined_hidden,
+        student_active_flat_idx=torch.tensor([1, 2, 4, 5]),
+        student_lm_head=combined_head,
+        student_config=SimpleNamespace(final_logit_softcapping=None),
+        data=combined_data,
+    )
+    combined_loss = reduce_output(combined_loss_impl, combined_output, combined_data)
+    combined_loss.backward()
+
+    split_head = torch.nn.Linear(hidden_size, vocab_size, bias=False)
+    split_head.weight.data.copy_(head_weight)
+    split_hidden = [
+        hidden_values[:, :2].clone().requires_grad_(True),
+        hidden_values[:, 2:].clone().requires_grad_(True),
+    ]
+    split_loss_impl = FullVocabKLLoss(
+        precomputed_topk=True,
+        top_k=top_k,
+        chunk_size=3,
+        checkpoint_student_chunks=True,
+    )
+    split_loss = torch.zeros(())
+    for sample, hidden in zip(samples, split_hidden, strict=True):
+        data = make_data([sample])
+        output = split_loss_impl(
+            student_hidden=hidden,
+            student_active_flat_idx=torch.tensor([1, 2] if len(sample["input_ids"]) == 4 else [0, 1]),
+            student_lm_head=split_head,
+            student_config=SimpleNamespace(final_logit_softcapping=None),
+            data=data,
+        )
+        split_loss = split_loss + reduce_output(split_loss_impl, output, data)
+    split_loss.backward()
+
+    torch.testing.assert_close(combined_loss, split_loss)
+    torch.testing.assert_close(combined_hidden.grad, torch.cat([hidden.grad for hidden in split_hidden], dim=1))
+    torch.testing.assert_close(combined_head.weight.grad, split_head.weight.grad)
 
 
 def test_precomputed_topk_dataset_flattens_response_targets_for_no_padding(tmp_path):

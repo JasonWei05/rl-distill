@@ -23,12 +23,18 @@ REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd)
 PYTHON_BIN=${PYTHON_BIN:-/tmp/.venv-gemma4-e2e/bin/python}
 TRAIN_PARQUET=${TRAIN_PARQUET:-/tmp/verl/data/deepscaler_4of4strict_rl_train.parquet}
 VALIDATION_PARQUET=${VALIDATION_PARQUET:-/tmp/verl/data/deepscaler_4of4strict_rl_val200_x16.parquet}
+TRAIN_SOURCE_DATASET=${TRAIN_SOURCE_DATASET:-deepscaler_4of4strict_rl_train}
+VALIDATION_SOURCE_DATASET=${VALIDATION_SOURCE_DATASET:-deepscaler_4of4strict_rl_val200_x16}
 GLOBAL_SEED=${GLOBAL_SEED:-42}
 PROMPTS_PER_SHARD=${PROMPTS_PER_SHARD:-8}
 ROW_GROUP_ROWS=${ROW_GROUP_ROWS:-2}
 GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.90}
 MAX_WORKER_ATTEMPTS=${MAX_WORKER_ATTEMPTS:-20}
 UPLOAD_REVISION=${UPLOAD_REVISION:-main}
+EXPECTED_TRAIN_QUESTIONS=${EXPECTED_TRAIN_QUESTIONS:-9723}
+EXPECTED_VALIDATION_QUESTIONS=${EXPECTED_VALIDATION_QUESTIONS:-200}
+TRAIN_SAMPLES_PER_QUESTION=${TRAIN_SAMPLES_PER_QUESTION:-5}
+VALIDATION_SAMPLES_PER_QUESTION=${VALIDATION_SAMPLES_PER_QUESTION:-5}
 
 teacher_model=
 teacher_content_sha256=
@@ -50,9 +56,11 @@ Usage: run_gemma4_trace_dataset.sh \
   [--hf-repo-id NAMESPACE/NAME] \
   [--allow-question-overlap] [--skip-upload]
 
-The scientific generation contract is fixed to five samples/question,
-temperature 1.0, top-p 1.0, sampling top-k disabled, an 8,192-token response
-cap, and stored rank-1-through-128 full-vocabulary-normalized log probabilities.
+The scientific generation contract fixes temperature 1.0, top-p 1.0,
+sampling top-k disabled, an 8,192-token response cap, and stored
+rank-1-through-128 full-vocabulary-normalized log probabilities. Train and
+validation sample counts are separately configurable through environment
+variables and are validated before upload.
 
 The command is resumable: completed shards are verified and skipped. Each GPU
 runs one independent worker. After both splits finish, the script regenerates a
@@ -149,6 +157,13 @@ if [[ $skip_upload != true && -z ${HF_TOKEN:-} ]]; then
     echo "HF_TOKEN must be exported for the final private dataset upload" >&2
     exit 2
 fi
+for count_name in EXPECTED_TRAIN_QUESTIONS EXPECTED_VALIDATION_QUESTIONS \
+    TRAIN_SAMPLES_PER_QUESTION VALIDATION_SAMPLES_PER_QUESTION; do
+    if ! [[ ${!count_name} =~ ^[1-9][0-9]*$ ]]; then
+        echo "${count_name} must be a positive integer" >&2
+        exit 2
+    fi
+done
 if [[ -n $(git -C "$REPO_ROOT" status --porcelain) ]]; then
     echo "Refusing production generation from a dirty repository: ${REPO_ROOT}" >&2
     exit 2
@@ -222,14 +237,16 @@ run_worker() {
     local split=$1
     local worker_id=$2
     local gpu_id=$3
-    local input_parquet source_dataset log_path attempt worker_pid worker_status
+    local input_parquet source_dataset samples_per_question log_path attempt worker_pid worker_status
 
     if [[ $split == train ]]; then
         input_parquet=$TRAIN_PARQUET
-        source_dataset=deepscaler_4of4strict_rl_train
+        source_dataset=$TRAIN_SOURCE_DATASET
+        samples_per_question=$TRAIN_SAMPLES_PER_QUESTION
     else
         input_parquet=$VALIDATION_PARQUET
-        source_dataset=deepscaler_4of4strict_rl_val200_x16
+        source_dataset=$VALIDATION_SOURCE_DATASET
+        samples_per_question=$VALIDATION_SAMPLES_PER_QUESTION
     fi
     log_path="${output_root}/logs/${split}-worker-${worker_id}.log"
 
@@ -260,7 +277,7 @@ run_worker() {
             --output-dir "${output_root}/${split}" \
             --direction "$direction" \
             --split "$split" \
-            --samples-per-question 5 \
+            --samples-per-question "$samples_per_question" \
             --global-seed "$GLOBAL_SEED" \
             --temperature 1.0 \
             --top-p 1.0 \
@@ -329,9 +346,10 @@ validator_args=(
     --split-dir "train=${output_root}/train"
     --split-dir "validation=${output_root}/validation"
     --output-index "${output_root}/dataset_index.json"
-    --expected-train-questions 9723
-    --expected-validation-questions 200
-    --expected-samples-per-question 5
+    --expected-train-questions "$EXPECTED_TRAIN_QUESTIONS"
+    --expected-validation-questions "$EXPECTED_VALIDATION_QUESTIONS"
+    --expected-train-samples-per-question "$TRAIN_SAMPLES_PER_QUESTION"
+    --expected-validation-samples-per-question "$VALIDATION_SAMPLES_PER_QUESTION"
     --local-files-only
 )
 if [[ $allow_question_overlap != true ]]; then
@@ -350,6 +368,10 @@ uploader_args=(
     --dataset-path "$output_root"
     --repo-id "$hf_repo_id"
     --revision "$UPLOAD_REVISION"
+    --expected-train-questions "$EXPECTED_TRAIN_QUESTIONS"
+    --expected-validation-questions "$EXPECTED_VALIDATION_QUESTIONS"
+    --expected-train-samples-per-question "$TRAIN_SAMPLES_PER_QUESTION"
+    --expected-validation-samples-per-question "$VALIDATION_SAMPLES_PER_QUESTION"
 )
 if [[ $allow_question_overlap == true ]]; then
     uploader_args+=(--allow-question-overlap)

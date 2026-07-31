@@ -64,6 +64,7 @@ def _semantic(
     tokenizer_metadata: dict,
     *,
     question_count: int = 1,
+    samples_per_question: int = 5,
     engine_dtype: str = "bfloat16",
 ):
     return {
@@ -75,7 +76,7 @@ def _semantic(
         "prompt_roster_sha256": "3" * 64,
         "source_row_count": question_count,
         "unique_question_count": question_count,
-        "samples_per_question": 5,
+        "samples_per_question": samples_per_question,
         "topk_width": schema.TOPK_WIDTH,
         "global_seed": 42,
         "prompts_per_shard": 1,
@@ -115,10 +116,12 @@ def _build_fixture(
     tmp_path: Path,
     *,
     question_counts: dict[str, int] | None = None,
+    sample_counts: dict[str, int] | None = None,
     question_overlap: bool = False,
     bad_train_sample_coverage: bool = False,
 ):
     question_counts = question_counts or {"train": 1, "validation": 1}
+    sample_counts = sample_counts or {"train": 5, "validation": 5}
     tokenizer = FakeTokenizer()
     tokenizer_sha256, vocab_size = schema.tokenizer_fingerprint(tokenizer)
     tokenizer_metadata = {
@@ -154,6 +157,7 @@ def _build_fixture(
         split_dir.mkdir()
         shard_path = split_dir / f"traces-{split}-000000.parquet"
         question_count = question_counts[split]
+        samples_per_question = sample_counts[split]
         source_uids: list[str] = []
         question_hashes: list[str] = []
         question_texts: list[str] = []
@@ -163,7 +167,7 @@ def _build_fixture(
             question_prefix = "train" if split == "train" or question_overlap else "validation"
             question_text = f"{question_prefix}-question-text-{question_index}"
             question_sha256 = schema.sha256_text(question_text)
-            for sample_index in range(5):
+            for sample_index in range(samples_per_question):
                 source_uids.append(source_uid)
                 question_hashes.append(question_sha256)
                 question_texts.append(question_text)
@@ -174,7 +178,7 @@ def _build_fixture(
             question_hashes[4] = question_hashes[5]
             question_texts[4] = question_texts[5]
             sample_indices[4] = 5
-        row_count = question_count * 5
+        row_count = question_count * samples_per_question
         table = pa.table(
             {
                 "source_uid": source_uids,
@@ -186,7 +190,12 @@ def _build_fixture(
         )
         pq.write_table(table, shard_path, row_group_size=row_count)
         split_question_hashes[split] = set(question_hashes)
-        semantic = _semantic(split, tokenizer_metadata, question_count=question_count)
+        semantic = _semantic(
+            split,
+            tokenizer_metadata,
+            question_count=question_count,
+            samples_per_question=samples_per_question,
+        )
         semantics[split] = semantic
         run_config = {
             "manifest_version": schema.MANIFEST_VERSION,
@@ -237,7 +246,9 @@ def _build_fixture(
         "direction": common["direction"],
         "topk_width": schema.TOPK_WIDTH,
         "recommended_training_topk_validation_tolerance": schema.FP16_TOPK_MASS_TOLERANCE,
-        "samples_per_question": 5,
+        "samples_per_question": (
+            next(iter(set(sample_counts.values()))) if len(set(sample_counts.values())) == 1 else sample_counts
+        ),
         "decode_check_performed": True,
         "teacher": common["teacher"],
         "tokenizer": common["tokenizer"],
@@ -295,6 +306,15 @@ def test_preflight_emits_hydra_lists_and_tolerance(tmp_path):
     assert float(values["TOPK_VALIDATION_TOLERANCE"]) == schema.FP16_TOPK_MASS_TOLERANCE
     assert values["TEACHER_IDENTITY_SHA256"] == fixture["teacher_identity_sha256"]
     assert values["STUDENT_IDENTITY_SHA256"] == fixture["student_identity_sha256"]
+
+
+def test_preflight_accepts_split_specific_sample_counts(tmp_path):
+    sample_counts = {"train": 5, "validation": 1}
+    fixture = _build_fixture(tmp_path, sample_counts=sample_counts)
+    preflight.run_preflight(
+        **_preflight_kwargs(fixture),
+        expected_samples_per_question=sample_counts,
+    )
 
 
 def test_preflight_rejects_unexpected_direction(tmp_path):

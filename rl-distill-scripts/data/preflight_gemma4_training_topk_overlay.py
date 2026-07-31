@@ -631,6 +631,8 @@ def run_preflight(
     expected_student_identity_sha256: str,
     local_files_only: bool = False,
     allow_question_overlap: bool = False,
+    expected_questions: Mapping[str, int] | None = None,
+    expected_samples_per_question: int | Mapping[str, int] = source_preflight.EXPECTED_SAMPLES_PER_QUESTION,
 ) -> source_preflight.PreflightResult:
     if expected_direction not in ALLOWED_DIRECTIONS:
         raise OverlayPreflightError(f"unsupported expected direction: {expected_direction!r}")
@@ -682,6 +684,8 @@ def run_preflight(
         expected_student_identity_sha256=expected_student_identity_sha256,
         local_files_only=local_files_only,
         allow_question_overlap=allow_question_overlap,
+        expected_questions=expected_questions,
+        expected_samples_per_question=expected_samples_per_question,
     )
     if source_result.dataset_index_sha256 != source_index_sha256:
         raise OverlayPreflightError("source preflight returned an unexpected dataset identity")
@@ -835,6 +839,26 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--expected-student-identity-sha256", required=True)
     parser.add_argument("--local-files-only", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--allow-question-overlap", action="store_true")
+    parser.add_argument(
+        "--expected-train-questions",
+        type=int,
+        default=source_preflight.EXPECTED_QUESTIONS["train"],
+    )
+    parser.add_argument(
+        "--expected-validation-questions",
+        type=int,
+        default=source_preflight.EXPECTED_QUESTIONS["validation"],
+    )
+    parser.add_argument(
+        "--expected-train-samples-per-question",
+        type=int,
+        default=source_preflight.EXPECTED_SAMPLES_PER_QUESTION,
+    )
+    parser.add_argument(
+        "--expected-validation-samples-per-question",
+        type=int,
+        default=source_preflight.EXPECTED_SAMPLES_PER_QUESTION,
+    )
     return parser.parse_args(argv)
 
 
@@ -851,6 +875,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             expected_student_identity_sha256=args.expected_student_identity_sha256,
             local_files_only=args.local_files_only,
             allow_question_overlap=args.allow_question_overlap,
+            expected_questions={
+                "train": args.expected_train_questions,
+                "validation": args.expected_validation_questions,
+            },
+            expected_samples_per_question={
+                "train": args.expected_train_samples_per_question,
+                "validation": args.expected_validation_samples_per_question,
+            },
         )
     except (OSError, RuntimeError, ValueError, pa.ArrowException, OverlayPreflightError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
