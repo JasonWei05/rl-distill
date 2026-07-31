@@ -62,6 +62,24 @@ def test_distributed_train_batch_indices_rejects_incomplete_contract() -> None:
         )
 
 
+def test_distributed_validation_indices_matches_sft_trainer() -> None:
+    actual = audit.distributed_validation_indices(dataset_size=16, world_size=4, rank=2)
+    sampler = DistributedSampler(
+        range(16),
+        num_replicas=4,
+        rank=2,
+        shuffle=False,
+        drop_last=False,
+    )
+
+    assert actual == list(sampler)
+
+
+def test_distributed_validation_indices_requires_exact_coverage() -> None:
+    with pytest.raises(audit.FSDP2TopKAuditError, match="divisible"):
+        audit.distributed_validation_indices(dataset_size=17, world_size=4, rank=0)
+
+
 def _gate_inputs() -> tuple[dict, dict, list[list[dict]], SimpleNamespace]:
     aggregate = {
         "top1_tie_safe": {"mean": 1.0},
@@ -110,6 +128,8 @@ def _gate_inputs() -> tuple[dict, dict, list[list[dict]], SimpleNamespace]:
         micro_batch_size_per_gpu=1,
         max_padded_tokens_per_microbatch=4096,
         max_grad_norm=50.0,
+        validate_before_train=True,
+        validation_every=1,
     )
     return aggregate, exact, production_batches, args
 
@@ -117,19 +137,21 @@ def _gate_inputs() -> tuple[dict, dict, list[list[dict]], SimpleNamespace]:
 def test_evaluate_gate_accepts_three_singleton_batches() -> None:
     aggregate, exact, production_batches, args = _gate_inputs()
 
-    gate = audit.evaluate_gate(aggregate, exact, [12.0, 16.0, 14.0], production_batches, args)
+    gate = audit.evaluate_gate(aggregate, exact, [12.0, 16.0, 14.0], production_batches, [0, 1, 2, 3], args)
 
     assert gate["status"] == "pass"
     assert gate["checks"]["production_batch_count"]["observed"] == 3
     assert gate["checks"]["backward_grad_norm_max"]["observed"] == 16.0
+    assert gate["checks"]["validation_event_count"]["observed"] == 4
 
 
 def test_evaluate_gate_fails_closed_on_missing_rank_or_bad_gradient() -> None:
     aggregate, exact, production_batches, args = _gate_inputs()
     production_batches[2].pop()
 
-    gate = audit.evaluate_gate(aggregate, exact, [12.0, 16.0, 60.0], production_batches, args)
+    gate = audit.evaluate_gate(aggregate, exact, [12.0, 16.0, 60.0], production_batches, [0, 1, 2], args)
 
     assert gate["status"] == "fail"
     assert gate["checks"]["production_rank_count_spread"]["passed"] is False
     assert gate["checks"]["backward_grad_norm_max"]["passed"] is False
+    assert gate["checks"]["validation_event_count"]["passed"] is False

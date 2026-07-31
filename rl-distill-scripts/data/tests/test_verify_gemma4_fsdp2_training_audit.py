@@ -96,7 +96,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
         "dataset_index_sha256": "b" * 64,
         "source_dataset_index_sha256": "c" * 64,
         "target_model_identity": {"model_identity_sha256": identity},
-        "splits": {"train": {"row_count": 48615}},
+        "splits": {"train": {"row_count": 48615}, "validation": {"row_count": 128}},
     }
     _write_json(dataset_index, index)
     student_model = tmp_path / "student-model"
@@ -118,6 +118,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
             "checkpoint_student_chunks": True,
             "clamp_min_topk_kl": False,
             "cudnn_sdpa": True,
+            "eval_cudnn_sdpa": False,
             "model_dtype": "fp32",
             "fsdp_param_dtype": "bf16",
             "fsdp_reduce_dtype": "fp32",
@@ -131,6 +132,16 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
             "kl_chunk_size": 4096,
             "max_length": 12288,
             "top_k": 128,
+            "sequential_optimizer_steps": True,
+            "validate_before_train": True,
+            "validation_every": 1,
+            "lr": 2e-6,
+            "lr_warmup_steps": 100,
+            "lr_scheduler_type": "linear",
+            "min_lr_ratio": 0.1,
+            "weight_decay": 0.1,
+            "betas": [0.9, 0.98],
+            "total_training_steps": 750,
         },
         "dataset": {
             "index_path": str(dataset_index),
@@ -170,9 +181,31 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
             "total_norm": 1.4,
             "max_batch_index": 3,
             "batches": [
-                {"batch_index": 1, "total_norm": 1.2},
-                {"batch_index": 2, "total_norm": 1.3},
-                {"batch_index": 3, "total_norm": 1.4},
+                {"batch_index": 1, "total_norm": 1.2, "optimizer_grad_norm": 1.2, "lr": 2e-8},
+                {"batch_index": 2, "total_norm": 1.3, "optimizer_grad_norm": 1.3, "lr": 4e-8},
+                {"batch_index": 3, "total_norm": 1.4, "optimizer_grad_norm": 1.4, "lr": 6e-8},
+            ],
+        },
+        "validation": {
+            "before_train": True,
+            "every_steps": 1,
+            "event_steps": [0, 1, 2, 3],
+            "events": [
+                {
+                    "after_step": step,
+                    "rank": rank,
+                    "global_indices": list(
+                        DistributedSampler(
+                            range(128),
+                            num_replicas=8,
+                            rank=rank,
+                            shuffle=False,
+                            drop_last=False,
+                        )
+                    ),
+                }
+                for step in range(4)
+                for rank in range(8)
             ],
         },
         "implementation": {
@@ -220,6 +253,7 @@ def test_verifier_binds_receipt_to_runtime_contract(tmp_path: Path) -> None:
         (lambda report: report["contract"].update(fsdp_param_dtype="fp32"), "fsdp_param_dtype"),
         (lambda report: report["contract"].update(gradient_checkpointing=False), "gradient_checkpointing"),
         (lambda report: report["contract"].update(checkpoint_student_chunks=False), "checkpoint_student_chunks"),
+        (lambda report: report["contract"].update(sequential_optimizer_steps=False), "sequential_optimizer_steps"),
         (lambda report: report["selection"].update(position_count=510), "16 traces and 511"),
         (
             lambda report: report["aggregate"]["stored_support_weighted_abs_logprob_delta"].update(mean=0.01),
@@ -257,6 +291,7 @@ def test_verifier_binds_receipt_to_runtime_contract(tmp_path: Path) -> None:
             lambda report: report["backward"]["batches"][2].update(total_norm=51.0),
             "required <= 50.0",
         ),
+        (lambda report: report["validation"]["event_steps"].pop(), "event_steps"),
         (
             lambda report: report["student_model"].update(model_identity_sha256="f" * 64),
             "student model identity",

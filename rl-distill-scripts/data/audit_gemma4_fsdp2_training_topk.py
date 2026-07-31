@@ -52,7 +52,7 @@ import audit_gemma4_cross_engine_topk as cross_engine  # noqa: E402
 from gemma4_distill_trace_schema import TOPK_WIDTH, atomic_write_json, hash_json, sha256_file  # noqa: E402
 from gemma4_model_identity import inspect_local_hf_model  # noqa: E402
 
-REPORT_VERSION = 3
+REPORT_VERSION = 4
 EXPECTED_SCHEMA = "gemma4-hf-bf16-sdpa-topk-overlay-v1"
 EXPECTED_TARGET_ENGINE = "hf_bf16_sdpa_full_forward"
 AUDITED_SOURCE_PATHS = (
@@ -62,7 +62,9 @@ AUDITED_SOURCE_PATHS = (
     "rl-distill-scripts/full_vocab_kl_loss.py",
     "verl/utils/dataset/dataset_utils.py",
     "verl/utils/fsdp_utils.py",
+    "verl/trainer/sft_trainer.py",
     "verl/workers/engine/utils.py",
+    "verl/workers/config/optimizer.py",
     "verl/workers/engine/fsdp/transformer_impl.py",
     "verl/workers/engine_workers.py",
 )
@@ -222,6 +224,26 @@ def distributed_train_batch_indices(
     return [indices[offset : offset + local_batch_size] for offset in range(0, required, local_batch_size)]
 
 
+def distributed_validation_indices(*, dataset_size: int, world_size: int, rank: int) -> list[int]:
+    """Reconstruct the exact non-shuffled validation shard used by SFTTrainer."""
+    from torch.utils.data import DistributedSampler
+
+    if dataset_size <= 0:
+        raise FSDP2TopKAuditError("validation dataset must not be empty")
+    if dataset_size % world_size != 0:
+        raise FSDP2TopKAuditError(
+            "exact validation coverage requires the validation row count to be divisible by world size"
+        )
+    sampler = DistributedSampler(
+        range(dataset_size),
+        num_replicas=world_size,
+        rank=rank,
+        shuffle=False,
+        drop_last=False,
+    )
+    return list(sampler)
+
+
 def validate_row(row: dict[str, Any]) -> None:
     input_ids = [int(value) for value in row["input_ids"]]
     response_mask = [int(value) for value in row["response_mask"]]
@@ -266,6 +288,7 @@ def evaluate_gate(
     exact: dict[str, Any],
     grad_norms: list[float] | None,
     production_batches: list[list[dict[str, Any]]],
+    validation_events: list[int],
     args,
 ) -> dict[str, Any]:
     observations = {
@@ -346,6 +369,11 @@ def evaluate_gate(
         observations["backward_grad_norm_max"] = float(max(grad_norms, default=math.inf))
         requirements["backward_batch_count"] = ("==", args.train_batches)
         requirements["backward_grad_norm_max"] = ("<=", args.max_grad_norm)
+        expected_validation_events = int(args.validate_before_train) + math.ceil(
+            args.train_batches / args.validation_every
+        )
+        observations["validation_event_count"] = float(len(validation_events))
+        requirements["validation_event_count"] = ("==", expected_validation_events)
     checks: dict[str, Any] = {}
     failures: list[str] = []
     for name, (operator, threshold) in requirements.items():
@@ -401,8 +429,11 @@ def run_distributed_audit(args) -> int:
 
         index, shards = verify_index(index_path, model_path, args.split)
         train_index, train_shards = verify_index(index_path, model_path, "train")
+        validation_index, validation_shards = verify_index(index_path, model_path, "validation")
         if train_index["dataset_index_sha256"] != index["dataset_index_sha256"]:
             raise FSDP2TopKAuditError("train and parity selections resolved different overlay identities")
+        if validation_index["dataset_index_sha256"] != index["dataset_index_sha256"]:
+            raise FSDP2TopKAuditError("validation and parity selections resolved different overlay identities")
         expected_identity = index["target_model_identity"]["model_identity_sha256"]
         selected = select_global_rows(shards, world_size * args.traces_per_rank)
         local_selection = selected[rank * args.traces_per_rank : (rank + 1) * args.traces_per_rank]
@@ -428,7 +459,23 @@ def run_distributed_audit(args) -> int:
                 row["global_index"] = global_index
             train_rows_by_batch.append(train_rows)
 
+        validation_total_rows = sum(int(shard["rows"]) for shard in validation_shards)
+        local_validation_indices = distributed_validation_indices(
+            dataset_size=validation_total_rows,
+            world_size=world_size,
+            rank=rank,
+        )
+        local_validation_selection = locate_global_rows(validation_shards, local_validation_indices)
+        validation_rows = load_rows(local_validation_selection, expected_identity)
+        for global_index, row in zip(local_validation_indices, validation_rows, strict=True):
+            validate_row(row)
+            row["global_index"] = global_index
+
         os.environ.setdefault("VERL_FSDP2_LOCAL_LOAD", "1")
+        os.environ["VERL_GEMMA4_CUDNN_SDPA"] = str(args.cudnn_sdpa)
+        os.environ["VERL_GEMMA4_EVAL_CUDNN_SDPA"] = str(args.eval_cudnn_sdpa)
+        os.environ["VERL_FAIL_ON_NONFINITE_GRAD"] = "1"
+        os.environ["VERL_MAX_PRECLIP_GRAD_NORM"] = str(args.max_grad_norm)
         if not args.fsdp_wrap:
             if world_size != 1:
                 raise FSDP2TopKAuditError("--no-fsdp-wrap is a single-rank diagnostic only")
@@ -462,10 +509,13 @@ def run_distributed_audit(args) -> int:
                 wrap_policy={"transformer_layer_cls_to_wrap": ["Gemma4TextDecoderLayer"]},
             )
             optimizer_config = FSDPOptimizerConfig(
-                lr=0.0,
-                total_training_steps=1,
-                lr_warmup_steps=0,
-                lr_scheduler_type="constant",
+                lr=args.lr,
+                total_training_steps=args.total_training_steps,
+                lr_warmup_steps=args.lr_warmup_steps,
+                lr_scheduler_type=args.lr_scheduler_type,
+                min_lr_ratio=args.min_lr_ratio,
+                weight_decay=args.weight_decay,
+                betas=(args.beta1, args.beta2),
                 clip_grad=1.0,
             )
             built_worker = TrainingWorker(
@@ -497,10 +547,19 @@ def run_distributed_audit(args) -> int:
         local_production_batches: list[dict[str, Any]] = []
 
         grad_diagnostics_by_batch = None
-        cudnn_sdpa_observed = False
+        validation_events: list[dict[str, Any]] = []
+        requested_cudnn_sdpa = bool(args.cudnn_sdpa)
+        requested_eval_cudnn_sdpa = bool(args.eval_cudnn_sdpa)
+
+        def require_attention_backend(context: str, expected: bool) -> None:
+            observed = torch.backends.cuda.cudnn_sdp_enabled()
+            if observed != expected:
+                raise FSDP2TopKAuditError(f"{context} observed cudnn_sdpa={observed}; expected {expected}")
+
         mode_context = engine.train_mode() if backward_exercised else engine.eval_mode()
         with mode_context:
-            cudnn_sdpa_observed = torch.backends.cuda.cudnn_sdp_enabled()
+            parity_backend = requested_cudnn_sdpa if backward_exercised else requested_eval_cudnn_sdpa
+            require_attention_backend("target-parity forward", parity_backend)
             for row in rows:
                 prompt_length = int(row["prompt_length"])
                 response_length = int(row["response_length"])
@@ -647,12 +706,10 @@ def run_distributed_audit(args) -> int:
                 chunk_size=args.kl_chunk_size,
                 checkpoint_student_chunks=True,
             )
-            production_data_by_batch = []
-            for batch_index, (local_train_indices, train_rows) in enumerate(
-                zip(local_train_indices_by_batch, train_rows_by_batch, strict=True), start=1
-            ):
+
+            def build_distillation_data(rows_to_build: list[dict[str, Any]], *, global_batch_size: int):
                 samples = []
-                for row in train_rows:
+                for row in rows_to_build:
                     input_ids_cpu = torch.tensor(row["input_ids"], dtype=torch.long)
                     loss_mask_cpu = torch.tensor(row["response_mask"], dtype=torch.long)
                     teacher_ids_cpu = torch.from_numpy(
@@ -672,7 +729,7 @@ def run_distributed_audit(args) -> int:
                     )
 
                 collated = SFTTensorCollator(DatasetPadMode.NO_PADDING)(samples)
-                production_data = tu.get_tensordict(
+                return tu.get_tensordict(
                     tensor_dict=collated,
                     non_tensor_dict={
                         "use_remove_padding": False,
@@ -681,7 +738,7 @@ def run_distributed_audit(args) -> int:
                         "micro_batch_size_per_gpu": args.micro_batch_size_per_gpu,
                         "max_padded_tokens_per_microbatch": args.max_padded_tokens_per_microbatch,
                         "temperature": 1.0,
-                        "global_batch_size": args.train_batch_size,
+                        "global_batch_size": global_batch_size,
                         "pad_mode": DatasetPadMode.NO_PADDING,
                         "pad_token_id": 0,
                         "use_logits_processor": True,
@@ -689,6 +746,12 @@ def run_distributed_audit(args) -> int:
                         "use_hidden_logits_processor": True,
                     },
                 )
+
+            production_data_by_batch = []
+            for batch_index, (local_train_indices, train_rows) in enumerate(
+                zip(local_train_indices_by_batch, train_rows_by_batch, strict=True), start=1
+            ):
+                production_data = build_distillation_data(train_rows, global_batch_size=args.train_batch_size)
                 tu.assign_non_tensor(production_data, sp_size=1)
                 audit_micro_batches, audit_indices = prepare_micro_batches(
                     data=production_data,
@@ -720,30 +783,55 @@ def run_distributed_audit(args) -> int:
                 production_data_by_batch.append(production_data)
 
             grad_diagnostics_by_batch = []
-            with student_engine.train_mode():
-                cudnn_sdpa_observed = cudnn_sdpa_observed and torch.backends.cuda.cudnn_sdp_enabled()
-                for batch_index, production_data in enumerate(production_data_by_batch, start=1):
+
+            def run_validation(after_step: int) -> None:
+                validation_data = build_distillation_data(
+                    validation_rows,
+                    global_batch_size=validation_total_rows,
+                )
+                tu.assign_non_tensor(validation_data, sp_size=1)
+                with student_engine.eval_mode():
+                    require_attention_backend(f"validation after step {after_step}", requested_eval_cudnn_sdpa)
+                    student_engine.infer_batch(validation_data, loss_function=student_helper)
+                validation_events.append(
+                    {
+                        "after_step": after_step,
+                        "rank": rank,
+                        "global_indices": local_validation_indices,
+                    }
+                )
+
+            if args.validate_before_train:
+                run_validation(0)
+
+            for batch_index, production_data in enumerate(production_data_by_batch, start=1):
+                with student_engine.train_mode():
+                    require_attention_backend(f"training step {batch_index}", requested_cudnn_sdpa)
                     student_engine.optimizer_zero_grad()
                     student_engine.forward_backward_batch(
                         data=production_data,
                         loss_function=student_helper,
                         forward_only=False,
                     )
-                    # The train-mode context clears gradients on exit, so measure
-                    # each exact production batch while it remains active.
                     diagnostics = fsdp2_grad_norm_diagnostics(
                         student_engine.module.named_parameters(),
                         group=student_engine.get_data_parallel_group(),
                         top_k=20,
                     )
                     diagnostics["batch_index"] = batch_index
+                    diagnostics["optimizer_grad_norm"] = float(student_engine.optimizer_step())
                     grad_diagnostics_by_batch.append(diagnostics)
+                diagnostics["lr"] = float(student_engine.lr_scheduler_step())
+                if batch_index % args.validation_every == 0 or batch_index == args.train_batches:
+                    run_validation(batch_index)
         gathered_records: list[Any] | None = [None] * world_size if rank == 0 else None
         gathered_traces: list[Any] | None = [None] * world_size if rank == 0 else None
         gathered_production_batches: list[Any] | None = [None] * world_size if rank == 0 else None
+        gathered_validation_events: list[Any] | None = [None] * world_size if rank == 0 else None
         dist.gather_object(local_records, gathered_records, dst=0)
         dist.gather_object(local_trace_records, gathered_traces, dst=0)
         dist.gather_object(local_production_batches, gathered_production_batches, dst=0)
+        dist.gather_object(validation_events, gathered_validation_events, dst=0)
 
         exit_code = 0
         if rank == 0:
@@ -771,7 +859,9 @@ def run_distributed_audit(args) -> int:
                 if grad_diagnostics_by_batch is not None
                 else None
             )
-            gate = evaluate_gate(aggregate, exact, grad_norms, production_batches, args)
+            complete_validation_events = [event for rank_events in gathered_validation_events for event in rank_events]
+            validation_steps = sorted({int(event["after_step"]) for event in complete_validation_events})
+            gate = evaluate_gate(aggregate, exact, grad_norms, production_batches, validation_steps, args)
             checkpointing_label = "enabled" if args.gradient_checkpointing else "disabled"
             report = {
                 "report_version": REPORT_VERSION,
@@ -784,7 +874,7 @@ def run_distributed_audit(args) -> int:
                         f"verl TrainingWorker FSDP2 {args.execution_mode} mode, activation checkpointing "
                         f"{checkpointing_label}, {args.fsdp_param_dtype} FSDP parameters, "
                         f"{args.fsdp_reduce_dtype} reductions, {args.fsdp_buffer_dtype} buffers, "
-                        "BF16 autocast, SDPA, use_cache=False"
+                        "BF16 autocast, SDPA, use_cache=False, real optimizer/scheduler steps, and validation cadence"
                     ),
                     "candidate": "precomputed unsharded-HF BF16 SDPA top-128 overlay",
                     "causal_alignment": "response token j is scored by hidden position prompt_length - 1 + j",
@@ -797,7 +887,8 @@ def run_distributed_audit(args) -> int:
                     "use_remove_padding": False,
                     "checkpoint_student_chunks": True,
                     "clamp_min_topk_kl": False,
-                    "cudnn_sdpa": cudnn_sdpa_observed,
+                    "cudnn_sdpa": requested_cudnn_sdpa,
+                    "eval_cudnn_sdpa": requested_eval_cudnn_sdpa,
                     "model_dtype": args.model_dtype,
                     "fsdp_param_dtype": args.fsdp_param_dtype,
                     "fsdp_reduce_dtype": args.fsdp_reduce_dtype,
@@ -810,6 +901,16 @@ def run_distributed_audit(args) -> int:
                     "max_padded_tokens_per_microbatch": args.max_padded_tokens_per_microbatch,
                     "kl_chunk_size": args.kl_chunk_size,
                     "max_length": args.max_length,
+                    "sequential_optimizer_steps": True,
+                    "validate_before_train": args.validate_before_train,
+                    "validation_every": args.validation_every,
+                    "lr": args.lr,
+                    "lr_warmup_steps": args.lr_warmup_steps,
+                    "lr_scheduler_type": args.lr_scheduler_type,
+                    "min_lr_ratio": args.min_lr_ratio,
+                    "weight_decay": args.weight_decay,
+                    "betas": [args.beta1, args.beta2],
+                    "total_training_steps": args.total_training_steps,
                 },
                 "dataset": {
                     "index_path": str(index_path),
@@ -858,6 +959,12 @@ def run_distributed_audit(args) -> int:
                     if grad_diagnostics_by_batch is not None
                     else None
                 ),
+                "validation": {
+                    "before_train": args.validate_before_train,
+                    "every_steps": args.validation_every,
+                    "event_steps": validation_steps,
+                    "events": complete_validation_events,
+                },
                 "aggregate": aggregate,
                 "exact_serialization": exact,
                 "positions": records,
@@ -926,8 +1033,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-sampled-token-abs-delta-p95", type=float, default=0.01)
     parser.add_argument("--max-membership-delta-mass-p99", type=float, default=0.001)
     parser.add_argument("--max-grad-norm", type=float, default=50.0)
+    parser.add_argument("--cudnn-sdpa", type=int, choices=(0, 1), default=1)
+    parser.add_argument("--eval-cudnn-sdpa", type=int, choices=(0, 1), default=None)
+    parser.add_argument("--validate-before-train", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--validation-every", type=int, default=1)
+    parser.add_argument("--lr", type=float, default=2e-6)
+    parser.add_argument("--lr-warmup-steps", type=int, default=100)
+    parser.add_argument("--lr-scheduler-type", choices=("constant", "cosine", "linear"), default="linear")
+    parser.add_argument("--min-lr-ratio", type=float, default=0.1)
+    parser.add_argument("--weight-decay", type=float, default=0.1)
+    parser.add_argument("--beta1", type=float, default=0.9)
+    parser.add_argument("--beta2", type=float, default=0.98)
+    parser.add_argument("--total-training-steps", type=int, default=750)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
+    if args.eval_cudnn_sdpa is None:
+        args.eval_cudnn_sdpa = args.cudnn_sdpa
     for name in (
         "traces_per_rank",
         "positions_per_trace",
@@ -937,6 +1058,8 @@ def parse_args() -> argparse.Namespace:
         "max_padded_tokens_per_microbatch",
         "kl_chunk_size",
         "max_length",
+        "validation_every",
+        "total_training_steps",
     ):
         if getattr(args, name) <= 0:
             parser.error(f"--{name.replace('_', '-')} must be positive")

@@ -60,7 +60,8 @@ An E4B-generated trace has passed the complete path into a real E2B student upda
 
 Preparation is therefore at complete-generation and end-to-end gate status for both directions, not
 completed-experiment status. The E2B-base overlay, source+overlay preflight, and corrected real FSDP2
-audit are complete; the next execution boundary is a fresh three-step E4B smoke followed by the
+sequential audit are complete; the next execution boundary is a clean-HEAD receipt and fresh
+three-step E4B smoke followed by the
 supervised 750-step run. The source
 train file has 9,723 rows but only 9,543 distinct question texts, and seven of the 200 validation
 question texts also occur in train. The bundles deliberately preserve that historical roster for
@@ -206,15 +207,15 @@ histories.
 - A separate engine bug was found while isolating precision: a bare `module.to(bfloat16)` downcasts
   Gemma 4's model-created FP32 rotary-frequency buffers. The FSDP loader now casts parameters while
   preserving those buffers exactly, with a focused regression test.
-- The exact seed-42 production sequence exposed a separate cuDNN SDPA BF16 backward pathology when
-  two padded sequences share one microbatch. Bounding the first batch to 5,120 padded tokens reduced
-  its gradient norm from `387.89` to `13.66`, but a fresh three-step W&B smoke (`b50c8b0e`) still
-  reached `356.42` on batch three. An exact diagnostic replay stopped at `62.96`, confirming that the
-  anomaly magnitude is nondeterministic. Replaying the same three batches with singleton
-  microbatches produced norms `14.84`, `21.26`, and `16.10`, completed validation at loss `0.20946`,
-  and saved a checkpoint. Disabling activation or vocabulary-chunk checkpointing did not fix the
-  paired path. Production therefore retains cuDNN for target parity but requires microbatch 1; the
-  4,096 padded-token ceiling is only a defensive contract if batching changes later.
+- The exact seed-42 production sequence exposed a separate cuDNN SDPA BF16 backward pathology.
+  Paired sequences first triggered it, but a clean singleton smoke (`5b475fb2`) later reached
+  gradient norm `74.66` on step 3 when cuDNN validation ran between every optimizer step. The same
+  batches without interleaved validation passed at `14.78`, `21.02`, and `12.61`. Disabling cuDNN
+  globally stabilized gradients but changed targets materially. The safe contract therefore keeps
+  cuDNN for training/target parity and uses non-cuDNN SDPA only for in-process validation. A
+  sequential audit reproducing validation at steps 0/1/2/3 passed at `14.78`, `21.20`, and `14.95`
+  with exact ordered top-128 support and sub-`0.001` sampled-token drift p95. Production also retains
+  singleton microbatches and the defensive 4,096 padded-token ceiling.
 - Deterministic trace-contract failures now return a distinct generator status, and the supervisor
   refuses identical-seed retries for that status instead of looping on an unrecoverable row.
 - The validation loader retains a final partial batch only when exact distillation coverage is
@@ -1428,3 +1429,9 @@ defaults are proposals, not silently adopted decisions.
   at `14.84`, `21.26`, and `16.10` and completed validation/checkpointing. Production now requires
   singleton microbatches, a defensive 4,096 ceiling, and a receipt covering all three opening
   batches before a fresh three-step W&B gate.
+- **2026-07-31 — In-process cuDNN validation rejected.** Singleton smoke `5b475fb2` failed on step 3
+  only when validation was interleaved. No-interleave W&B control `0ea93c05` passed all three steps.
+  Global non-cuDNN training was numerically stable but failed overlay parity, while cuDNN training
+  plus non-cuDNN validation passed the full sequential audit at gradient norms `14.78`, `21.20`, and
+  `14.95`. The production contract now binds the train/eval backend split and real optimizer,
+  scheduler, and validation sequence.

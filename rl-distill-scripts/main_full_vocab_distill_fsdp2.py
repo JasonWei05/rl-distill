@@ -177,6 +177,8 @@ class FullVocabDistillTrainer(SFTTrainer):
             "hf_push_enabled": hf_push_enabled,
             "hf_repo": hf_cfg.get("repo_id") if hf_push_enabled else None,
             "wandb_run_id": os.environ.get("WANDB_RUN_ID"),
+            "cudnn_sdpa": os.environ.get("VERL_GEMMA4_CUDNN_SDPA"),
+            "eval_cudnn_sdpa": os.environ.get("VERL_GEMMA4_EVAL_CUDNN_SDPA"),
         }
         receipt = checkpoint_root / "run_complete.json"
         temporary = receipt.with_name(f".{receipt.name}.tmp.{os.getpid()}")

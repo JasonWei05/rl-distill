@@ -9,6 +9,28 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-07-31 — Validation-interleaved cuDNN backward anomaly isolated and fixed
+
+**Failure beyond singleton batching.** A clean-HEAD three-step W&B smoke (`5b475fb2`) used the
+audited singleton-microbatch contract and still reached gradient norm `74.66` on step 3 after
+validation ran at steps 0, 1, and 2. The fail-closed gate stopped before the optimizer update; no
+checkpoint from that run is resumable.
+
+**Isolation.** The same exact three train batches with only step-0 and final validation passed in
+W&B run `0ea93c05` at gradient norms `14.78`, `21.02`, and `12.61`, proving that the third batch and
+optimizer sequence are safe without an intervening validation forward. Disabling cuDNN SDPA for
+all forwards also kept gradients finite (`14.73`, `18.63`, `23.20`) but failed target parity:
+weighted log-probability drift `0.01826` and sampled-token p95 `0.09447`.
+
+**Fix and gate.** Training retains cuDNN SDPA so it matches the immutable BF16 target overlay;
+in-process validation uses the non-cuDNN SDPA backend so it cannot contaminate the next backward.
+The audit now executes the real optimizer/scheduler sequence and exact validation cadence. The
+mixed-backend diagnostic passed with exact ordered top-128 support, weighted drift `0.000168`,
+sampled-token p95 `0.000864`, and sequential gradient norms `14.78`, `21.20`, `14.95`. A clean-HEAD
+receipt and fresh three-step W&B checkpoint smoke remain required before production relaunch.
+
+---
+
 ## 2026-07-31 — E2B-to-E4B paired-microbatch anomaly isolated; singleton production contract
 
 **Failure.** Fresh W&B smoke `b50c8b0e` used the BF16-forward/FP32-master stack and the previously

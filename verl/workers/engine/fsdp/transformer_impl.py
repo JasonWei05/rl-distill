@@ -108,8 +108,8 @@ def _cast_module_parameters_preserving_buffers(module: torch.nn.Module, dtype: t
         submodule._buffers[name] = buffer
 
 
-def _enable_gemma4_cudnn_sdpa(engine):
-    """Undo vLLM's process-global cuDNN SDPA disable for Gemma 4 forwards.
+def _set_gemma4_cudnn_sdpa(engine, *, mode: str):
+    """Select the audited Gemma 4 SDPA backend for a train or eval context.
 
     Importing ``vllm.platforms.cuda`` calls
     ``torch.backends.cuda.enable_cudnn_sdp(False)``. ``TrainingWorker`` imports
@@ -120,8 +120,9 @@ def _enable_gemma4_cudnn_sdpa(engine):
     log probabilities. Long padded multi-sequence backward safety is enforced
     separately by the fixed microbatch padded-token ceiling.
 
-    Return the prior state so callers can restore it after the training/eval
-    context; colocated vLLM code therefore retains the state it requested.
+    Evaluation may use a separate override because repeated cuDNN inference
+    between optimizer steps can destabilize a later Gemma 4 backward. Return
+    the prior state so colocated vLLM code retains the state it requested.
     """
     if device_name != "cuda":
         return None
@@ -134,16 +135,21 @@ def _enable_gemma4_cudnn_sdpa(engine):
     if getattr(text_config, "model_type", None) != "gemma4_text":
         return None
 
-    requested = os.environ.get("VERL_GEMMA4_CUDNN_SDPA", "1")
+    if mode not in {"train", "eval"}:
+        raise ValueError(f"unsupported Gemma 4 SDPA mode: {mode}")
+    requested = (os.environ.get("VERL_GEMMA4_EVAL_CUDNN_SDPA") if mode == "eval" else None) or os.environ.get(
+        "VERL_GEMMA4_CUDNN_SDPA", "1"
+    )
     if requested not in {"0", "1"}:
-        raise ValueError("VERL_GEMMA4_CUDNN_SDPA must be 0 or 1")
+        variable = "VERL_GEMMA4_EVAL_CUDNN_SDPA" if mode == "eval" else "VERL_GEMMA4_CUDNN_SDPA"
+        raise ValueError(f"{variable} must be 0 or 1")
 
     target = requested == "1"
     previous = torch.backends.cuda.cudnn_sdp_enabled()
     if previous != target:
         torch.backends.cuda.enable_cudnn_sdp(target)
         if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
-            logger.info("Set cuDNN SDPA=%s for Gemma 4 forward", target)
+            logger.info("Set cuDNN SDPA=%s for Gemma 4 %s forward", target, mode)
     return previous
 
 
@@ -1204,7 +1210,7 @@ class EngineEvalModeCtx(BaseEngineCtx):
     def __enter__(self):
         assert isinstance(self.engine, FSDPEngine)
         super().__enter__()
-        self.prev_cudnn_sdpa = _enable_gemma4_cudnn_sdpa(self.engine)
+        self.prev_cudnn_sdpa = _set_gemma4_cudnn_sdpa(self.engine, mode="eval")
         self.prev_sp_group = get_ulysses_sequence_parallel_group()
         set_ulysses_sequence_parallel_group(self.engine.ulysses_parallel_group)
         self.engine.module.eval()
@@ -1232,7 +1238,7 @@ class EngineTrainModeCtx(BaseEngineCtx):
     def __enter__(self):
         assert isinstance(self.engine, FSDPEngine)
         super().__enter__()
-        self.prev_cudnn_sdpa = _enable_gemma4_cudnn_sdpa(self.engine)
+        self.prev_cudnn_sdpa = _set_gemma4_cudnn_sdpa(self.engine, mode="train")
         self.prev_sp_group = get_ulysses_sequence_parallel_group()
         set_ulysses_sequence_parallel_group(self.engine.ulysses_parallel_group)
         self.engine.module.train()

@@ -31,7 +31,7 @@ from gemma4_model_identity import inspect_local_hf_model
 
 SCRIPT_PATH = Path(__file__).resolve()
 REPO_ROOT = SCRIPT_PATH.parents[2]
-EXPECTED_REPORT_VERSION = 3
+EXPECTED_REPORT_VERSION = 4
 EXPECTED_SCHEMA = "gemma4-hf-bf16-sdpa-topk-overlay-v1"
 REQUIRED_SOURCE_PATHS = {
     "rl-distill-scripts/data/audit_gemma4_fsdp2_training_topk.py",
@@ -40,7 +40,9 @@ REQUIRED_SOURCE_PATHS = {
     "rl-distill-scripts/full_vocab_kl_loss.py",
     "verl/utils/dataset/dataset_utils.py",
     "verl/utils/fsdp_utils.py",
+    "verl/trainer/sft_trainer.py",
     "verl/workers/engine/utils.py",
+    "verl/workers/config/optimizer.py",
     "verl/workers/engine/fsdp/transformer_impl.py",
     "verl/workers/engine_workers.py",
 }
@@ -112,6 +114,8 @@ def verify_receipt(
     expected_max_padded_tokens_per_microbatch: int = 4096,
     expected_kl_chunk_size: int = 4096,
     expected_max_length: int = 12288,
+    expected_cudnn_sdpa: bool = True,
+    expected_eval_cudnn_sdpa: bool = False,
     repo_root: Path = REPO_ROOT,
     verify_repository: bool = True,
 ) -> dict[str, Any]:
@@ -155,7 +159,8 @@ def verify_receipt(
         "use_remove_padding": False,
         "checkpoint_student_chunks": True,
         "clamp_min_topk_kl": False,
-        "cudnn_sdpa": True,
+        "cudnn_sdpa": expected_cudnn_sdpa,
+        "eval_cudnn_sdpa": expected_eval_cudnn_sdpa,
         "model_dtype": "fp32",
         "fsdp_param_dtype": "bf16",
         "fsdp_reduce_dtype": "fp32",
@@ -169,6 +174,16 @@ def verify_receipt(
         "kl_chunk_size": expected_kl_chunk_size,
         "max_length": expected_max_length,
         "top_k": 128,
+        "sequential_optimizer_steps": True,
+        "validate_before_train": True,
+        "validation_every": 1,
+        "lr": 2e-6,
+        "lr_warmup_steps": 100,
+        "lr_scheduler_type": "linear",
+        "min_lr_ratio": 0.1,
+        "weight_decay": 0.1,
+        "betas": [0.9, 0.98],
+        "total_training_steps": 750,
     }
     for field, expected in expected_contract.items():
         _expect_equal(contract.get(field), expected, f"audit contract {field}")
@@ -368,6 +383,52 @@ def verify_receipt(
         batch_grad_norms.index(max(batch_grad_norms)) + 1,
         "audit backward max_batch_index",
     )
+    expected_lrs = [2e-8 * batch_index for batch_index in range(1, expected_train_batches + 1)]
+    for batch_index, (batch, expected_lr) in enumerate(zip(backward_batches, expected_lrs, strict=True), start=1):
+        optimizer_grad_norm = _finite_number(
+            _mapping(batch, f"audit backward batch {batch_index}").get("optimizer_grad_norm"),
+            f"audit backward batch {batch_index} optimizer_grad_norm",
+        )
+        if not math.isclose(optimizer_grad_norm, batch_grad_norms[batch_index - 1], rel_tol=1e-5, abs_tol=1e-5):
+            raise TrainingAuditReceiptError(
+                f"audit backward batch {batch_index} optimizer_grad_norm does not match its diagnostic norm"
+            )
+        observed_lr = _finite_number(batch.get("lr"), f"audit backward batch {batch_index} lr")
+        if not math.isclose(observed_lr, expected_lr, rel_tol=1e-8, abs_tol=1e-12):
+            raise TrainingAuditReceiptError(
+                f"audit backward batch {batch_index} lr is {observed_lr}; expected {expected_lr}"
+            )
+
+    validation = _mapping(report.get("validation"), "audit validation")
+    _expect_equal(validation.get("before_train"), True, "audit validation before_train")
+    _expect_equal(validation.get("every_steps"), 1, "audit validation every_steps")
+    expected_validation_steps = list(range(expected_train_batches + 1))
+    _expect_equal(validation.get("event_steps"), expected_validation_steps, "audit validation event_steps")
+    validation_events = validation.get("events")
+    if (
+        not isinstance(validation_events, list)
+        or len(validation_events) != len(expected_validation_steps) * expected_world_size
+    ):
+        raise TrainingAuditReceiptError("audit validation must record every rank at every required validation step")
+    validation_split = _mapping(_mapping(index.get("splits"), "overlay splits").get("validation"), "validation split")
+    validation_row_count = int(validation_split.get("row_count", 0))
+    if validation_row_count <= 0 or validation_row_count % expected_world_size != 0:
+        raise TrainingAuditReceiptError("overlay validation row count must be positive and divisible by world size")
+    for expected_step in expected_validation_steps:
+        step_events = [event for event in validation_events if event.get("after_step") == expected_step]
+        if len(step_events) != expected_world_size:
+            raise TrainingAuditReceiptError(f"audit validation step {expected_step} must record every rank")
+        for expected_rank, event in enumerate(sorted(step_events, key=lambda value: int(value.get("rank", -1)))):
+            event = _mapping(event, f"audit validation step {expected_step} rank {expected_rank}")
+            _expect_equal(event.get("rank"), expected_rank, "audit validation rank")
+            sampler = DistributedSampler(
+                range(validation_row_count),
+                num_replicas=expected_world_size,
+                rank=expected_rank,
+                shuffle=False,
+                drop_last=False,
+            )
+            _expect_equal(event.get("global_indices"), list(sampler), "audit validation sampler indices")
 
     implementation = _mapping(report.get("implementation"), "audit implementation")
     _expect_equal(implementation.get("dirty"), False, "audit implementation dirty")
@@ -400,6 +461,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-max-padded-tokens-per-microbatch", type=int, required=True)
     parser.add_argument("--expected-kl-chunk-size", type=int, required=True)
     parser.add_argument("--expected-max-length", type=int, required=True)
+    parser.add_argument("--expected-cudnn-sdpa", type=int, choices=(0, 1), required=True)
+    parser.add_argument("--expected-eval-cudnn-sdpa", type=int, choices=(0, 1), required=True)
     args = parser.parse_args()
     for name in (
         "expected_world_size",
@@ -429,6 +492,8 @@ def main() -> int:
             expected_max_padded_tokens_per_microbatch=args.expected_max_padded_tokens_per_microbatch,
             expected_kl_chunk_size=args.expected_kl_chunk_size,
             expected_max_length=args.expected_max_length,
+            expected_cudnn_sdpa=bool(args.expected_cudnn_sdpa),
+            expected_eval_cudnn_sdpa=bool(args.expected_eval_cudnn_sdpa),
         )
     except (OSError, TrainingAuditReceiptError, ValueError) as error:
         print(f"training-engine audit rejected: {error}", file=sys.stderr)

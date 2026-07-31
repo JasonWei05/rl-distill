@@ -384,6 +384,8 @@ def test_launcher_routes_overlay_schema_to_strict_overlay_preflight(tmp_path: Pa
         "--expected-max-padded-tokens-per-microbatch": "4096",
         "--expected-kl-chunk-size": "4096",
         "--expected-max-length": "12288",
+        "--expected-cudnn-sdpa": "1",
+        "--expected-eval-cudnn-sdpa": "0",
     }
     for flag, expected in expected_verifier_arguments.items():
         flag_index = verifier_argv.index(flag)
