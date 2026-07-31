@@ -16,6 +16,7 @@ The concrete Engine implementation using PyTorch FullyShardedDataParallel (FSDP)
 """
 
 import gc
+import json
 import logging
 import os
 import warnings
@@ -47,10 +48,12 @@ from verl.utils.fsdp_utils import (
     apply_fsdp2,
     collect_lora_params,
     fsdp2_clip_grad_norm_,
+    fsdp2_grad_norm_diagnostics,
     fsdp2_load_full_state_dict,
     fsdp_version,
     get_fsdp_wrap_policy,
     get_init_weight_context_manager,
+    gradient_norm_anomaly_reason,
     init_fn,
     load_fsdp_model_to_gpu,
     load_fsdp_optimizer,
@@ -81,6 +84,43 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 device_name = get_device_name()
+
+
+def _enable_gemma4_cudnn_sdpa(engine):
+    """Undo vLLM's process-global cuDNN SDPA disable for Gemma 4 forwards.
+
+    Importing ``vllm.platforms.cuda`` calls
+    ``torch.backends.cuda.enable_cudnn_sdp(False)``. ``TrainingWorker`` imports
+    vLLM transitively through the checkpoint-engine registry before it builds
+    the HF model, so an otherwise identical Gemma 4 FSDP2 forward silently
+    selects a different SDPA backend. Gemma 4's learned residual gates amplify
+    the small BF16 forward difference into severely divergent gradients.
+
+    Return the prior state so callers can restore it after the training/eval
+    context; colocated vLLM code therefore retains the state it requested.
+    """
+    if device_name != "cuda":
+        return None
+
+    module = getattr(engine.module, "module", engine.module)
+    config = getattr(module, "config", None)
+    if config is None:
+        return None
+    text_config = config.get_text_config() if hasattr(config, "get_text_config") else config
+    if getattr(text_config, "model_type", None) != "gemma4_text":
+        return None
+
+    previous = torch.backends.cuda.cudnn_sdp_enabled()
+    if not previous:
+        torch.backends.cuda.enable_cudnn_sdp(True)
+        if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
+            logger.info("Restored cuDNN SDPA for Gemma 4 after a process-global backend disable")
+    return previous
+
+
+def _restore_cudnn_sdpa(previous):
+    if previous is not None and torch.backends.cuda.cudnn_sdp_enabled() != previous:
+        torch.backends.cuda.enable_cudnn_sdp(previous)
 
 
 def _select_hidden_states_for_lm_head(hidden_states, token_indices, batch_indices=None):
@@ -827,6 +867,15 @@ class FSDPEngine(BaseEngine):
                 loss, meta_info = self.forward_step(micro_batch, loss_function=loss_function, forward_only=forward_only)
 
                 if not forward_only:
+                    if os.environ.get("VERL_FAIL_ON_NONFINITE_LOSS", "0") == "1":
+                        local_finite = torch.isfinite(loss.detach()).to(dtype=torch.int32)
+                        torch.distributed.all_reduce(
+                            local_finite,
+                            op=torch.distributed.ReduceOp.MIN,
+                            group=self.get_data_parallel_group(),
+                        )
+                        if not local_finite.item():
+                            raise FloatingPointError("non-finite training loss detected before backward")
                     loss.backward()
 
             output_lst.append(meta_info)
@@ -852,6 +901,14 @@ class FSDPEngine(BaseEngine):
         """
         assert self.optimizer_config.clip_grad is not None
 
+        grad_diagnostics = None
+        if isinstance(self.module, FSDPModule) and os.environ.get("VERL_FSDP2_GRAD_DIAGNOSTICS", "0") == "1":
+            grad_diagnostics = fsdp2_grad_norm_diagnostics(
+                self.module.named_parameters(),
+                group=self.get_data_parallel_group(),
+                top_k=int(os.environ.get("VERL_FSDP2_GRAD_DIAGNOSTICS_TOPK", "10")),
+            )
+
         if isinstance(self.module, FSDP):
             grad_norm = self.module.clip_grad_norm_(self.optimizer_config.clip_grad)
         elif isinstance(self.module, FSDPModule):
@@ -864,10 +921,37 @@ class FSDPEngine(BaseEngine):
         if isinstance(grad_norm, DTensor):
             grad_norm = grad_norm.full_tensor()
 
-        # if grad_norm is not finite, skip the update
-        if not torch.isfinite(grad_norm):
-            print(f"WARN: grad_norm is not finite: {grad_norm}")
+        if grad_diagnostics is not None and torch.distributed.get_rank() == 0:
+            print(
+                "[FSDP2GradDiagnostics] "
+                f"torch_total_norm={grad_norm.item():.9g} "
+                f"manual_total_norm={grad_diagnostics['total_norm']:.9g} "
+                f"top={grad_diagnostics['top']}",
+                flush=True,
+            )
+            diagnostics_path = os.environ.get("VERL_FSDP2_GRAD_DIAGNOSTICS_PATH")
+            if diagnostics_path:
+                payload = {
+                    "torch_total_norm": grad_norm.item(),
+                    "manual_total_norm": grad_diagnostics["total_norm"],
+                    "top": grad_diagnostics["top"],
+                    "per_parameter": grad_diagnostics["per_parameter"],
+                }
+                diagnostics_path = os.path.abspath(diagnostics_path)
+                os.makedirs(os.path.dirname(diagnostics_path), exist_ok=True)
+                temporary_path = f"{diagnostics_path}.tmp.{os.getpid()}"
+                with open(temporary_path, "w", encoding="utf-8") as handle:
+                    json.dump(payload, handle, indent=2, sort_keys=True)
+                    handle.write("\n")
+                os.replace(temporary_path, diagnostics_path)
+
+        max_grad_norm = os.environ.get("VERL_MAX_PRECLIP_GRAD_NORM")
+        anomaly_reason = gradient_norm_anomaly_reason(grad_norm, max_norm=max_grad_norm)
+        if anomaly_reason is not None:
             self.optimizer.zero_grad()
+            if max_grad_norm is not None or os.environ.get("VERL_FAIL_ON_NONFINITE_GRAD", "0") == "1":
+                raise FloatingPointError(anomaly_reason)
+            print(f"WARN: {anomaly_reason}")
         else:
             self.optimizer.step()
 
@@ -1045,6 +1129,7 @@ class EngineEvalModeCtx(BaseEngineCtx):
     def __enter__(self):
         assert isinstance(self.engine, FSDPEngine)
         super().__enter__()
+        self.prev_cudnn_sdpa = _enable_gemma4_cudnn_sdpa(self.engine)
         self.prev_sp_group = get_ulysses_sequence_parallel_group()
         set_ulysses_sequence_parallel_group(self.engine.ulysses_parallel_group)
         self.engine.module.eval()
@@ -1052,6 +1137,7 @@ class EngineEvalModeCtx(BaseEngineCtx):
     def __exit__(self, exc_type, exc_value, traceback):
         assert isinstance(self.engine, FSDPEngine)
         set_ulysses_sequence_parallel_group(self.prev_sp_group)
+        _restore_cudnn_sdpa(self.prev_cudnn_sdpa)
 
         # https://pytorch.org/docs/stable/notes/fsdp.html#fsdp-notes
         # unshard the root FSDP module
@@ -1071,6 +1157,7 @@ class EngineTrainModeCtx(BaseEngineCtx):
     def __enter__(self):
         assert isinstance(self.engine, FSDPEngine)
         super().__enter__()
+        self.prev_cudnn_sdpa = _enable_gemma4_cudnn_sdpa(self.engine)
         self.prev_sp_group = get_ulysses_sequence_parallel_group()
         set_ulysses_sequence_parallel_group(self.engine.ulysses_parallel_group)
         self.engine.module.train()
@@ -1078,6 +1165,7 @@ class EngineTrainModeCtx(BaseEngineCtx):
     def __exit__(self, exc_type, exc_value, traceback):
         assert isinstance(self.engine, FSDPEngine)
         set_ulysses_sequence_parallel_group(self.prev_sp_group)
+        _restore_cudnn_sdpa(self.prev_cudnn_sdpa)
         self.engine.optimizer_zero_grad()
         super().__exit__(exc_type, exc_value, traceback)
 

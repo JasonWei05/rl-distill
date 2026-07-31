@@ -14,7 +14,10 @@
 
 """FSDP2 full-vocabulary off-policy distillation entry point."""
 
+import json
 import os
+from datetime import UTC, datetime
+from pathlib import Path
 
 import hydra
 import torch
@@ -141,6 +144,46 @@ class FullVocabDistillTrainer(SFTTrainer):
             delete_local_after=bool(cfg.get("delete_local_after", False)),
         )
 
+    def _write_completion_receipt(self):
+        """Record completion only after the final checkpoint and uploads succeed."""
+        import torch.distributed as dist
+
+        if dist.is_available() and dist.is_initialized() and dist.get_rank() != 0:
+            return
+
+        checkpoint_root = Path(self.config.trainer.default_local_dir)
+        final_step = int(self.total_training_steps)
+        tracker = checkpoint_root / "latest_checkpointed_iteration.txt"
+        try:
+            checkpoint_step = int(tracker.read_text(encoding="utf-8").strip())
+        except (FileNotFoundError, ValueError) as error:
+            raise RuntimeError(f"cannot prove final checkpoint completion from {tracker}") from error
+        if checkpoint_step != final_step:
+            raise RuntimeError(
+                f"training returned before its final checkpoint: tracker={checkpoint_step}, expected={final_step}"
+            )
+        checkpoint_dir = checkpoint_root / f"global_step_{final_step}"
+        if not checkpoint_dir.is_dir():
+            raise RuntimeError(f"final checkpoint directory is missing: {checkpoint_dir}")
+
+        hf_cfg = self.config.trainer.get("hf_push", None)
+        hf_push_enabled = bool(hf_cfg is not None and hf_cfg.get("enable", False))
+        if hf_push_enabled and self._hf_pusher is None:
+            raise RuntimeError("HF push was required but no rank-0 HFPusher was initialized")
+
+        payload = {
+            "checkpoint_step": final_step,
+            "completed_at": datetime.now(UTC).isoformat(),
+            "hf_push_enabled": hf_push_enabled,
+            "hf_repo": hf_cfg.get("repo_id") if hf_push_enabled else None,
+            "wandb_run_id": os.environ.get("WANDB_RUN_ID"),
+        }
+        receipt = checkpoint_root / "run_complete.json"
+        temporary = receipt.with_name(f".{receipt.name}.tmp.{os.getpid()}")
+        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(temporary, receipt)
+        print(f"[FullVocabDistill] wrote verified completion receipt: {receipt}", flush=True)
+
     def fit(self):
         try:
             super().fit()
@@ -148,6 +191,9 @@ class FullVocabDistillTrainer(SFTTrainer):
             if getattr(self, "_hf_pusher", None) is not None:
                 print("[HFPusher] waiting for pending uploads before exit...", flush=True)
                 wait_for_hf_pusher(self._hf_pusher, timeout=3600)
+        self._write_completion_receipt()
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.barrier()
 
 
 @hydra.main(config_path="config", config_name="full_vocab_distill_fsdp2", version_base=None)

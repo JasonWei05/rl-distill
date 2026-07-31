@@ -620,6 +620,93 @@ def fsdp2_clip_grad_norm_(parameters, max_norm, norm_type=2.0, error_if_nonfinit
     return total_norm
 
 
+def fsdp2_grad_norm_diagnostics(named_parameters, group=None, top_k=10):
+    """Independently measure FSDP2 gradient norms from local DTensor shards.
+
+    This is intentionally separate from ``torch.nn.utils._get_total_norm`` so
+    anomaly investigations can distinguish a real gradient spike from a
+    DTensor norm-accounting problem.  The function performs one scalar-vector
+    all-reduce for all parameters and does not mutate gradients.
+    """
+    names = []
+    local_squared_norms = []
+    distributed = dist.is_available() and dist.is_initialized()
+    world_size = dist.get_world_size(group) if distributed else 1
+
+    chunk_elements = int(os.environ.get("VERL_FSDP2_GRAD_DIAGNOSTICS_CHUNK_ELEMENTS", str(16 * 1024 * 1024)))
+    if chunk_elements <= 0:
+        raise ValueError("VERL_FSDP2_GRAD_DIAGNOSTICS_CHUNK_ELEMENTS must be positive")
+
+    for name, parameter in named_parameters:
+        grad = parameter.grad
+        if grad is None:
+            continue
+
+        replica_factor = 1
+        if isinstance(grad, DTensor):
+            local_grad = grad.to_local()
+            mesh = grad.device_mesh
+            for mesh_dim, placement in enumerate(grad.placements):
+                if placement.is_partial():
+                    raise NotImplementedError("gradient diagnostics do not support Partial DTensor placements")
+                if placement.is_replicate():
+                    replica_factor *= mesh.size(mesh_dim)
+        else:
+            local_grad = grad
+            # Plain gradients owned by an FSDP2 module are replicated across
+            # the data-parallel group, so count one copy globally.
+            replica_factor = world_size
+
+        flat_grad = local_grad.detach().view(-1)
+        squared_norm = torch.zeros((), dtype=torch.float64, device=flat_grad.device)
+        for start in range(0, flat_grad.numel(), chunk_elements):
+            chunk = flat_grad[start : start + chunk_elements]
+            squared_norm.add_(chunk.float().square().sum(dtype=torch.float64))
+        if replica_factor > 1:
+            squared_norm = squared_norm / replica_factor
+        names.append(name)
+        local_squared_norms.append(squared_norm)
+
+    if not local_squared_norms:
+        return {"total_norm": 0.0, "top": [], "per_parameter": {}}
+
+    squared_norms = torch.stack(local_squared_norms)
+    if distributed:
+        dist.all_reduce(squared_norms, op=dist.ReduceOp.SUM, group=group)
+
+    total_norm = squared_norms.sum().sqrt().item()
+    per_parameter = {name: squared_norm.sqrt().item() for name, squared_norm in zip(names, squared_norms, strict=True)}
+    count = min(max(0, int(top_k)), len(names))
+    if count:
+        values, indices = torch.topk(squared_norms, k=count)
+        top = [(names[index], value.sqrt().item()) for value, index in zip(values, indices.tolist(), strict=True)]
+    else:
+        top = []
+    return {"total_norm": total_norm, "top": top, "per_parameter": per_parameter}
+
+
+def gradient_norm_anomaly_reason(grad_norm, max_norm=None):
+    """Return a fail-closed diagnostic message for an unsafe pre-clip norm."""
+    if isinstance(grad_norm, torch.Tensor):
+        if grad_norm.numel() != 1:
+            raise ValueError("grad_norm must be a scalar")
+        value = float(grad_norm.detach().item())
+    else:
+        value = float(grad_norm)
+
+    if not math.isfinite(value):
+        return f"gradient norm is non-finite: {value}"
+
+    if max_norm is None:
+        return None
+    threshold = float(max_norm)
+    if not math.isfinite(threshold) or threshold <= 0:
+        raise ValueError(f"maximum gradient norm must be finite and positive, got {max_norm}")
+    if value > threshold:
+        return f"gradient norm {value:.9g} exceeds fail-closed threshold {threshold:.9g}"
+    return None
+
+
 def layered_summon_lora_params(fsdp_module, is_diffusers=False) -> OrderedDict:
     from peft.utils.save_and_load import get_peft_model_state_dict
 

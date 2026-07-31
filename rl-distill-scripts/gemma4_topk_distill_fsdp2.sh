@@ -308,6 +308,55 @@ export FULL_VOCAB_KL_CHUNK_SIZE=${FULL_VOCAB_KL_CHUNK_SIZE:-4096}
 export CLAMP_MIN_TOPK_KL=${CLAMP_MIN_TOPK_KL:-false}
 export CHECKPOINT_DISTILL_CHUNKS=${CHECKPOINT_DISTILL_CHUNKS:-true}
 export MODEL_DTYPE=${MODEL_DTYPE:-fp32}
+export ENABLE_GRADIENT_CHECKPOINTING=${ENABLE_GRADIENT_CHECKPOINTING:-true}
+case "${ENABLE_GRADIENT_CHECKPOINTING,,}" in
+    true|false) ;;
+    *) echo "ENABLE_GRADIENT_CHECKPOINTING must be true or false" >&2; exit 2 ;;
+esac
+export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP=${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Gemma4TextDecoderLayer}
+if ! [[ "${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    echo "FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP must be a Python class-name identifier" >&2
+    exit 2
+fi
+# Match the unsharded verification path by retaining FP32 FSDP parameter views
+# while autocast selects BF16 for eligible compute kernels. This also keeps the
+# optimizer/checkpoint representation in FP32 and makes backward-parity gates
+# compare like for like.
+export FSDP_PARAM_DTYPE=${FSDP_PARAM_DTYPE:-fp32}
+export FSDP_REDUCE_DTYPE=${FSDP_REDUCE_DTYPE:-fp32}
+export FSDP_BUFFER_DTYPE=${FSDP_BUFFER_DTYPE:-fp32}
+export ALLOW_UNSAFE_GEMMA4_FSDP_PARAM_DTYPE=${ALLOW_UNSAFE_GEMMA4_FSDP_PARAM_DTYPE:-false}
+case "${FSDP_PARAM_DTYPE}" in
+    fp32) ;;
+    bf16|fp16)
+        if [ "${ALLOW_UNSAFE_GEMMA4_FSDP_PARAM_DTYPE}" != "true" ]; then
+            echo "Gemma 4 production requires FSDP_PARAM_DTYPE=fp32; set ALLOW_UNSAFE_GEMMA4_FSDP_PARAM_DTYPE=true only for a deliberate diagnostic" >&2
+            exit 2
+        fi
+        ;;
+    *) echo "FSDP_PARAM_DTYPE must be fp32, bf16, or fp16" >&2; exit 2 ;;
+esac
+case "${FSDP_REDUCE_DTYPE}" in
+    fp32|bf16|fp16) ;;
+    *) echo "FSDP_REDUCE_DTYPE must be fp32, bf16, or fp16" >&2; exit 2 ;;
+esac
+case "${FSDP_BUFFER_DTYPE}" in
+    fp32|bf16|fp16) ;;
+    *) echo "FSDP_BUFFER_DTYPE must be fp32, bf16, or fp16" >&2; exit 2 ;;
+esac
+
+# A bad Gemma 4 training forward can have a plausible loss while its backward
+# is catastrophically wrong. Fail before the optimizer update so a supervisor
+# can distinguish numerical corruption from restartable infrastructure loss.
+export VERL_FAIL_ON_NONFINITE_LOSS=${VERL_FAIL_ON_NONFINITE_LOSS:-1}
+export VERL_FAIL_ON_NONFINITE_GRAD=${VERL_FAIL_ON_NONFINITE_GRAD:-1}
+export VERL_MAX_PRECLIP_GRAD_NORM=${VERL_MAX_PRECLIP_GRAD_NORM:-100}
+if ! [[ "${VERL_MAX_PRECLIP_GRAD_NORM}" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
+   [ "${VERL_MAX_PRECLIP_GRAD_NORM}" = "0" ] || \
+   [ "${VERL_MAX_PRECLIP_GRAD_NORM}" = "0.0" ]; then
+    echo "VERL_MAX_PRECLIP_GRAD_NORM must be a positive decimal number" >&2
+    exit 2
+fi
 export TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-64}
 export MICRO_BATCH_SIZE_PER_GPU=${MICRO_BATCH_SIZE_PER_GPU:-2}
 if ! [[ "${MICRO_BATCH_SIZE_PER_GPU}" =~ ^[1-9][0-9]*$ ]]; then
@@ -378,12 +427,12 @@ COMMON_OVERRIDES=(
     data.require_exact_val_coverage="${REQUIRE_EXACT_VAL_COVERAGE}"
     model.path="${MODEL_PATH}"
     model.use_remove_padding=false
-    model.enable_gradient_checkpointing=true
+    model.enable_gradient_checkpointing="${ENABLE_GRADIENT_CHECKPOINTING}"
     model.override_config.attn_implementation=sdpa
     engine.fsdp_size=-1
     engine.model_dtype="${MODEL_DTYPE}"
     engine.use_torch_compile=false
-    'engine.wrap_policy.transformer_layer_cls_to_wrap=["Gemma4TextDecoderLayer"]'
+    "engine.wrap_policy.transformer_layer_cls_to_wrap=[\"${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP}\"]"
     optim.lr="${LR}"
     optim.lr_warmup_steps="${LR_WARMUP_STEPS}"
     optim.total_training_steps="${TOTAL_TRAINING_STEPS}"
@@ -409,6 +458,10 @@ COMMON_OVERRIDES=(
     trainer.hf_push.delete_local_after=false
     'checkpoint.save_contents=["model","optimizer","extra","hf_model"]'
     'checkpoint.load_contents=["model","optimizer","extra"]'
+)
+
+COMMON_OVERRIDES+=(
+    "+engine.mixed_precision={param_dtype:${FSDP_PARAM_DTYPE},reduce_dtype:${FSDP_REDUCE_DTYPE},buffer_dtype:${FSDP_BUFFER_DTYPE}}"
 )
 
 cd "${PROJECT_ROOT}/rl-distill-scripts"
