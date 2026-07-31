@@ -14,6 +14,7 @@
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from wandb.proto import wandb_internal_pb2
 from wandb.sdk.internal.datastore import DataStore
 
 LOCAL_DIR = Path(__file__).resolve().parents[1] / "local"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def load_local_module(name: str):
@@ -276,6 +278,39 @@ def test_supervisor_checkpoint_and_metric_gates(tmp_path):
     )
     assert "gate" in supervisor.health_is_bad({"probs_ratio": 0.8})
     assert "non-finite" in supervisor.health_is_bad({"grad_norm": float("nan")})
+
+
+def test_tracked_nemo_patch_is_applicable_or_applied():
+    nemo_root = REPO_ROOT / "third_party/nemo-rl"
+    if not (nemo_root / "nemo_rl").is_dir():
+        pytest.skip("NeMo-RL submodule is not initialized")
+
+    patch_script = LOCAL_DIR / "apply_nemo_rl_patches.sh"
+    result = subprocess.run(
+        ["bash", str(patch_script), "--check"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "NEMO_RL_PATCH_OK" in result.stdout
+
+
+def test_all_nemo_launch_paths_include_tracked_patch():
+    patch_script_name = "apply_nemo_rl_patches.sh"
+    launch_paths = [
+        LOCAL_DIR / "build_venv.sh",
+        LOCAL_DIR / "run_gate.sh",
+        LOCAL_DIR / "run_train.sh",
+        LOCAL_DIR / "full_run_supervisor.py",
+        REPO_ROOT / "rl-distill-scripts/scale_train/run_nemorl_gemma4_e2b_repro.sh",
+    ]
+    for launch_path in launch_paths:
+        assert patch_script_name in launch_path.read_text(), launch_path
+
+    dockerfile = REPO_ROOT / "rl-distill-scripts/scale_train/st_config/Dockerfile.nemorl"
+    assert "0001-batch-aware-local-logprob-chunking.patch" in dockerfile.read_text()
 
 
 def test_supervisor_reads_live_local_wandb_history(tmp_path):

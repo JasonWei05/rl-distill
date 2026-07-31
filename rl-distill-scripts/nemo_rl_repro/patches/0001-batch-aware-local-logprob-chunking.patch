@@ -1,0 +1,364 @@
+diff --git a/nemo_rl/distributed/model_utils.py b/nemo_rl/distributed/model_utils.py
+index badeb8a19c64ce33ace065e7154da5c14d11a49e..df7f08dacfcfc36b2afe65b100b1c11d0f692b07 100644
+--- a/nemo_rl/distributed/model_utils.py
++++ b/nemo_rl/distributed/model_utils.py
+@@ -374,6 +374,90 @@ class ChunkedDistributedLogprob(torch.autograd.Function):
+         return grad_input, None, None, None, None, None, None
+ 
+ 
++def get_local_logprob_seq_chunk_size(
++    batch_size: int,
++    max_tokens_per_chunk: int,
++) -> int:
++    """Convert a local logprob token budget into a sequence chunk size.
++
++    Local logits have shape ``[B, S, V]``, so chunking only ``S`` does not
++    actually bound the temporary vocabulary buffer when dynamic batching makes
++    ``B > 1``.  Treat ``max_tokens_per_chunk`` as a budget over ``B * S`` and
++    reduce the sequence slice accordingly.
++    """
++    if max_tokens_per_chunk <= 0:
++        raise ValueError(
++            f"max_tokens_per_chunk must be positive, got {max_tokens_per_chunk}"
++        )
++    return max(1, max_tokens_per_chunk // max(1, batch_size))
++
++
++class ChunkedLocalLogprob(torch.autograd.Function):
++    """Compute selected local-vocabulary logprobs with bounded peak memory.
++
++    The ordinary autograd graph retains every chunk's full-vocabulary
++    log-softmax output until backward, defeating sequence chunking. This custom
++    function saves only the original logits and targets, then rematerializes one
++    chunk at a time during backward.
++    """
++
++    @staticmethod
++    def forward(  # pyrefly: ignore[bad-override]
++        ctx: Any,
++        logits: torch.Tensor,
++        target: torch.Tensor,
++        chunk_size: int,
++    ) -> torch.Tensor:
++        seq_chunk_size = get_local_logprob_seq_chunk_size(
++            int(logits.shape[0]), chunk_size
++        )
++        seq_size = int(logits.shape[1])
++        selected_logprobs = []
++        for chunk_start in range(0, seq_size, seq_chunk_size):
++            chunk_end = min(chunk_start + seq_chunk_size, seq_size)
++            chunk_logits = logits[:, chunk_start:chunk_end].to(torch.float32)
++            chunk_logprobs = torch.nn.functional.log_softmax(chunk_logits, dim=-1)
++            selected_logprobs.append(
++                chunk_logprobs.gather(
++                    dim=-1,
++                    index=target[:, chunk_start:chunk_end].unsqueeze(-1),
++                ).squeeze(-1)
++            )
++            del chunk_logprobs, chunk_logits
++
++        ctx.save_for_backward(logits, target)
++        ctx.seq_chunk_size = seq_chunk_size
++        return torch.cat(selected_logprobs, dim=1)
++
++    @staticmethod
++    def backward(
++        ctx: Any,
++        *grad_outputs: torch.Tensor,
++    ) -> tuple[torch.Tensor, None, None]:
++        grad_output = grad_outputs[0]
++        logits, target = ctx.saved_tensors
++        seq_chunk_size = ctx.seq_chunk_size
++        seq_size = int(logits.shape[1])
++
++        grad_input = torch.empty_like(logits)
++        for chunk_start in range(0, seq_size, seq_chunk_size):
++            chunk_end = min(chunk_start + seq_chunk_size, seq_size)
++            chunk_logits = logits[:, chunk_start:chunk_end].to(torch.float32)
++            chunk_grad = torch.nn.functional.softmax(chunk_logits, dim=-1)
++            chunk_grad.neg_()
++            target_chunk = target[:, chunk_start:chunk_end].unsqueeze(-1)
++            chunk_grad.scatter_add_(
++                dim=-1,
++                index=target_chunk,
++                src=torch.ones_like(target_chunk, dtype=chunk_grad.dtype),
++            )
++            chunk_grad.mul_(grad_output[:, chunk_start:chunk_end].unsqueeze(-1))
++            grad_input[:, chunk_start:chunk_end].copy_(chunk_grad)
++            del chunk_grad, chunk_logits, target_chunk
++
++        return grad_input, None, None
++
++
+ class DistributedLogprobWithSampling(torch.autograd.Function):
+     """Custom autograd function for computing log probabilities with top-k/top-p sampling.
+ 
+@@ -1580,17 +1664,19 @@ def get_next_token_logprobs_from_logits(
+         vocab_parallel_group: Process group for vocab parallelism
+         context_parallel_group: Process group for context parallelism
+         sampling_params: Sampling parameters for top-k/top-p filtering
+-        chunk_size: Sequence-dim chunk size for the vocab-parallel path; only
+-            applied without top-k/top-p sampling.
++        chunk_size: Sequence-dim chunk size for distributed paths. For local
++            logits this is a maximum ``batch * sequence`` token budget, so the
++            sequence slice is reduced automatically when dynamic batching has
++            more than one sequence.
+ 
+     Returns:
+         Token log-probabilities of shape [batch_size, seq_len - 1]
+     """
+-    # ChunkedDistributedLogprob casts each chunk to float32 internally.
+-    use_chunking = (
+-        vocab_parallel_group is not None
+-        and chunk_size is not None
+-        and not need_top_k_or_top_p_filtering(sampling_params)
++    is_dtensor = isinstance(next_token_logits, torch.distributed.tensor.DTensor)
++
++    # Distributed and local chunking cast each chunk to float32 internally.
++    use_chunking = chunk_size is not None and not need_top_k_or_top_p_filtering(
++        sampling_params
+     )
+     if not use_chunking:
+         next_token_logits = next_token_logits.to(torch.float32)
+@@ -1613,31 +1699,43 @@ def get_next_token_logprobs_from_logits(
+         # slice off to the correct length to remove potential CP padding
+         logprobs = logprobs[:, : input_ids.shape[1] - 1]
+ 
+-    elif isinstance(next_token_logits, torch.distributed.tensor.DTensor):
++    elif is_dtensor:
+         logprobs = get_logprobs_from_vocab_parallel_logits(
+             next_token_logits,
+             input_ids,
+             seq_index=seq_index,
++            chunk_size=chunk_size if use_chunking else None,
+             sampling_params=sampling_params,
+         )
+ 
+     else:
+-        # Remove last position's logits
+-        next_token_logits_wo_last = next_token_logits[:, :-1]
+-        # Apply top-k and top-p filtering
+-        next_token_logits_wo_last, _ = apply_top_k_top_p(
+-            next_token_logits_wo_last,
+-            top_k=sampling_params.top_k if sampling_params is not None else None,
+-            top_p=sampling_params.top_p if sampling_params is not None else 1.0,
+-        )
+-        # Compute logprobs
+-        next_token_logprobs = torch.nn.functional.log_softmax(
+-            next_token_logits_wo_last, dim=-1
+-        )
+-        next_tokens = input_ids[:, 1:].cuda()  # Skip first token
+-        logprobs = next_token_logprobs.gather(
+-            dim=-1, index=next_tokens.unsqueeze(-1)
+-        ).squeeze(-1)
++        target_seq_len = input_ids.shape[1] - 1
++        next_token_logits_wo_last = next_token_logits[:, :target_seq_len]
++        next_tokens = input_ids[:, 1:].to(next_token_logits.device)
++
++        if target_seq_len == 0:
++            return next_token_logits.new_empty(
++                (input_ids.shape[0], 0), dtype=torch.float32
++            )
++
++        if use_chunking:
++            logprobs = ChunkedLocalLogprob.apply(
++                next_token_logits_wo_last, next_tokens, chunk_size
++            )
++        else:
++            # Apply top-k and top-p filtering
++            next_token_logits_wo_last, _ = apply_top_k_top_p(
++                next_token_logits_wo_last,
++                top_k=sampling_params.top_k if sampling_params is not None else None,
++                top_p=sampling_params.top_p if sampling_params is not None else 1.0,
++            )
++            # Compute logprobs
++            next_token_logprobs = torch.nn.functional.log_softmax(
++                next_token_logits_wo_last, dim=-1
++            )
++            logprobs = next_token_logprobs.gather(
++                dim=-1, index=next_tokens.unsqueeze(-1)
++            ).squeeze(-1)
+ 
+     return logprobs
+ 
+diff --git a/nemo_rl/models/automodel/train.py b/nemo_rl/models/automodel/train.py
+index d23f7f670a4244e1a330c9d53de110734bbe0dd0..0b14ef77e43f46f5e259bf3750451bc6f4f98093 100644
+--- a/nemo_rl/models/automodel/train.py
++++ b/nemo_rl/models/automodel/train.py
+@@ -49,6 +49,7 @@ from nemo_rl.distributed.model_utils import (
+     allgather_cp_sharded_tensor,
+     cp_load_balanced_to_contiguous,
+     distributed_vocab_topk,
++    get_local_logprob_seq_chunk_size,
+     get_logprobs_from_vocab_parallel_logits,
+ )
+ from nemo_rl.models.automodel.data import ProcessedInputs, ProcessedMicrobatch
+@@ -617,7 +618,9 @@ class LossPostProcessor:
+ 
+         # Wrap prepare_loss_input with sampling_params
+         prepare_loss_input_wrapped = partial(
+-            prepare_loss_input, sampling_params=self.sampling_params
++            prepare_loss_input,
++            sampling_params=self.sampling_params,
++            chunk_size=self.cfg.get("logprob_chunk_size", None),
+         )
+         # Wrap loss function for sequence packing if needed
+         if self.enable_seq_packing:
+@@ -805,8 +808,9 @@ class LogprobsPostProcessor:
+         Returns:
+             Token log probabilities
+ 
+-        When ``logprob_chunk_size`` is set, log-softmax and gather run per
+-        sequence chunk to bound peak memory for long-context runs.
++        When ``logprob_chunk_size`` is set, log-softmax and gather run with a
++        bounded batch-times-sequence token budget. This remains bounded when
++        dynamic batching puts multiple short sequences in one microbatch.
+         """
+         # Extract logprobs for each token in the sequence by gathering the logprob
+         # corresponding to the next token at each position
+@@ -836,9 +840,12 @@ class LogprobsPostProcessor:
+             del log_probs
+             return token_logprobs
+ 
++        seq_chunk_size = get_local_logprob_seq_chunk_size(
++            int(logits.shape[0]), self.logprob_chunk_size
++        )
+         chunked_token_logprobs = []
+-        for chunk_start in range(0, target_seq_len, self.logprob_chunk_size):
+-            chunk_end = min(chunk_start + self.logprob_chunk_size, target_seq_len)
++        for chunk_start in range(0, target_seq_len, seq_chunk_size):
++            chunk_end = min(chunk_start + seq_chunk_size, target_seq_len)
+             chunk_logits = logits[:, chunk_start:chunk_end, :].to(torch.float32)
+             chunk_logits = chunk_logits.contiguous()
+             chunk_logits = apply_top_k_top_p_filtering_for_local_logits(
+diff --git a/tests/unit/models/automodel/test_automodel_train.py b/tests/unit/models/automodel/test_automodel_train.py
+index d1f209152ffcc9c2046f5d14aafe287e378d55fc..68af21d6b5dbf0506259fc167468292bcd776e1e 100644
+--- a/tests/unit/models/automodel/test_automodel_train.py
++++ b/tests/unit/models/automodel/test_automodel_train.py
+@@ -351,6 +351,46 @@ class TestApplyTemperatureScaling:
+ # =====================
+ @pytest.mark.automodel
+ class TestLossPostProcessor:
++    @patch("nemo_rl.models.automodel.train.prepare_loss_input")
++    def test_forwards_logprob_chunk_size(
++        self,
++        mock_prepare_loss_input,
++        base_cfg,
++        mock_loss_fn,
++        mock_device_mesh,
++        mock_cp_mesh,
++        mock_tp_mesh,
++        processed_inputs_no_flash,
++    ):
++        cfg = {**base_cfg, "logprob_chunk_size": 16}
++        processor = LossPostProcessor(
++            loss_fn=mock_loss_fn,
++            cfg=cfg,
++            device_mesh=mock_device_mesh,
++            cp_mesh=mock_cp_mesh,
++            tp_mesh=mock_tp_mesh,
++            cp_size=1,
++            dp_size=1,
++        )
++        logits = torch.randn(4, 64, 32)
++        data_dict = BatchedDataDict(
++            {
++                "input_ids": torch.randint(0, 32, (4, 64)),
++                "sample_mask": torch.ones(4, dtype=torch.bool),
++            }
++        )
++        mock_prepare_loss_input.return_value = ({"logits": logits}, data_dict)
++
++        processor(
++            logits=logits,
++            data_dict=data_dict,
++            processed_inputs=processed_inputs_no_flash,
++            global_valid_seqs=torch.tensor(4),
++            global_valid_toks=torch.tensor(256),
++        )
++
++        assert mock_prepare_loss_input.call_args.kwargs["chunk_size"] == 16
++
+     def test_basic_loss_computation(
+         self,
+         base_cfg,
+diff --git a/tests/unit/models/automodel/test_logprob_memory.py b/tests/unit/models/automodel/test_logprob_memory.py
+index 7aa820c48066a815da46a6da2dd506b05f7fbe2a..f994b630524d5657aa65b902bb6f99fe410dfc78 100644
+--- a/tests/unit/models/automodel/test_logprob_memory.py
++++ b/tests/unit/models/automodel/test_logprob_memory.py
+@@ -21,6 +21,7 @@ except ImportError:
+     pytest.skip("nemo_automodel not available", allow_module_level=True)
+ 
+ from nemo_rl.algorithms.logits_sampling_utils import TrainingSamplingParams
++from nemo_rl.distributed.model_utils import get_next_token_logprobs_from_logits
+ from nemo_rl.models.automodel.train import LogprobsPostProcessor
+ 
+ 
+@@ -178,4 +179,66 @@ def test_local_logprobs_chunking_limits_log_softmax_sequence_size(monkeypatch):
+     actual = processor._compute_local_logprobs(logits, input_ids)
+ 
+     assert actual.shape == (2, 6)
+-    assert seen_shapes == [(2, 2, 17), (2, 2, 17), (2, 2, 17)]
++    assert seen_shapes == [(2, 1, 17)] * 6
++
++
++def test_training_local_logprobs_chunking_matches_forward_and_backward(monkeypatch):
++    torch.manual_seed(37)
++    input_ids = torch.randint(0, 19, (2, 8))
++    base_logits = torch.randn(2, 8, 19)
++    seen_shapes = []
++    original_log_softmax = torch.nn.functional.log_softmax
++
++    def log_softmax(input_tensor, *args, **kwargs):
++        seen_shapes.append(tuple(input_tensor.shape))
++        return original_log_softmax(input_tensor, *args, **kwargs)
++
++    def run(chunk_size):
++        logits = base_logits.detach().clone().requires_grad_(True)
++        logprobs = get_next_token_logprobs_from_logits(
++            input_ids=input_ids,
++            next_token_logits=logits,
++            chunk_size=chunk_size,
++        )
++        logprobs.sum().backward()
++        return logprobs.detach(), logits.grad.detach()
++
++    expected_logprobs, expected_grad = run(None)
++    monkeypatch.setattr(torch.nn.functional, "log_softmax", log_softmax)
++    actual_logprobs, actual_grad = run(3)
++
++    torch.testing.assert_close(actual_logprobs, expected_logprobs)
++    torch.testing.assert_close(actual_grad, expected_grad)
++    assert seen_shapes == [(2, 1, 19)] * 7
++
++
++def test_training_local_logprobs_chunking_bounds_batch_sequence_tokens(monkeypatch):
++    torch.manual_seed(41)
++    batch_size = 7
++    token_budget = 16
++    input_ids = torch.randint(0, 23, (batch_size, 11))
++    logits = torch.randn(batch_size, 11, 23, requires_grad=True)
++    seen_batch_sequence_sizes = []
++    original_log_softmax = torch.nn.functional.log_softmax
++    original_softmax = torch.nn.functional.softmax
++
++    def log_softmax(input_tensor, *args, **kwargs):
++        seen_batch_sequence_sizes.append(input_tensor.shape[0] * input_tensor.shape[1])
++        return original_log_softmax(input_tensor, *args, **kwargs)
++
++    def softmax(input_tensor, *args, **kwargs):
++        seen_batch_sequence_sizes.append(input_tensor.shape[0] * input_tensor.shape[1])
++        return original_softmax(input_tensor, *args, **kwargs)
++
++    monkeypatch.setattr(torch.nn.functional, "log_softmax", log_softmax)
++    monkeypatch.setattr(torch.nn.functional, "softmax", softmax)
++
++    logprobs = get_next_token_logprobs_from_logits(
++        input_ids=input_ids,
++        next_token_logits=logits,
++        chunk_size=token_budget,
++    )
++    logprobs.sum().backward()
++
++    assert seen_batch_sequence_sizes
++    assert max(seen_batch_sequence_sizes) <= token_budget

@@ -5,6 +5,7 @@
 set -uo pipefail
 _HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_HERE}/env.sh"
+bash "${_HERE}/apply_nemo_rl_patches.sh" || exit 1
 cd "${NEMO_RL_ROOT}" || exit 1
 export UV_PROJECT_ENVIRONMENT="${NEMO_RL_DRIVER_VENV}"
 

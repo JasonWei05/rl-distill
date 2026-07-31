@@ -76,7 +76,10 @@ ENV UV_HTTP_TIMEOUT=300
 # nemo-rl source only — pinned vendored checkout, so this and the heavy layers below
 # stay cached across launches.
 COPY third_party/nemo-rl /workspace/rl-distill/third_party/nemo-rl
+COPY rl-distill-scripts/nemo_rl_repro/patches/0001-batch-aware-local-logprob-chunking.patch /tmp/nemo-rl.patch
 WORKDIR /workspace/rl-distill/third_party/nemo-rl
+RUN git apply --check /tmp/nemo-rl.patch \
+    && git apply /tmp/nemo-rl.patch
 
 # Driver venv: their locked cu130 stack; TransformerEngine source build (~25 min).
 # deep-ep is skipped here exactly like the run script — it belongs to the worker
@@ -109,4 +112,11 @@ RUN uv run --no-sync python -c "import torch; print('BAKE_OK torch', torch.__ver
 FROM env AS full
 COPY . /workspace/rl-distill
 WORKDIR /workspace/rl-distill
+RUN cd third_party/nemo-rl \
+    && if git apply --reverse --check ../../rl-distill-scripts/nemo_rl_repro/patches/0001-batch-aware-local-logprob-chunking.patch; then \
+         :; \
+       else \
+         git apply --check ../../rl-distill-scripts/nemo_rl_repro/patches/0001-batch-aware-local-logprob-chunking.patch \
+         && git apply ../../rl-distill-scripts/nemo_rl_repro/patches/0001-batch-aware-local-logprob-chunking.patch; \
+       fi
 ENV PYTHONPATH=/workspace/rl-distill

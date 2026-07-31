@@ -231,10 +231,10 @@ histories.
 - The validation loader retains a final partial batch only when exact distillation coverage is
   requested and computes token-weighted aggregates. Generic SFT retains its historical
   `drop_last=True` behavior.
-- Clean repository HEAD also cannot reproduce the E4B NeMoRL run without additional work: the
-  supervisor expects local NeMo patches that are stored in the private E4B HF repository but are
-  not applied by a committed script. Provenance and patch application must be repaired before the
-  post-distillation E4B RL phase.
+- The previously local NeMoRL log-probability memory changes are now stored as
+  `nemo_rl_repro/patches/0001-batch-aware-local-logprob-chunking.patch`. Every local launcher,
+  the full-run supervisor, and the NeMoRL Docker build apply it idempotently against the pinned
+  `5f89b3ae` submodule and fail closed on revision drift.
 - The private E4B repository's `repro/manifest.json` refers to an older v1 run rather than
   `6e5192d8`; the reconstructed teacher must receive a new, verified provenance manifest.
 - The initial private E2B-teacher upload reached the Hub only after full local validation and failed
@@ -1356,8 +1356,9 @@ defaults are proposals, not silently adopted decisions.
 ### Post-distillation E4B RL
 
 - **D53 — RL framework.** NeMoRL or verl? Recommended: use the same NeMoRL recipe as the existing E4B
-  baseline for the cleanest comparison, but only after committing/applying the missing patch and
-  passing a ratio≈1 gate. If verl is chosen, first production-validate the attention-mask fix.
+  baseline for the cleanest comparison. The required source patch is now tracked and applied by
+  every launch path; retain the ratio≈1 gate. If verl is chosen, first production-validate the
+  attention-mask fix.
 - **D54 — RL horizon and seeds.** Total steps, number of seeds, and stop rule are unspecified.
   Recommended: at least one seed through 125 steps for comparison with available curves, then extend
   to 500 only if healthy; two or three seeds are needed for strong optimization claims.

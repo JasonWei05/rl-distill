@@ -5,6 +5,7 @@
 set -uo pipefail
 _HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_HERE}/env.sh"
+bash "${_HERE}/apply_nemo_rl_patches.sh" || exit 1
 _REPO_ROOT="$(cd "${_HERE}/../../.." && pwd)"
 cd "${_REPO_ROOT}" || exit 1
 if [ -f .env ]; then set -a; source .env; set +a; fi

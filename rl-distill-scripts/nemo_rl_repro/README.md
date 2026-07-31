@@ -1,11 +1,12 @@
 # NeMo-RL exact replication of the gemma-4 E2B DAPO run
 
 Reproduces the verl run **`DAPO-gemma4-e2b-pt-DeepScaleR-4of4strict-seed42` (8k variant:
-8192 max response + 2048 overlong buffer)** on NVIDIA NeMo-RL, with **zero edits** to the
-vendored `third_party/nemo-rl` checkout (pinned submodule @ `5f89b3ae`). Purpose: test
+8192 max response + 2048 overlong buffer)** on NVIDIA NeMo-RL. The submodule is pinned at
+`5f89b3ae` and receives one repository-owned, numerically equivalent memory patch that makes
+local log-probability chunking batch-aware and rematerializes its backward pass. Purpose: test
 whether the truncation-driven grad-norm bimodality seen in verl (clean steps 1.3–6.8;
-steps with ≥1 at-cap response 83–3108) reproduces in an independent framework —
-i.e. behavior of the *algorithm*, not a verl bug.
+steps with ≥1 at-cap response 83–3108) reproduces in an independent framework — i.e. behavior
+of the *algorithm*, not a verl bug.
 
 verl reference data: wandb `rl-distill/DAPO` run `recbw9dcxso` (recovery of `bw9dcxso`,
 285 steps).
@@ -17,6 +18,8 @@ verl reference data: wandb `rl-distill/DAPO` run `recbw9dcxso` (recovery of `bw9
 | `config/dapo_gemma4_e2b_pt_repro.yaml` | Full parity config; every knob comments its verl counterpart |
 | `run_grpo_repro.py` | Wrapper around their `examples/run_grpo.py`: registers the `math_strict` env before setup; `NEMORL_FORCE_LOCAL_RAY=1` shim for shared devboxes |
 | `sitecustomize.py` | Auto-loads in every Ray actor via the launcher's PYTHONPATH: on transformers >= 5.5.2 applies the two gemma-4 KV-sharing fixes (use_cache workaround removal + FSDP2 `cast_forward_inputs=False`); on the locked 5.5.0 it **hard-fails** any act-ckpt launch instead of letting training silently corrupt (see Gotchas) |
+| `patches/0001-batch-aware-local-logprob-chunking.patch` | Tracked NeMo-RL source/test patch: forwards `logprob_chunk_size` into training, bounds local chunks by batch×sequence tokens, and rematerializes local softmax in backward |
+| `local/apply_nemo_rl_patches.sh` | Idempotently applies or verifies the tracked patch against the exact pinned submodule commit; every local/production launcher invokes it |
 | `rl_distill_nemo/strict_math_env.py` | Verbatim port of the strict boxed-only scorer (`verl/utils/reward_score/math_verify.py`) as a NeMo-RL environment |
 | `rl_distill_nemo/deepscaler_dataset.py` | verl-parquet → NeMo response-dataset adapter |
 | `tests/` | Reward parity (6/6) and tokenization parity (5/5 byte-identical) vs verl |
@@ -60,6 +63,8 @@ zstd -d -c rl-distill-nemorl-env-cu130-20260729.docker.tar.zst | docker load   #
 git submodule update --init --recursive third_party/nemo-rl   # pinned @ 5f89b3ae
 #   --recursive is REQUIRED: nemo-rl's own 3rdparty submodules (Gym/Automodel/...) are uv
 #   workspace members; without them `uv sync` fails with "nemo-gym ... not a workspace member"
+bash rl-distill-scripts/nemo_rl_repro/local/apply_nemo_rl_patches.sh
+#   launchers run this automatically; the explicit command is useful as a clean-clone check
 # repo-root .env with HF_TOKEN (gated google/gemma-4-E2B) + WANDB_API_KEY
 # data: bash rl-distill-scripts/data/prepare_deepscaler_4of4strict_rl_data.sh
 #   (downloads the exact train 9,723 / val 200x16 split from JWei05/DeepScaleR-4of4-strict-RL)
@@ -90,7 +95,7 @@ uv sync with TransformerEngine source build); on `train-rl-distill-nemorl` every
 fast-skips (markers still print). Pod-log marker chain to watch:
 
 ```
-DATA_PREP_OK -> CUDA_COMPAT_OK -> CUDNN_DEV_OK -> CUDA13_TOOLKIT_OK -> CMAKE_OK
+NEMO_RL_PATCH_OK -> DATA_PREP_OK -> CUDA_COMPAT_OK -> CUDNN_DEV_OK -> CUDA13_TOOLKIT_OK -> CMAKE_OK
   -> UV_ENV_OK -> CUDNN_HOME_OK/NCCL_HEADERS_OK -> WORKER_VENVS_OK -> GEMMA4_KV_PATCH_OK
   -> CUDA_OK -> MATH_VERIFY_OK -> GATE_PASS validation/accuracy=X
   -> (training steps) -> RUN_DONE rc=0
@@ -196,6 +201,7 @@ trainable params per optimizer step.
   `+policy.dtensor_cfg.automodel_kwargs.force_hf=true`.
 - `checkpointing.keep_top_k` must be an int on this pin (`NotRequired[int]`): an explicit
   `null` fails MasterConfig pydantic validation at startup. The config uses 1000000 = keep all.
-- `policy.logprob_chunk_size` is silently ignored in the training loss path (upstream
-  `LossPostProcessor` never forwards it; the Megatron twin was their #2871/#2872, automodel side
-  unfixed) — memory-only, numerically inert; `cpu_offload=true` covers the 4-GPU shortfall.
+- `policy.logprob_chunk_size` now reaches the automodel training-loss path through the tracked
+  NeMo-RL patch. For local logits it is a batch×sequence token budget, and custom autograd
+  rematerializes each FP32 softmax chunk during backward instead of retaining every vocabulary
+  buffer. The patch is memory-only and has forward/backward equivalence coverage.

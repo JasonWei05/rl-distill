@@ -111,6 +111,11 @@ def terminate_process_group(process: subprocess.Popen[bytes] | None) -> None:
             pass
 
 
+def apply_tracked_nemo_patch(repo_root: Path) -> None:
+    patch_script = repo_root / "rl-distill-scripts/nemo_rl_repro/local/apply_nemo_rl_patches.sh"
+    subprocess.run(["bash", str(patch_script)], check=True, cwd=repo_root)
+
+
 def validate_environment(repo_root: Path, driver_python: Path, gpus: int) -> None:
     worker_venv_root = Path(os.environ.get("NEMO_RL_VENV_DIR", "/tmp/nemo-rl-worker-venvs"))
     policy_worker_python = (
@@ -326,6 +331,7 @@ def main() -> int:
     logs_dir.mkdir(parents=True, exist_ok=True)
     supervisor_dir.mkdir(parents=True, exist_ok=True)
 
+    apply_tracked_nemo_patch(repo_root)
     validate_environment(repo_root, driver_python, args.gpus)
 
     run_id_file = checkpoint_dir / ".wandb_run_id"

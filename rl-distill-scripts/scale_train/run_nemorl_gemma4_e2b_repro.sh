@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # NeMo-RL exact replication of DAPO-gemma4-e2b-pt-DeepScaleR-4of4strict-seed42 (8k variant),
 # for a cross-framework comparison against the verl run (wandb bw9dcxso / recovery recbw9dcxso).
-# Framework: third_party/nemo-rl @ 5f89b3ae, UNMODIFIED — all adaptation lives in
-# rl-distill-scripts/nemo_rl_repro/ (dataset, strict reward env, config, wrapper).
+# Framework: third_party/nemo-rl @ 5f89b3ae plus the repository-owned patch under
+# rl-distill-scripts/nemo_rl_repro/patches/.
 # See rl-distill-scripts/nemo_rl_repro/PARITY_CHECKLIST.md for matched knobs + caveats.
 #
 # Flow: cuda-compat fallback (cu130 stack on a CUDA-12.8-driver fleet) -> uv env resolve ->
@@ -28,6 +28,10 @@ esac
 export GATE_MIN GATE_MAX
 RUN_BASENAME="nemorl-dapo-gemma4-${GEMMA4_VARIANT}-pt-DeepScaleR-4of4strict-seed42-8k"
 export NEMO_RL_ROOT="${NEMO}"
+bash "${REPRO_DIR}/local/apply_nemo_rl_patches.sh" || {
+  echo "FATAL: tracked NeMo-RL patch failed"
+  exit 1
+}
 
 # --- data: same prep as the verl runs (parquets referenced by the repro config) ---
 export DATA_DIR=/tmp/verl/data
