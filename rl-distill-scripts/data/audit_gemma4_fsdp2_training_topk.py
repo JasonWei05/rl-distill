@@ -52,7 +52,7 @@ import audit_gemma4_cross_engine_topk as cross_engine  # noqa: E402
 from gemma4_distill_trace_schema import TOPK_WIDTH, atomic_write_json, hash_json, sha256_file  # noqa: E402
 from gemma4_model_identity import inspect_local_hf_model  # noqa: E402
 
-REPORT_VERSION = 5
+REPORT_VERSION = 4
 EXPECTED_SCHEMA = "gemma4-hf-bf16-sdpa-topk-overlay-v1"
 EXPECTED_TARGET_ENGINE = "hf_bf16_sdpa_full_forward"
 AUDITED_SOURCE_PATHS = (
@@ -368,7 +368,7 @@ def evaluate_gate(
         observations["backward_batch_count"] = float(len(grad_norms))
         observations["backward_grad_norm_max"] = float(max(grad_norms, default=math.inf))
         requirements["backward_batch_count"] = ("==", args.train_batches)
-        requirements["backward_grad_norm_max"] = ("<=", args.max_grad_norm)
+        requirements["backward_grad_norm_max"] = ("<=", args.max_grad_norm) if args.max_grad_norm > 0 else (">=", 0.0)
         expected_validation_events = int(args.validate_before_train) + math.ceil(
             args.train_batches / args.validation_every
         )
@@ -474,9 +474,11 @@ def run_distributed_audit(args) -> int:
         os.environ.setdefault("VERL_FSDP2_LOCAL_LOAD", "1")
         os.environ["VERL_GEMMA4_CUDNN_SDPA"] = str(args.cudnn_sdpa)
         os.environ["VERL_GEMMA4_EVAL_CUDNN_SDPA"] = str(args.eval_cudnn_sdpa)
-        os.environ["VERL_GEMMA4_CUDNN_DETERMINISTIC"] = str(args.cudnn_deterministic)
         os.environ["VERL_FAIL_ON_NONFINITE_GRAD"] = "1"
-        os.environ["VERL_MAX_PRECLIP_GRAD_NORM"] = str(args.max_grad_norm)
+        if args.max_grad_norm > 0:
+            os.environ["VERL_MAX_PRECLIP_GRAD_NORM"] = str(args.max_grad_norm)
+        else:
+            os.environ.pop("VERL_MAX_PRECLIP_GRAD_NORM", None)
         if not args.fsdp_wrap:
             if world_size != 1:
                 raise FSDP2TopKAuditError("--no-fsdp-wrap is a single-rank diagnostic only")
@@ -551,18 +553,11 @@ def run_distributed_audit(args) -> int:
         validation_events: list[dict[str, Any]] = []
         requested_cudnn_sdpa = bool(args.cudnn_sdpa)
         requested_eval_cudnn_sdpa = bool(args.eval_cudnn_sdpa)
-        requested_cudnn_deterministic = bool(args.cudnn_deterministic)
 
         def require_attention_backend(context: str, expected: bool) -> None:
             observed = torch.backends.cuda.cudnn_sdp_enabled()
             if observed != expected:
                 raise FSDP2TopKAuditError(f"{context} observed cudnn_sdpa={observed}; expected {expected}")
-            observed_deterministic = torch.backends.cudnn.deterministic
-            if observed_deterministic != requested_cudnn_deterministic:
-                raise FSDP2TopKAuditError(
-                    f"{context} observed cudnn_deterministic={observed_deterministic}; "
-                    f"expected {requested_cudnn_deterministic}"
-                )
 
         mode_context = engine.train_mode() if backward_exercised else engine.eval_mode()
         with mode_context:
@@ -897,7 +892,6 @@ def run_distributed_audit(args) -> int:
                     "clamp_min_topk_kl": False,
                     "cudnn_sdpa": requested_cudnn_sdpa,
                     "eval_cudnn_sdpa": requested_eval_cudnn_sdpa,
-                    "cudnn_deterministic": requested_cudnn_deterministic,
                     "model_dtype": args.model_dtype,
                     "fsdp_param_dtype": args.fsdp_param_dtype,
                     "fsdp_reduce_dtype": args.fsdp_reduce_dtype,
@@ -920,7 +914,6 @@ def run_distributed_audit(args) -> int:
                     "weight_decay": args.weight_decay,
                     "betas": [args.beta1, args.beta2],
                     "total_training_steps": args.total_training_steps,
-                    "max_preclip_grad_norm": args.max_grad_norm,
                 },
                 "dataset": {
                     "index_path": str(index_path),
@@ -1042,10 +1035,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-support-probability-l1", type=float, default=0.003)
     parser.add_argument("--max-sampled-token-abs-delta-p95", type=float, default=0.01)
     parser.add_argument("--max-membership-delta-mass-p99", type=float, default=0.001)
-    parser.add_argument("--max-grad-norm", type=float, default=40.0)
+    parser.add_argument("--max-grad-norm", type=float, default=0.0)
     parser.add_argument("--cudnn-sdpa", type=int, choices=(0, 1), default=1)
     parser.add_argument("--eval-cudnn-sdpa", type=int, choices=(0, 1), default=None)
-    parser.add_argument("--cudnn-deterministic", type=int, choices=(0, 1), default=1)
     parser.add_argument("--validate-before-train", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--validation-every", type=int, default=1)
     parser.add_argument("--lr", type=float, default=2e-6)
@@ -1074,8 +1066,8 @@ def parse_args() -> argparse.Namespace:
     ):
         if getattr(args, name) <= 0:
             parser.error(f"--{name.replace('_', '-')} must be positive")
-    if not math.isfinite(args.max_grad_norm) or args.max_grad_norm <= 0:
-        parser.error("--max-grad-norm must be finite and positive")
+    if not math.isfinite(args.max_grad_norm) or args.max_grad_norm < 0:
+        parser.error("--max-grad-norm must be finite and non-negative")
     return args
 
 

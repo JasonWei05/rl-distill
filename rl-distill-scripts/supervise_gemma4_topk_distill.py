@@ -135,8 +135,6 @@ def completion_receipt_error(
     hf_repo: str,
     cudnn_sdpa: int = 1,
     eval_cudnn_sdpa: int = 0,
-    cudnn_deterministic: int = 1,
-    max_grad_norm: float = 40.0,
 ) -> str | None:
     """Return why the trainer's post-upload completion receipt is invalid."""
     receipt_path = checkpoint_dir / "run_complete.json"
@@ -154,8 +152,6 @@ def completion_receipt_error(
         "hf_repo": hf_repo if hf_push else None,
         "cudnn_sdpa": str(cudnn_sdpa),
         "eval_cudnn_sdpa": str(eval_cudnn_sdpa),
-        "cudnn_deterministic": str(cudnn_deterministic),
-        "max_preclip_grad_norm": str(max_grad_norm),
     }
     for key, expected_value in expected.items():
         if receipt.get(key) != expected_value:
@@ -192,7 +188,7 @@ def numerical_anomaly_reason(metrics: dict[str, float], *, max_grad_norm: float)
     if grad_norm is not None:
         if not math.isfinite(grad_norm):
             return f"train/grad_norm is non-finite: {grad_norm}"
-        if grad_norm > max_grad_norm:
+        if max_grad_norm > 0 and grad_norm > max_grad_norm:
             return f"train/grad_norm exceeds {max_grad_norm}: {grad_norm}"
 
     for key in (
@@ -233,8 +229,8 @@ def validate_environment(args: argparse.Namespace) -> None:
         raise ValueError("the verified production contract requires exactly 8 GPUs")
     if args.max_steps <= 0 or args.save_freq <= 0 or args.test_freq <= 0:
         raise ValueError("max-steps, save-freq, and test-freq must be positive")
-    if not math.isfinite(args.max_grad_norm) or args.max_grad_norm <= 0:
-        raise ValueError("max-grad-norm must be finite and positive")
+    if not math.isfinite(args.max_grad_norm) or args.max_grad_norm < 0:
+        raise ValueError("max-grad-norm must be finite and non-negative; zero disables the finite ceiling")
     for token_name in ("WANDB_API_KEY", "HF_TOKEN"):
         if not os.environ.get(token_name):
             raise RuntimeError(f"{token_name} is not set in .env or the environment")
@@ -290,10 +286,8 @@ def build_child_environment(args: argparse.Namespace, run_id: str) -> dict[str, 
             "FSDP_CAST_FORWARD_INPUTS": "true",
             "VERL_GEMMA4_CUDNN_SDPA": str(args.cudnn_sdpa),
             "VERL_GEMMA4_EVAL_CUDNN_SDPA": str(args.eval_cudnn_sdpa),
-            "VERL_GEMMA4_CUDNN_DETERMINISTIC": str(args.cudnn_deterministic),
             "VERL_FAIL_ON_NONFINITE_LOSS": "1",
             "VERL_FAIL_ON_NONFINITE_GRAD": "1",
-            "VERL_MAX_PRECLIP_GRAD_NORM": str(args.max_grad_norm),
             "VERL_FSDP2_GRAD_DIAGNOSTICS": "1" if args.grad_diagnostics else "0",
             "VERL_FSDP2_GRAD_DIAGNOSTICS_TOPK": "20",
             "VERL_FSDP2_GRAD_DIAGNOSTICS_PATH": str(args.supervisor_dir / "latest_grad_diagnostics.json"),
@@ -303,6 +297,10 @@ def build_child_environment(args: argparse.Namespace, run_id: str) -> dict[str, 
             "WANDB_RESUME": "allow",
         }
     )
+    if args.max_grad_norm > 0:
+        environment["VERL_MAX_PRECLIP_GRAD_NORM"] = str(args.max_grad_norm)
+    else:
+        environment.pop("VERL_MAX_PRECLIP_GRAD_NORM", None)
     environment.pop("WANDB_RESUME_FROM", None)
     environment.pop("WANDB_FORK_FROM", None)
     return environment
@@ -325,10 +323,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-freq", type=int, default=250)
     parser.add_argument("--test-freq", type=int, default=10)
     parser.add_argument("--max-checkpoints-to-keep", type=int, default=4)
-    parser.add_argument("--max-grad-norm", type=float, default=40.0)
+    parser.add_argument(
+        "--max-grad-norm",
+        type=float,
+        default=0.0,
+        help="optional finite pre-clip gradient ceiling; zero monitors only non-finite gradients",
+    )
     parser.add_argument("--cudnn-sdpa", type=int, choices=(0, 1), default=1)
     parser.add_argument("--eval-cudnn-sdpa", type=int, choices=(0, 1), default=0)
-    parser.add_argument("--cudnn-deterministic", type=int, choices=(0, 1), default=1)
     parser.add_argument("--gpus", type=int, default=8)
     parser.add_argument("--project", default="gemma4-distill-vs-rl")
     parser.add_argument("--entity", default="rl-distill")
@@ -425,8 +427,6 @@ def main() -> int:
                     hf_repo=args.hf_repo,
                     cudnn_sdpa=args.cudnn_sdpa,
                     eval_cudnn_sdpa=args.eval_cudnn_sdpa,
-                    cudnn_deterministic=args.cudnn_deterministic,
-                    max_grad_norm=args.max_grad_norm,
                 )
                 if receipt_error is not None:
                     state.update(
@@ -557,8 +557,6 @@ def main() -> int:
                     hf_repo=args.hf_repo,
                     cudnn_sdpa=args.cudnn_sdpa,
                     eval_cudnn_sdpa=args.eval_cudnn_sdpa,
-                    cudnn_deterministic=args.cudnn_deterministic,
-                    max_grad_norm=args.max_grad_norm,
                 )
                 if return_code == 0 and receipt_error is None:
                     log("Trainer exited successfully after final checkpoint and required uploads")

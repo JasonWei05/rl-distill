@@ -121,9 +121,7 @@ def _set_gemma4_cudnn_sdpa(engine, *, mode: str):
     separately by the fixed microbatch padded-token ceiling.
 
     Evaluation may use a separate override because repeated cuDNN inference
-    between optimizer steps can destabilize a later Gemma 4 backward. cuDNN
-    attention may also select a nondeterministic algorithm, so production can
-    require its deterministic path independently of backend enablement. Return
+    between optimizer steps can destabilize a later Gemma 4 backward. Return
     the prior state so colocated vLLM code retains the state it requested.
     """
     if device_name != "cuda":
@@ -145,32 +143,19 @@ def _set_gemma4_cudnn_sdpa(engine, *, mode: str):
     if requested not in {"0", "1"}:
         variable = "VERL_GEMMA4_EVAL_CUDNN_SDPA" if mode == "eval" else "VERL_GEMMA4_CUDNN_SDPA"
         raise ValueError(f"{variable} must be 0 or 1")
-    deterministic = os.environ.get("VERL_GEMMA4_CUDNN_DETERMINISTIC", "1")
-    if deterministic not in {"0", "1"}:
-        raise ValueError("VERL_GEMMA4_CUDNN_DETERMINISTIC must be 0 or 1")
 
     target = requested == "1"
-    target_deterministic = deterministic == "1"
-    previous = (torch.backends.cuda.cudnn_sdp_enabled(), torch.backends.cudnn.deterministic)
-    if previous[0] != target:
+    previous = torch.backends.cuda.cudnn_sdp_enabled()
+    if previous != target:
         torch.backends.cuda.enable_cudnn_sdp(target)
         if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
             logger.info("Set cuDNN SDPA=%s for Gemma 4 %s forward", target, mode)
-    if previous[1] != target_deterministic:
-        torch.backends.cudnn.deterministic = target_deterministic
-        if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
-            logger.info("Set cuDNN deterministic=%s for Gemma 4 %s forward", target_deterministic, mode)
     return previous
 
 
 def _restore_cudnn_sdpa(previous):
-    if previous is None:
-        return
-    previous_sdpa, previous_deterministic = previous
-    if torch.backends.cuda.cudnn_sdp_enabled() != previous_sdpa:
-        torch.backends.cuda.enable_cudnn_sdp(previous_sdpa)
-    if torch.backends.cudnn.deterministic != previous_deterministic:
-        torch.backends.cudnn.deterministic = previous_deterministic
+    if previous is not None and torch.backends.cuda.cudnn_sdp_enabled() != previous:
+        torch.backends.cuda.enable_cudnn_sdp(previous)
 
 
 def _select_hidden_states_for_lm_head(hidden_states, token_indices, batch_indices=None):

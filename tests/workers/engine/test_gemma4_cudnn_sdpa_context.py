@@ -32,7 +32,6 @@ def cudnn_sdpa_state(monkeypatch):
     monkeypatch.setattr(transformer_impl, "device_name", "cuda")
     monkeypatch.setattr(torch.backends.cuda, "cudnn_sdp_enabled", lambda: state["enabled"])
     monkeypatch.setattr(torch.backends.cuda, "enable_cudnn_sdp", enable)
-    monkeypatch.setattr(torch.backends.cudnn, "deterministic", False)
     monkeypatch.setattr(transformer_impl, "get_ulysses_sequence_parallel_group", lambda: None)
     monkeypatch.setattr(transformer_impl, "set_ulysses_sequence_parallel_group", lambda _group: None)
     return state
@@ -47,10 +46,8 @@ def test_gemma4_context_temporarily_restores_cudnn_sdpa(context_type, cudnn_sdpa
 
     with context_type(engine, disable_auto_offload=True):
         assert cudnn_sdpa_state["enabled"] is True
-        assert torch.backends.cudnn.deterministic is True
 
     assert cudnn_sdpa_state["enabled"] is False
-    assert torch.backends.cudnn.deterministic is False
     assert cudnn_sdpa_state["calls"] == [True, False]
 
 
@@ -60,10 +57,8 @@ def test_gemma4_context_preserves_already_enabled_state(cudnn_sdpa_state):
 
     with transformer_impl.EngineTrainModeCtx(engine, disable_auto_offload=True):
         assert cudnn_sdpa_state["enabled"] is True
-        assert torch.backends.cudnn.deterministic is True
 
     assert cudnn_sdpa_state["enabled"] is True
-    assert torch.backends.cudnn.deterministic is False
     assert cudnn_sdpa_state["calls"] == []
 
 
@@ -88,18 +83,6 @@ def test_gemma4_context_can_disable_cudnn_sdpa(monkeypatch, cudnn_sdpa_state):
     assert cudnn_sdpa_state["calls"] == [False, True]
 
 
-def test_gemma4_context_can_disable_cudnn_determinism(monkeypatch, cudnn_sdpa_state):
-    monkeypatch.setenv("VERL_GEMMA4_CUDNN_DETERMINISTIC", "0")
-    engine = _engine("gemma4_text")
-
-    with transformer_impl.EngineTrainModeCtx(engine, disable_auto_offload=True):
-        assert cudnn_sdpa_state["enabled"] is True
-        assert torch.backends.cudnn.deterministic is False
-
-    assert cudnn_sdpa_state["enabled"] is False
-    assert torch.backends.cudnn.deterministic is False
-
-
 def test_gemma4_eval_context_can_use_separate_backend(monkeypatch, cudnn_sdpa_state):
     cudnn_sdpa_state["enabled"] = True
     monkeypatch.setenv("VERL_GEMMA4_CUDNN_SDPA", "1")
@@ -118,14 +101,5 @@ def test_gemma4_context_rejects_invalid_cudnn_sdpa_override(monkeypatch, cudnn_s
     engine = _engine("gemma4_text")
 
     with pytest.raises(ValueError, match="must be 0 or 1"):
-        with transformer_impl.EngineTrainModeCtx(engine, disable_auto_offload=True):
-            pass
-
-
-def test_gemma4_context_rejects_invalid_cudnn_deterministic_override(monkeypatch, cudnn_sdpa_state):
-    monkeypatch.setenv("VERL_GEMMA4_CUDNN_DETERMINISTIC", "invalid")
-    engine = _engine("gemma4_text")
-
-    with pytest.raises(ValueError, match="VERL_GEMMA4_CUDNN_DETERMINISTIC must be 0 or 1"):
         with transformer_impl.EngineTrainModeCtx(engine, disable_auto_offload=True):
             pass

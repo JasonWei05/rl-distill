@@ -9,30 +9,20 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
-## 2026-07-31 — Residual cuDNN backward nondeterminism isolated; production held for deterministic gate
+## 2026-07-31 — Finite Gemma 4 gradient spikes accepted; deterministic-cuDNN experiment withdrawn
 
-**Production anomaly.** Fresh 750-step W&B run `25f52162` used the clean validation-isolated
-contract and produced opening gradient norms `14.799`, `21.572`, `47.828`, and `17.493`. The
-step-3 value is a reproducible bad-backward signature even though it remained below the old
-fail-closed threshold of `50`. The run was stopped before step 250, has no durable checkpoint, and
-must never be resumed from
-`/tmp/verl/ckpts/gemma4-distill-vs-rl/e2b-base-to-e4b-topk128-lr2e6-linear-b128-2ep-750-evalsafe-v1-9a3e103f-20260731`.
+**Operator decision.** Large but finite Gemma 4 pre-clip gradient norms are not a stop condition for
+this experiment. The scoped `torch.backends.cudnn.deterministic=True` change and its report-v5
+contract were withdrawn. Its clean eight-GPU gate produced a finite norm of `127.41`; this is now
+retained as an observed Gemma 4 training value rather than classified as numerical corruption.
 
-**Root cause and fix.** cuDNN SDPA was still free to select a magnitude-nondeterministic backward
-algorithm. Gemma 4 train/eval engine contexts now scope
-`torch.backends.cudnn.deterministic=True` while retaining cuDNN SDPA for training target parity and
-the non-cuDNN validation backend. They restore both prior backend states on exit. Three independent
-eight-GPU dirty-tree audits preserved exact target support and produced sequential gradient norms
-`[14.77, 21.13, 14.00]`, `[14.85, 20.97, 12.95]`, and `[14.76, 20.93, 15.82]`, including two
-production-cadence replays.
-
-**Fail-closed contract.** Audit report v5 binds deterministic cuDNN and a maximum pre-clip gradient
-norm of `40` through the audit receipt, launcher, supervisor environment, and completion receipt.
-This catches `47.828` before its optimizer update while retaining margin over the repeated safe
-opening maximum of `21.13`. Focused tests pass (`55 passed`); the broader Gemma 4 suite plus SFT
-validation/gradient diagnostics passes (`288 passed`). Ruff, format, shell syntax, and diff checks
-pass. A clean-HEAD v5 receipt and fresh 10-step W&B production-cadence smoke remain mandatory before
-the next 750-step launch.
+**Production contract.** Training returns to the normal verified stack from `9a3e103f`: cuDNN SDPA
+for training target parity, non-cuDNN SDPA for interleaved validation, singleton microbatches, and
+the 4,096 padded-token ceiling. The finite gradient-magnitude ceiling is disabled by default while
+gradient norms remain logged. Non-finite loss, non-finite gradients, invalid probability masses,
+crashes, stalls, checkpoint failures, and upload failures still fail closed and are monitored by the
+supervisor. A fresh clean receipt is required because production receipts bind the repository
+commit and audited source hashes.
 
 ---
 

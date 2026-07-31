@@ -218,7 +218,6 @@ def test_launcher_rejects_unverified_gemma4_batching_contract(tmp_path: Path) ->
         "MAX_TOKEN_LEN_PER_GPU": "8192",
         "CLAMP_MIN_TOPK_KL": "true",
         "CHECKPOINT_DISTILL_CHUNKS": "false",
-        "VERL_GEMMA4_CUDNN_DETERMINISTIC": "0",
         "NPROC_PER_NODE": "4",
     }
     for name, value in invalid_contracts.items():
@@ -229,15 +228,8 @@ def test_launcher_rejects_unverified_gemma4_batching_contract(tmp_path: Path) ->
         assert result.returncode == 2, (name, result.stderr)
         assert "audited overlay contract requires 8 GPUs" in result.stderr
 
-    invalid_environment = dict(environment)
-    invalid_environment["MAX_PADDED_TOKENS_PER_MICROBATCH"] = "4096"
-    invalid_environment["VERL_MAX_PRECLIP_GRAD_NORM"] = "50"
-    result = _run_launcher(invalid_environment)
-    assert result.returncode == 2
-    assert "requires VERL_MAX_PRECLIP_GRAD_NORM=40" in result.stderr
 
-
-def test_launcher_rejects_invalid_gradient_gate(tmp_path: Path) -> None:
+def test_launcher_accepts_disabled_gradient_ceiling_and_rejects_invalid_value(tmp_path: Path) -> None:
     environment, fake_bin = _base_environment(tmp_path)
     fake_python = fake_bin / "preflight-python"
     _write_fake_preflight_python(
@@ -248,8 +240,14 @@ def test_launcher_rejects_invalid_gradient_gate(tmp_path: Path) -> None:
 
     result = _run_launcher(environment)
 
+    assert result.returncode == 0
+
+    environment["VERL_MAX_PRECLIP_GRAD_NORM"] = "invalid"
+
+    result = _run_launcher(environment)
+
     assert result.returncode == 2
-    assert "VERL_MAX_PRECLIP_GRAD_NORM must be a positive decimal number" in result.stderr
+    assert "VERL_MAX_PRECLIP_GRAD_NORM must be a non-negative decimal number" in result.stderr
 
 
 def test_launcher_forwards_explicit_schedule_and_epoch_contract(tmp_path: Path) -> None:
@@ -392,10 +390,8 @@ def test_launcher_routes_overlay_schema_to_strict_overlay_preflight(tmp_path: Pa
         "--expected-max-padded-tokens-per-microbatch": "4096",
         "--expected-kl-chunk-size": "4096",
         "--expected-max-length": "12288",
-        "--expected-max-grad-norm": "40",
         "--expected-cudnn-sdpa": "1",
         "--expected-eval-cudnn-sdpa": "0",
-        "--expected-cudnn-deterministic": "1",
     }
     for flag, expected in expected_verifier_arguments.items():
         flag_index = verifier_argv.index(flag)

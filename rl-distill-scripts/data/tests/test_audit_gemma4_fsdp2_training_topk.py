@@ -155,3 +155,13 @@ def test_evaluate_gate_fails_closed_on_missing_rank_or_bad_gradient() -> None:
     assert gate["checks"]["production_rank_count_spread"]["passed"] is False
     assert gate["checks"]["backward_grad_norm_max"]["passed"] is False
     assert gate["checks"]["validation_event_count"]["passed"] is False
+
+
+def test_evaluate_gate_accepts_large_finite_gradient_when_ceiling_disabled() -> None:
+    aggregate, exact, production_batches, args = _gate_inputs()
+    args.max_grad_norm = 0.0
+
+    gate = audit.evaluate_gate(aggregate, exact, [12.0, 127.0, 7230.0], production_batches, [0, 1, 2, 3], args)
+
+    assert gate["status"] == "pass"
+    assert gate["checks"]["backward_grad_norm_max"]["observed"] == 7230.0

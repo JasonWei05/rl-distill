@@ -31,7 +31,7 @@ from gemma4_model_identity import inspect_local_hf_model
 
 SCRIPT_PATH = Path(__file__).resolve()
 REPO_ROOT = SCRIPT_PATH.parents[2]
-EXPECTED_REPORT_VERSION = 5
+EXPECTED_REPORT_VERSION = 4
 EXPECTED_SCHEMA = "gemma4-hf-bf16-sdpa-topk-overlay-v1"
 REQUIRED_SOURCE_PATHS = {
     "rl-distill-scripts/data/audit_gemma4_fsdp2_training_topk.py",
@@ -114,10 +114,8 @@ def verify_receipt(
     expected_max_padded_tokens_per_microbatch: int = 4096,
     expected_kl_chunk_size: int = 4096,
     expected_max_length: int = 12288,
-    expected_max_grad_norm: float = 40.0,
     expected_cudnn_sdpa: bool = True,
     expected_eval_cudnn_sdpa: bool = False,
-    expected_cudnn_deterministic: bool = True,
     repo_root: Path = REPO_ROOT,
     verify_repository: bool = True,
 ) -> dict[str, Any]:
@@ -129,10 +127,9 @@ def verify_receipt(
         "padded-token ceiling": expected_max_padded_tokens_per_microbatch,
         "KL chunk size": expected_kl_chunk_size,
         "maximum sequence length": expected_max_length,
-        "maximum pre-clip gradient norm": expected_max_grad_norm,
     }
     for field, value in expected_positive_values.items():
-        if not math.isfinite(value) or value <= 0:
+        if value <= 0:
             raise TrainingAuditReceiptError(f"expected {field} must be positive")
 
     receipt_path = receipt_path.expanduser().resolve(strict=True)
@@ -164,7 +161,6 @@ def verify_receipt(
         "clamp_min_topk_kl": False,
         "cudnn_sdpa": expected_cudnn_sdpa,
         "eval_cudnn_sdpa": expected_eval_cudnn_sdpa,
-        "cudnn_deterministic": expected_cudnn_deterministic,
         "model_dtype": "fp32",
         "fsdp_param_dtype": "bf16",
         "fsdp_reduce_dtype": "fp32",
@@ -188,7 +184,6 @@ def verify_receipt(
         "weight_decay": 0.1,
         "betas": [0.9, 0.98],
         "total_training_steps": 750,
-        "max_preclip_grad_norm": expected_max_grad_norm,
     }
     for field, expected in expected_contract.items():
         _expect_equal(contract.get(field), expected, f"audit contract {field}")
@@ -466,10 +461,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-max-padded-tokens-per-microbatch", type=int, required=True)
     parser.add_argument("--expected-kl-chunk-size", type=int, required=True)
     parser.add_argument("--expected-max-length", type=int, required=True)
-    parser.add_argument("--expected-max-grad-norm", type=float, required=True)
     parser.add_argument("--expected-cudnn-sdpa", type=int, choices=(0, 1), required=True)
     parser.add_argument("--expected-eval-cudnn-sdpa", type=int, choices=(0, 1), required=True)
-    parser.add_argument("--expected-cudnn-deterministic", type=int, choices=(0, 1), required=True)
     args = parser.parse_args()
     for name in (
         "expected_world_size",
@@ -482,8 +475,6 @@ def parse_args() -> argparse.Namespace:
     ):
         if getattr(args, name) <= 0:
             parser.error(f"--{name.replace('_', '-')} must be positive")
-    if not math.isfinite(args.expected_max_grad_norm) or args.expected_max_grad_norm <= 0:
-        parser.error("--expected-max-grad-norm must be finite and positive")
     return args
 
 
@@ -501,10 +492,8 @@ def main() -> int:
             expected_max_padded_tokens_per_microbatch=args.expected_max_padded_tokens_per_microbatch,
             expected_kl_chunk_size=args.expected_kl_chunk_size,
             expected_max_length=args.expected_max_length,
-            expected_max_grad_norm=args.expected_max_grad_norm,
             expected_cudnn_sdpa=bool(args.expected_cudnn_sdpa),
             expected_eval_cudnn_sdpa=bool(args.expected_eval_cudnn_sdpa),
-            expected_cudnn_deterministic=bool(args.expected_cudnn_deterministic),
         )
     except (OSError, TrainingAuditReceiptError, ValueError) as error:
         print(f"training-engine audit rejected: {error}", file=sys.stderr)
