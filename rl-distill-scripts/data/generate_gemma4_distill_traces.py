@@ -856,6 +856,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         run_generation(parse_args(argv))
+    except TraceValidationError as error:
+        # A deterministic trace-contract violation (for example, an empty
+        # completion produced with a fixed seed) cannot be repaired by
+        # restarting the worker with the same configuration.  Give the
+        # supervisor a distinct status so it can fail closed immediately.
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 3
     except (OSError, RuntimeError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2

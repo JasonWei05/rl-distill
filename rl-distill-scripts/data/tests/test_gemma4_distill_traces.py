@@ -696,3 +696,15 @@ def test_training_index_rejects_empty_response_by_default(tmp_path):
         )
     assert not shard_path.exists()
     assert not schema.parquet_manifest_path(shard_path).exists()
+
+
+def test_generator_marks_trace_validation_failures_as_non_retryable(monkeypatch, capsys):
+    monkeypatch.setattr(generate, "parse_args", lambda _argv: object())
+
+    def fail_validation(_args):
+        raise schema.TraceValidationError("deterministic empty response")
+
+    monkeypatch.setattr(generate, "run_generation", fail_validation)
+
+    assert generate.main([]) == 3
+    assert "deterministic empty response" in capsys.readouterr().err

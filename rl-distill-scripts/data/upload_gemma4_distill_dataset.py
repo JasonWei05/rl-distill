@@ -18,18 +18,25 @@
 Only a validator-produced dataset index containing complete ``train`` and
 ``validation`` splits is accepted.  Every Parquet row, shard manifest, run
 configuration, and index hash is checked before any Hugging Face mutation.
-The exact validated bundle is then committed to a private dataset repository.
+The exact validated bundle is copied to content-verified staging files, then
+committed only to an otherwise empty destination branch with the observed
+parent commit pinned. Uploads are private by default. Public visibility
+requires an explicit ``--public`` opt-in and is verified before and after the
+commit.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 from collections.abc import Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -96,7 +103,7 @@ _REVISION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 
 
 class DatasetUploadError(ValueError):
-    """Raised when validation or private upload cannot be completed safely."""
+    """Raised when validation or upload cannot be completed safely."""
 
 
 @dataclass(frozen=True)
@@ -126,6 +133,7 @@ class UploadResult:
     commit_oid: str
     dataset_index_sha256: str
     file_count: int
+    private: bool
 
     def lines(self) -> list[str]:
         return [
@@ -134,7 +142,7 @@ class UploadResult:
             f"COMMIT_OID={self.commit_oid}",
             f"DATASET_INDEX_SHA256={self.dataset_index_sha256}",
             f"FILES_UPLOADED={self.file_count}",
-            "PRIVATE=true",
+            f"PRIVATE={'true' if self.private else 'false'}",
         ]
 
 
@@ -512,8 +520,8 @@ def _new_hf_api(token: str) -> Any:
     return HfApi(token=token)
 
 
-def _verify_bundle_unchanged(bundle: ValidatedUploadBundle) -> None:
-    for item in bundle.files:
+def _verify_upload_files_unchanged(files: Sequence[UploadFile]) -> None:
+    for item in files:
         if not item.local_path.is_file():
             raise DatasetUploadError(f"validated upload file disappeared: {item.local_path}")
         if item.local_path.stat().st_size != item.size_bytes:
@@ -522,94 +530,258 @@ def _verify_bundle_unchanged(bundle: ValidatedUploadBundle) -> None:
             raise DatasetUploadError(f"validated upload file content changed: {item.local_path}")
 
 
+def _verify_bundle_unchanged(bundle: ValidatedUploadBundle) -> None:
+    _verify_upload_files_unchanged(bundle.files)
+
+
+@contextmanager
+def _stage_validated_files(bundle: ValidatedUploadBundle):
+    """Yield private, content-verified snapshots for the duration of one commit.
+
+    ``CommitOperationAdd`` streams path contents after it is constructed.  The
+    validated source tree can therefore change between the initial hash check
+    and the actual upload unless the operation points at a disjoint snapshot.
+    Staging beside the dataset keeps large Parquet copies on the same storage
+    volume while the random, mode-0700 temporary directory keeps the paths
+    private until the commit finishes.
+    """
+
+    _verify_bundle_unchanged(bundle)
+    prefix = f".{bundle.dataset_root.name}-hf-upload-stage-"
+    with tempfile.TemporaryDirectory(prefix=prefix, dir=bundle.dataset_root.parent) as temporary_directory:
+        staging_root = Path(temporary_directory)
+        staged_files: list[UploadFile] = []
+        for item in bundle.files:
+            relative = Path(item.path_in_repo)
+            if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+                raise DatasetUploadError(f"unsafe staged repository path: {item.path_in_repo!r}")
+            staged_path = staging_root / relative
+            staged_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.copyfile(item.local_path, staged_path)
+            except OSError as error:
+                raise DatasetUploadError(f"cannot stage validated upload file {item.local_path}: {error}") from error
+            if staged_path.stat().st_size != item.size_bytes:
+                raise DatasetUploadError(f"staged upload file size mismatch: {item.path_in_repo}")
+            staged_sha256 = trace_schema.sha256_file(staged_path)
+            if staged_sha256 != item.sha256:
+                raise DatasetUploadError(f"staged upload file content mismatch: {item.path_in_repo}")
+            staged_files.append(
+                UploadFile(
+                    local_path=staged_path,
+                    path_in_repo=item.path_in_repo,
+                    size_bytes=item.size_bytes,
+                    sha256=item.sha256,
+                )
+            )
+        yield tuple(staged_files)
+
+
+def _require_commit_oid(value: Any, description: str) -> str:
+    if not isinstance(value, str) or len(value) not in (40, 64):
+        raise DatasetUploadError(f"{description} must be an immutable 40/64-character commit OID")
+    try:
+        int(value, 16)
+    except ValueError as error:
+        raise DatasetUploadError(f"{description} must be hexadecimal") from error
+    return value.lower()
+
+
+def _git_blob_sha1(path: Path, size_bytes: int) -> str:
+    digest = hashlib.sha1()
+    digest.update(f"blob {size_bytes}\0".encode())
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _remote_lfs_sha256(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        digest = value.get("sha256")
+    else:
+        digest = getattr(value, "sha256", None)
+    return digest if isinstance(digest, str) else None
+
+
+def _verify_remote_file_content(
+    api: Any,
+    *,
+    repo_id: str,
+    revision: str,
+    token: str,
+    files: Sequence[UploadFile],
+    expected_git_blob_sha1s: Mapping[str, str],
+) -> None:
+    remote_files: dict[str, Any] = {}
+    for item in api.list_repo_tree(
+        repo_id,
+        repo_type="dataset",
+        revision=revision,
+        recursive=True,
+        expand=True,
+        token=token,
+    ):
+        path = getattr(item, "path", None)
+        blob_id = getattr(item, "blob_id", None)
+        if blob_id is None:
+            continue
+        if not isinstance(path, str) or not path:
+            raise DatasetUploadError("Hugging Face returned a repository file without a valid path")
+        if path in remote_files:
+            raise DatasetUploadError(f"Hugging Face returned duplicate repository path {path!r}")
+        remote_files[path] = item
+
+    expected_paths = {item.path_in_repo for item in files}
+    missing_paths = expected_paths.difference(remote_files)
+    stale_paths = set(remote_files).difference(expected_paths, _ALLOWED_HUB_INFRA_FILES)
+    if missing_paths or stale_paths:
+        raise DatasetUploadError(
+            "Hugging Face commit does not contain exactly the validated dataset files: "
+            f"missing={sorted(missing_paths)[:8]}, stale={sorted(stale_paths)[:8]}"
+        )
+
+    for expected in files:
+        remote = remote_files[expected.path_in_repo]
+        remote_size = getattr(remote, "size", None)
+        if remote_size != expected.size_bytes:
+            raise DatasetUploadError(f"remote file size mismatch: {expected.path_in_repo}")
+        lfs_sha256 = _remote_lfs_sha256(getattr(remote, "lfs", None))
+        if lfs_sha256 is not None:
+            if lfs_sha256.lower() != expected.sha256:
+                raise DatasetUploadError(f"remote LFS SHA256 mismatch: {expected.path_in_repo}")
+            continue
+        remote_blob_id = getattr(remote, "blob_id", None)
+        expected_blob_id = expected_git_blob_sha1s.get(expected.path_in_repo)
+        if expected_blob_id is None:
+            raise DatasetUploadError(f"missing pre-commit Git blob identity: {expected.path_in_repo}")
+        if remote_blob_id != expected_blob_id:
+            raise DatasetUploadError(f"remote Git blob SHA1 mismatch: {expected.path_in_repo}")
+
+
 def upload_validated_bundle(
     bundle: ValidatedUploadBundle,
     *,
     repo_id: str,
     revision: str,
     token: str,
+    private: bool = True,
     api: Any | None = None,
 ) -> UploadResult:
     repo_id = _validate_repo_id(repo_id)
     revision = _validate_revision(revision)
     if not isinstance(token, str) or not token:
         raise DatasetUploadError("a Hugging Face token must be supplied from the configured environment variable")
-    _verify_bundle_unchanged(bundle)
-    try:
-        if api is None:
-            api = _new_hf_api(token)
-        api.create_repo(repo_id, repo_type="dataset", private=True, exist_ok=True, token=token)
-        repo_info = api.repo_info(repo_id, repo_type="dataset", token=token)
-        if getattr(repo_info, "private", None) is not True:
-            raise DatasetUploadError(f"refusing to upload because dataset repository {repo_id!r} is not private")
+    if type(private) is not bool:
+        raise DatasetUploadError("private must be a boolean")
+    with _stage_validated_files(bundle) as staged_files:
+        failure_message: str | None = None
+        try:
+            if api is None:
+                api = _new_hf_api(token)
+            repo_existed = api.repo_exists(repo_id, repo_type="dataset", token=token)
+            if type(repo_existed) is not bool:
+                raise DatasetUploadError(f"Hugging Face did not report whether repository {repo_id!r} exists")
+            api.create_repo(repo_id, repo_type="dataset", private=private, exist_ok=True, token=token)
+            repo_info = api.repo_info(repo_id, repo_type="dataset", revision=revision, token=token)
+            actual_private = getattr(repo_info, "private", None)
+            if type(actual_private) is not bool:
+                raise DatasetUploadError(f"Hugging Face did not report repository visibility for {repo_id!r}")
+            if private and actual_private is not True:
+                raise DatasetUploadError(f"refusing to upload because dataset repository {repo_id!r} is not private")
+            if not private and actual_private is not False:
+                existing = "existing " if repo_existed else "newly created "
+                raise DatasetUploadError(
+                    f"refusing public upload because {existing}dataset repository {repo_id!r} is private; "
+                    "the generic uploader never changes repository visibility"
+                )
+            parent_commit = _require_commit_oid(
+                getattr(repo_info, "sha", None),
+                f"Hugging Face head for {repo_id!r} revision {revision!r}",
+            )
 
-        desired_paths = {item.path_in_repo for item in bundle.files}
-        existing_paths = set(
-            api.list_repo_files(
-                repo_id,
+            existing_paths = set(
+                api.list_repo_files(
+                    repo_id,
+                    repo_type="dataset",
+                    revision=revision,
+                    token=token,
+                )
+            )
+            existing_dataset_paths = existing_paths.difference(_ALLOWED_HUB_INFRA_FILES)
+            if existing_dataset_paths:
+                raise DatasetUploadError(
+                    "refusing to overwrite an existing Hub dataset bundle; "
+                    f"non-infrastructure files={sorted(existing_dataset_paths)[:8]}"
+                )
+
+            from huggingface_hub import CommitOperationAdd
+
+            expected_git_blob_sha1s = {
+                item.path_in_repo: _git_blob_sha1(item.local_path, item.size_bytes) for item in staged_files
+            }
+            operations = [
+                CommitOperationAdd(path_in_repo=item.path_in_repo, path_or_fileobj=item.local_path)
+                for item in staged_files
+            ]
+            for item, operation in zip(staged_files, operations, strict=True):
+                operation_sha256 = operation.upload_info.sha256.hex()
+                if operation.upload_info.size != item.size_bytes or operation_sha256 != item.sha256:
+                    raise DatasetUploadError(f"Hugging Face upload operation changed staged bytes: {item.path_in_repo}")
+            commit_info = api.create_commit(
+                repo_id=repo_id,
                 repo_type="dataset",
                 revision=revision,
+                parent_commit=parent_commit,
+                operations=operations,
+                commit_message=f"Upload validated Gemma 4 traces {bundle.dataset_index_sha256[:12]}",
+                commit_description=(
+                    f"direction={bundle.direction}\n"
+                    f"dataset_index_sha256={bundle.dataset_index_sha256}\n"
+                    f"experiment_sha256={bundle.experiment_sha256}"
+                ),
                 token=token,
             )
-        )
-        stale_paths = existing_paths.difference(desired_paths, _ALLOWED_HUB_INFRA_FILES)
-        if stale_paths:
-            raise DatasetUploadError(
-                f"refusing to mix the validated bundle with stale Hub files: {sorted(stale_paths)[:8]}"
+            commit_oid = _require_commit_oid(
+                getattr(commit_info, "oid", None),
+                "Hugging Face returned commit OID",
             )
-
-        from huggingface_hub import CommitOperationAdd
-
-        operations = [
-            CommitOperationAdd(path_in_repo=item.path_in_repo, path_or_fileobj=item.local_path) for item in bundle.files
-        ]
-        commit_info = api.create_commit(
-            repo_id=repo_id,
-            repo_type="dataset",
-            revision=revision,
-            operations=operations,
-            commit_message=f"Upload validated Gemma 4 traces {bundle.dataset_index_sha256[:12]}",
-            commit_description=(
-                f"direction={bundle.direction}\n"
-                f"dataset_index_sha256={bundle.dataset_index_sha256}\n"
-                f"experiment_sha256={bundle.experiment_sha256}"
-            ),
-            token=token,
-        )
-        commit_oid = getattr(commit_info, "oid", None)
-        if not isinstance(commit_oid, str) or len(commit_oid) not in (40, 64):
-            raise DatasetUploadError("Hugging Face did not return an immutable 40/64-character commit OID")
-        try:
-            int(commit_oid, 16)
-        except ValueError as error:
-            raise DatasetUploadError("Hugging Face returned a non-hexadecimal commit OID") from error
-        committed_paths = set(
-            api.list_repo_files(
-                repo_id,
-                repo_type="dataset",
+            _verify_upload_files_unchanged(staged_files)
+            _verify_remote_file_content(
+                api,
+                repo_id=repo_id,
                 revision=commit_oid,
                 token=token,
+                files=staged_files,
+                expected_git_blob_sha1s=expected_git_blob_sha1s,
             )
+            final_repo_info = api.repo_info(repo_id, repo_type="dataset", token=token)
+            final_private = getattr(final_repo_info, "private", None)
+            if final_private is not private:
+                requested_visibility = "private" if private else "public"
+                raise DatasetUploadError(
+                    f"dataset repository {repo_id!r} is not {requested_visibility} after the upload commit"
+                )
+        except DatasetUploadError as error:
+            failure_message = _redact_secret(str(error), token)
+        except Exception as error:
+            sanitized = _redact_secret(str(error), token)
+            failure_message = f"Hugging Face dataset upload failed: {sanitized}"
+        if failure_message is not None:
+            # Raise after leaving the except suite so the raw provider
+            # exception is not retained as __cause__/__context__ and cannot
+            # leak the token through formatted tracebacks.
+            raise DatasetUploadError(failure_message) from None
+        return UploadResult(
+            repo_id=repo_id,
+            requested_revision=revision,
+            commit_oid=commit_oid,
+            dataset_index_sha256=bundle.dataset_index_sha256,
+            file_count=len(bundle.files),
+            private=private,
         )
-        missing_paths = desired_paths.difference(committed_paths)
-        stale_paths = committed_paths.difference(desired_paths, _ALLOWED_HUB_INFRA_FILES)
-        if missing_paths or stale_paths:
-            raise DatasetUploadError(
-                "Hugging Face commit does not contain exactly the validated dataset files: "
-                f"missing={sorted(missing_paths)[:8]}, stale={sorted(stale_paths)[:8]}"
-            )
-    except DatasetUploadError:
-        raise
-    except Exception as error:
-        sanitized = _redact_secret(str(error), token)
-        raise DatasetUploadError(f"Hugging Face dataset upload failed: {sanitized}") from error
-    return UploadResult(
-        repo_id=repo_id,
-        requested_revision=revision,
-        commit_oid=commit_oid,
-        dataset_index_sha256=bundle.dataset_index_sha256,
-        file_count=len(bundle.files),
-    )
 
 
 def upload_dataset(
@@ -619,10 +791,18 @@ def upload_dataset(
     revision: str,
     token: str,
     allow_question_overlap: bool = False,
+    private: bool = True,
     api: Any | None = None,
 ) -> UploadResult:
     bundle = validate_upload_bundle(dataset_path, allow_question_overlap=allow_question_overlap)
-    return upload_validated_bundle(bundle, repo_id=repo_id, revision=revision, token=token, api=api)
+    return upload_validated_bundle(
+        bundle,
+        repo_id=repo_id,
+        revision=revision,
+        token=token,
+        private=private,
+        api=api,
+    )
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -632,7 +812,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         required=True,
         help="Completed dataset root containing dataset_index.json, or the dataset index JSON itself.",
     )
-    parser.add_argument("--repo-id", required=True, help="Explicit private HF dataset repo in namespace/name form.")
+    parser.add_argument("--repo-id", required=True, help="Explicit HF dataset repo in namespace/name form.")
     parser.add_argument("--revision", default="main", help="Existing target branch/revision (default: main).")
     parser.add_argument(
         "--token-env",
@@ -640,6 +820,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Environment variable containing the HF token; token values are never accepted as CLI arguments.",
     )
     parser.add_argument("--allow-question-overlap", action="store_true")
+    parser.add_argument(
+        "--public",
+        action="store_true",
+        help="Explicitly make and verify the dataset repository public. The default is private.",
+    )
     return parser.parse_args(argv)
 
 
@@ -656,6 +841,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             revision=args.revision,
             token=token,
             allow_question_overlap=args.allow_question_overlap,
+            private=not args.public,
         )
     except (OSError, RuntimeError, ValueError) as error:
         print(f"ERROR: {_redact_secret(str(error), token)}", file=sys.stderr)

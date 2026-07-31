@@ -234,6 +234,8 @@ run_worker() {
     log_path="${output_root}/logs/${split}-worker-${worker_id}.log"
 
     worker_pid=
+    # Invoked indirectly by the INT/TERM trap below.
+    # shellcheck disable=SC2329
     terminate_worker() {
         trap - INT TERM
         if [[ -n $worker_pid ]] && kill -0 "$worker_pid" 2>/dev/null; then
@@ -284,6 +286,11 @@ run_worker() {
         worker_pid=
         echo "[supervisor] split=${split} worker=${worker_id} failed attempt=${attempt} status=${worker_status}" \
             | tee -a "$log_path" >&2
+        if ((worker_status == 3)); then
+            echo "[supervisor] deterministic trace validation failure; refusing identical-seed retries" \
+                | tee -a "$log_path" >&2
+            return "$worker_status"
+        fi
         if ((attempt < MAX_WORKER_ATTEMPTS)); then
             sleep 5
         fi

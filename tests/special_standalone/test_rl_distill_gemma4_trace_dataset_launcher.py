@@ -65,3 +65,10 @@ def test_trace_dataset_launcher_isolates_and_cleans_worker_process_groups() -> N
     assert "setsid env CUDA_VISIBLE_DEVICES" in source
     assert 'kill -TERM -- "-${worker_pid}"' in source
     assert "trap terminate_worker INT TERM" in source
+
+
+def test_trace_dataset_launcher_does_not_retry_deterministic_validation_failures() -> None:
+    source = LAUNCHER.read_text(encoding="utf-8")
+
+    assert "worker_status == 3" in source
+    assert "refusing identical-seed retries" in source

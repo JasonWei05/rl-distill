@@ -19,7 +19,8 @@ set -euo pipefail
 #
 # Production inputs are accepted only through a validated dataset index:
 #   MODEL_PATH                         - immutable local E2B/E4B student snapshot
-#   DATASET_INDEX                      - output of validate_gemma4_distill_traces.py
+#   DATASET_INDEX                      - validated vLLM index or finalized unsharded-HF overlay index
+#   SOURCE_DATASET_INDEX               - exact vLLM source index (required only for an overlay)
 #   DISTILL_DIRECTION                  - e4b_rl100_to_e2b or e2b_base_to_e4b
 #   EXPECTED_TEACHER_IDENTITY_SHA256   - hash_json() of the pinned teacher identity
 #   EXPECTED_STUDENT_IDENTITY_SHA256   - content-bound student identity from preflight
@@ -93,14 +94,52 @@ if [ -n "${DATASET_INDEX:-}" ]; then
     : "${EXPECTED_TEACHER_IDENTITY_SHA256:?Set the pinned teacher identity SHA256}"
     : "${EXPECTED_STUDENT_IDENTITY_SHA256:?Set the pinned student identity SHA256}"
 
+    if ! DATASET_SCHEMA_VERSION=$("${PYTHON_BIN}" -c '
+import json
+import sys
+from pathlib import Path
+
+value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+schema = value.get("schema_version") if isinstance(value, dict) else None
+if not isinstance(schema, str) or not schema:
+    raise SystemExit("dataset index schema_version must be a non-empty string")
+print(schema)
+' "${DATASET_INDEX}"); then
+        echo "Could not read DATASET_INDEX schema_version" >&2
+        exit 2
+    fi
+    case "${DATASET_SCHEMA_VERSION}" in
+        gemma4-distill-topk-v1)
+            if [ -n "${SOURCE_DATASET_INDEX:-}" ]; then
+                echo "SOURCE_DATASET_INDEX is valid only for an unsharded-HF overlay" >&2
+                exit 2
+            fi
+            PREFLIGHT_SCRIPT="${PROJECT_ROOT}/rl-distill-scripts/data/preflight_gemma4_topk_distill.py"
+            ;;
+        gemma4-hf-bf16-sdpa-topk-overlay-v1)
+            if [ -z "${SOURCE_DATASET_INDEX:-}" ]; then
+                echo "Set SOURCE_DATASET_INDEX to the immutable vLLM source index for the overlay" >&2
+                exit 2
+            fi
+            PREFLIGHT_SCRIPT="${PROJECT_ROOT}/rl-distill-scripts/data/preflight_gemma4_training_topk_overlay.py"
+            ;;
+        *)
+            echo "Unsupported DATASET_INDEX schema_version: ${DATASET_SCHEMA_VERSION}" >&2
+            exit 2
+            ;;
+    esac
+
     PREFLIGHT_ARGS=(
-        "${PROJECT_ROOT}/rl-distill-scripts/data/preflight_gemma4_topk_distill.py"
+        "${PREFLIGHT_SCRIPT}"
         --dataset-index "${DATASET_INDEX}"
         --student-model "${MODEL_PATH}"
         --expected-direction "${DISTILL_DIRECTION}"
         --expected-teacher-identity-sha256 "${EXPECTED_TEACHER_IDENTITY_SHA256}"
         --expected-student-identity-sha256 "${EXPECTED_STUDENT_IDENTITY_SHA256}"
     )
+    if [ "${DATASET_SCHEMA_VERSION}" = "gemma4-hf-bf16-sdpa-topk-overlay-v1" ]; then
+        PREFLIGHT_ARGS+=(--source-dataset-index "${SOURCE_DATASET_INDEX}")
+    fi
     if [ "${PREFLIGHT_LOCAL_FILES_ONLY,,}" = "true" ]; then
         PREFLIGHT_ARGS+=(--local-files-only)
     else
@@ -175,6 +214,10 @@ if [ -n "${DATASET_INDEX:-}" ]; then
     export TEACHER_TOP_K=${PREFLIGHT_TOPK_WIDTH}
     export TEACHER_TOPK_VALIDATION_TOLERANCE=${PREFLIGHT_TOPK_TOLERANCE}
 else
+    if [ -n "${SOURCE_DATASET_INDEX:-}" ]; then
+        echo "SOURCE_DATASET_INDEX requires DATASET_INDEX" >&2
+        exit 2
+    fi
     if [ "${SMOKE_ONLY_ALLOW_DIRECT_FILES,,}" != "true" ]; then
         echo "Set DATASET_INDEX for production, or explicitly enable the direct-file smoke-only path" >&2
         exit 2

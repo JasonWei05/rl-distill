@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import traceback
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -201,31 +202,98 @@ def _write_complete_dataset(root: Path) -> Path:
 
 
 class FakeApi:
-    def __init__(self, *, private=True, error=None, existing_files=()):
+    def __init__(
+        self,
+        *,
+        exists=True,
+        private=True,
+        error=None,
+        existing_files=(),
+        post_commit_private=None,
+        on_repo_exists=None,
+        on_create_commit=None,
+        head_oid="c" * 40,
+        remote_overrides=None,
+    ):
+        self.exists = exists
         self.private = private
         self.error = error
         self.calls = []
         self.operations = []
         self.files = set(existing_files)
+        self.post_commit_private = post_commit_private
+        self.on_repo_exists = on_repo_exists
+        self.on_create_commit = on_create_commit
+        self.head_oid = head_oid
+        self.remote_overrides = remote_overrides or {}
+        self.committed = False
+        self.uploaded_sha256 = {}
+        self.remote_entries = {}
+
+    def repo_exists(self, repo_id, **kwargs):
+        self.calls.append(("repo_exists", repo_id, kwargs))
+        if self.on_repo_exists is not None:
+            self.on_repo_exists()
+        return self.exists
 
     def create_repo(self, repo_id, **kwargs):
         self.calls.append(("create_repo", repo_id, kwargs))
         if self.error is not None:
             raise self.error
+        if not self.exists:
+            self.exists = True
+            self.private = kwargs["private"]
         return SimpleNamespace()
 
     def repo_info(self, repo_id, **kwargs):
         self.calls.append(("repo_info", repo_id, kwargs))
-        return SimpleNamespace(private=self.private)
+        private = self.post_commit_private if self.committed and self.post_commit_private is not None else self.private
+        sha = "d" * 40 if self.committed else self.head_oid
+        return SimpleNamespace(private=private, sha=sha)
 
     def list_repo_files(self, repo_id, **kwargs):
         self.calls.append(("list_repo_files", repo_id, kwargs))
         return sorted(self.files)
 
+    def list_repo_tree(self, repo_id, **kwargs):
+        self.calls.append(("list_repo_tree", repo_id, kwargs))
+        entries = dict(self.remote_entries)
+        for path in self.files.difference(entries):
+            entries[path] = SimpleNamespace(path=path, size=0, blob_id="e" * 40, lfs=None)
+        return [entries[path] for path in sorted(entries)]
+
     def create_commit(self, **kwargs):
         self.calls.append(("create_commit", kwargs["repo_id"], kwargs))
         self.operations = list(kwargs["operations"])
+        if self.on_create_commit is not None:
+            self.on_create_commit(self.operations)
+        self.uploaded_sha256 = {
+            operation.path_in_repo: schema.sha256_file(Path(operation.path_or_fileobj)) for operation in self.operations
+        }
+        for operation in self.operations:
+            path = Path(operation.path_or_fileobj)
+            path_in_repo = operation.path_in_repo
+            size = path.stat().st_size
+            sha256 = self.uploaded_sha256[path_in_repo]
+            if path_in_repo.endswith(".parquet"):
+                lfs = SimpleNamespace(sha256=sha256)
+                blob_id = "a" * 40
+            else:
+                lfs = None
+                blob_id = uploader._git_blob_sha1(path, size)
+            override = self.remote_overrides.get(path_in_repo, {})
+            if "lfs_sha256" in override:
+                lfs = SimpleNamespace(sha256=override["lfs_sha256"])
+            if "blob_id" in override:
+                blob_id = override["blob_id"]
+            self.remote_entries[path_in_repo] = SimpleNamespace(
+                path=path_in_repo,
+                size=override.get("size", size),
+                blob_id=blob_id,
+                lfs=lfs,
+            )
         self.files.update(operation.path_in_repo for operation in self.operations)
+        self.committed = True
         return SimpleNamespace(oid="d" * 40)
 
 
@@ -351,19 +419,24 @@ def test_private_atomic_upload_reports_branch_and_immutable_revision(tmp_path):
     assert result.requested_revision == "trace-v1"
     assert result.commit_oid == "d" * 40
     assert result.file_count == 7
+    assert result.private is True
     assert "secret-token" not in "\n".join(result.lines())
-    assert api.calls[0][0] == "create_repo"
-    assert api.calls[0][2]["private"] is True
-    assert api.calls[0][2]["repo_type"] == "dataset"
+    assert "PRIVATE=true" in result.lines()
+    assert api.calls[0][0] == "repo_exists"
+    create_repo_call = next(call for call in api.calls if call[0] == "create_repo")
+    assert create_repo_call[2]["private"] is True
+    assert create_repo_call[2]["repo_type"] == "dataset"
     create_commit_call = next(call for call in api.calls if call[0] == "create_commit")
     assert create_commit_call[2]["revision"] == "trace-v1"
+    assert create_commit_call[2]["parent_commit"] == "c" * 40
     assert {operation.path_in_repo for operation in api.operations} == {item.path_in_repo for item in bundle.files}
+    assert api.uploaded_sha256 == {item.path_in_repo: item.sha256 for item in bundle.files}
 
 
 def test_existing_stale_hub_file_is_refused_before_commit(tmp_path):
     _, bundle = _validated_fixture(tmp_path)
     api = FakeApi(existing_files={"obsolete-shard.parquet"})
-    with pytest.raises(uploader.DatasetUploadError, match="stale Hub files"):
+    with pytest.raises(uploader.DatasetUploadError, match="refusing to overwrite an existing Hub dataset bundle"):
         uploader.upload_validated_bundle(
             bundle,
             repo_id="example/private-traces",
@@ -371,6 +444,22 @@ def test_existing_stale_hub_file_is_refused_before_commit(tmp_path):
             token="secret-token",
             api=api,
         )
+    assert "create_commit" not in [call[0] for call in api.calls]
+
+
+def test_existing_same_path_hub_file_is_refused_before_commit(tmp_path):
+    _, bundle = _validated_fixture(tmp_path)
+    api = FakeApi(existing_files={bundle.files[0].path_in_repo})
+
+    with pytest.raises(uploader.DatasetUploadError, match="refusing to overwrite an existing Hub dataset bundle"):
+        uploader.upload_validated_bundle(
+            bundle,
+            repo_id="example/private-traces",
+            revision="main",
+            token="secret-token",
+            api=api,
+        )
+
     assert "create_commit" not in [call[0] for call in api.calls]
 
 
@@ -389,6 +478,53 @@ def test_bundle_changed_after_validation_is_refused_before_hf_mutation(tmp_path)
     assert api.calls == []
 
 
+def test_upload_uses_verified_snapshot_if_source_changes_after_staging(tmp_path):
+    _, bundle = _validated_fixture(tmp_path)
+    source_item = bundle.files[0]
+    original = source_item.local_path.read_bytes()
+
+    def mutate_source():
+        replacement = bytes([original[0] ^ 1]) + original[1:]
+        source_item.local_path.write_bytes(replacement)
+
+    api = FakeApi(on_repo_exists=mutate_source)
+    result = uploader.upload_validated_bundle(
+        bundle,
+        repo_id="example/private-traces",
+        revision="main",
+        token="secret-token",
+        api=api,
+    )
+
+    assert result.commit_oid == "d" * 40
+    assert source_item.local_path.read_bytes() != original
+    assert api.uploaded_sha256 == {item.path_in_repo: item.sha256 for item in bundle.files}
+    assert all(
+        Path(operation.path_or_fileobj) != item.local_path
+        for operation, item in zip(api.operations, bundle.files, strict=True)
+    )
+
+
+def test_upload_rejects_staged_regular_file_changed_during_commit(tmp_path):
+    _, bundle = _validated_fixture(tmp_path)
+
+    def mutate_staged_file(operations):
+        operation = next(item for item in operations if item.path_in_repo == "dataset_index.json")
+        path = Path(operation.path_or_fileobj)
+        original = path.read_bytes()
+        path.write_bytes(bytes([original[0] ^ 1]) + original[1:])
+
+    api = FakeApi(on_create_commit=mutate_staged_file)
+    with pytest.raises(uploader.DatasetUploadError, match="validated upload file content changed"):
+        uploader.upload_validated_bundle(
+            bundle,
+            repo_id="example/private-traces",
+            revision="main",
+            token="secret-token",
+            api=api,
+        )
+
+
 def test_existing_public_repo_is_refused_before_commit(tmp_path):
     _, bundle = _validated_fixture(tmp_path)
     api = FakeApi(private=False)
@@ -400,7 +536,126 @@ def test_existing_public_repo_is_refused_before_commit(tmp_path):
             token="secret-token",
             api=api,
         )
-    assert [call[0] for call in api.calls] == ["create_repo", "repo_info"]
+    assert [call[0] for call in api.calls] == ["repo_exists", "create_repo", "repo_info"]
+
+
+def test_explicit_public_upload_reports_and_verifies_public_visibility(tmp_path):
+    _, bundle = _validated_fixture(tmp_path)
+    api = FakeApi(private=False)
+
+    result = uploader.upload_validated_bundle(
+        bundle,
+        repo_id="example/public-traces",
+        revision="main",
+        token="secret-token",
+        private=False,
+        api=api,
+    )
+
+    assert result.private is False
+    assert "PRIVATE=false" in result.lines()
+    create_repo_call = next(call for call in api.calls if call[0] == "create_repo")
+    assert create_repo_call[2]["private"] is False
+    assert [call[0] for call in api.calls].count("repo_info") == 2
+
+
+def test_explicit_public_upload_allows_new_repo_created_public(tmp_path):
+    _, bundle = _validated_fixture(tmp_path)
+    api = FakeApi(exists=False, private=True)
+
+    result = uploader.upload_validated_bundle(
+        bundle,
+        repo_id="example/public-traces",
+        revision="main",
+        token="secret-token",
+        private=False,
+        api=api,
+    )
+
+    assert result.private is False
+    assert api.private is False
+    assert "create_commit" in [call[0] for call in api.calls]
+
+
+def test_explicit_public_upload_refuses_existing_private_repo_before_commit(tmp_path):
+    _, bundle = _validated_fixture(tmp_path)
+    api = FakeApi(exists=True, private=True)
+
+    with pytest.raises(uploader.DatasetUploadError, match="existing dataset repository .* is private"):
+        uploader.upload_validated_bundle(
+            bundle,
+            repo_id="example/public-traces",
+            revision="main",
+            token="secret-token",
+            private=False,
+            api=api,
+        )
+
+    assert [call[0] for call in api.calls] == ["repo_exists", "create_repo", "repo_info"]
+
+
+def test_upload_fails_closed_if_visibility_changes_after_commit(tmp_path):
+    _, bundle = _validated_fixture(tmp_path)
+    api = FakeApi(private=False, post_commit_private=True)
+
+    with pytest.raises(uploader.DatasetUploadError, match="is not public after the upload commit"):
+        uploader.upload_validated_bundle(
+            bundle,
+            repo_id="example/public-traces",
+            revision="main",
+            token="secret-token",
+            private=False,
+            api=api,
+        )
+
+    assert "create_commit" in [call[0] for call in api.calls]
+
+
+def test_upload_rejects_remote_lfs_content_mismatch(tmp_path):
+    _, bundle = _validated_fixture(tmp_path)
+    parquet = next(item for item in bundle.files if item.path_in_repo.endswith(".parquet"))
+    api = FakeApi(remote_overrides={parquet.path_in_repo: {"lfs_sha256": "0" * 64}})
+
+    with pytest.raises(uploader.DatasetUploadError, match="remote LFS SHA256 mismatch"):
+        uploader.upload_validated_bundle(
+            bundle,
+            repo_id="example/private-traces",
+            revision="main",
+            token="secret-token",
+            api=api,
+        )
+
+
+def test_upload_rejects_remote_git_blob_content_mismatch(tmp_path):
+    _, bundle = _validated_fixture(tmp_path)
+    json_file = next(item for item in bundle.files if item.path_in_repo == "dataset_index.json")
+    api = FakeApi(remote_overrides={json_file.path_in_repo: {"blob_id": "0" * 40}})
+
+    with pytest.raises(uploader.DatasetUploadError, match="remote Git blob SHA1 mismatch"):
+        uploader.upload_validated_bundle(
+            bundle,
+            repo_id="example/private-traces",
+            revision="main",
+            token="secret-token",
+            api=api,
+        )
+
+
+def test_public_visibility_requires_explicit_boolean_opt_in(tmp_path):
+    _, bundle = _validated_fixture(tmp_path)
+    api = FakeApi(private=False)
+
+    with pytest.raises(uploader.DatasetUploadError, match="private must be a boolean"):
+        uploader.upload_validated_bundle(
+            bundle,
+            repo_id="example/public-traces",
+            revision="main",
+            token="secret-token",
+            private="false",
+            api=api,
+        )
+
+    assert api.calls == []
 
 
 def test_hf_errors_redact_token(tmp_path):
@@ -416,6 +671,10 @@ def test_hf_errors_redact_token(tmp_path):
         )
     assert "secret-token" not in str(captured.value)
     assert "[REDACTED]" in str(captured.value)
+    formatted = "".join(traceback.format_exception(captured.value))
+    assert "secret-token" not in formatted
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
 
 
 def test_cli_error_output_redacts_token(monkeypatch, capsys):
@@ -439,3 +698,37 @@ def test_cli_error_output_redacts_token(monkeypatch, capsys):
     assert status == 2
     assert "secret-token" not in captured.out + captured.err
     assert "[REDACTED]" in captured.err
+
+
+def test_cli_public_flag_is_explicit_and_private_remains_default(monkeypatch, capsys):
+    monkeypatch.setenv("GEMMA4_UPLOAD_TEST_TOKEN", "secret-token")
+    observed = []
+
+    def fake_upload(*_args, **kwargs):
+        observed.append(kwargs["private"])
+        return uploader.UploadResult(
+            repo_id=kwargs["repo_id"],
+            requested_revision=kwargs["revision"],
+            commit_oid="d" * 40,
+            dataset_index_sha256="e" * 64,
+            file_count=7,
+            private=kwargs["private"],
+        )
+
+    monkeypatch.setattr(uploader, "upload_dataset", fake_upload)
+    common = [
+        "--dataset-path",
+        "/unused/dataset_index.json",
+        "--repo-id",
+        "example/traces",
+        "--token-env",
+        "GEMMA4_UPLOAD_TEST_TOKEN",
+    ]
+
+    assert uploader.main(common) == 0
+    assert uploader.main([*common, "--public"]) == 0
+
+    assert observed == [True, False]
+    output = capsys.readouterr().out
+    assert "PRIVATE=true" in output
+    assert "PRIVATE=false" in output

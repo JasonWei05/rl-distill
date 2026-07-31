@@ -9,6 +9,74 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-07-31 — Gemma 4 source traces complete; cross-engine target policy and preparation tooling
+
+**Scope.** Preparation only for the two Gemma 4 distillation-vs.-RL lines. No 750-step
+distillation, benchmark production, post-distillation RL, or model training run was started. The
+canonical status and ambiguity ledger are in
+[`GEMMA4_DISTILL_VS_RL_EXPERIMENTS.md`](GEMMA4_DISTILL_VS_RL_EXPERIMENTS.md).
+
+**Complete local vLLM source bundles.** Both directions contain 48,615 train plus 1,000 validation
+rows (1,216 train and 25 validation shards), five responses per registered question unit, exact
+stored token IDs/response masks, and top-128 full-vocabulary-normalized vLLM targets:
+
+| Direction | Dataset index | Experiment | Response tokens | Local root |
+|---|---|---|---:|---|
+| E4B-RL step 100 → E2B | `8b5712e0f5dea3388340a9bc91a6ceee40ff2ff990e66b7238090e240daeda6c` | `b515965fcdc31caebae1e71cf696731f4271182bdaca8af8326888d0b196af92` | 14,049,865 | `/lambda/nfs/Jason-scale/rl-distill-traces/gemma4-e4b-rl100-topk128` |
+| E2B base → E4B | `d170166abad89588880f5c0a9eac43006f9a32bbe27cec28d7eb97c65288dbcc` | `f77e9dd611371030cc7752d4f4d0c92d4890448d9fe48594efdf3e223a5a409e` | 8,257,057 | `/lambda/nfs/Jason-scale/rl-distill-traces/gemma4-e2b-base-topk128` |
+
+Both indexes preserve the historical 9,723-row train roster, 200 validation UIDs, 180 duplicate-text
+train occurrences, and seven train/validation text overlaps. Clean evaluation must also report the
+193-question non-overlap subset. Sampling is temperature/top-p 1.0, top-k disabled, with
+4,096/8,192/12,288 prompt/response/context caps. The tokenizer and template hashes are
+`f3ab24e73e9022f7b8d77113f543debd3779ef1e96c6452c68aaa9f3e6b81d17` and
+`27b8801d8b61a413a9bb3b54b6f55e16217eff3e55f7c560377c8a162dd63c1c`.
+
+**HF publication status.** Both source bundles are public and independently verified at immutable
+commits:
+
+| Direction | Public repository | Commit | Dataset index |
+|---|---|---|---|
+| E4B-RL step 100 → E2B | `JWei05/gemma4-e4b-rl100-topk128-traces` | `2b6e49a0a456ee9d67b16a1dc61785562bee90c9` | `8b5712e0f5dea3388340a9bc91a6ceee40ff2ff990e66b7238090e240daeda6c` |
+| E2B base → E4B | `JWei05/gemma4-e2b-base-topk128-traces` | `e32aaa02681ae83b3d7256b1b155c9084da2f289` | `d170166abad89588880f5c0a9eac43006f9a32bbe27cec28d7eb97c65288dbcc` |
+
+Each commit contains exactly 2,485 registered files. Independent remote verification compared every
+path and size, LFS SHA-256 for every Parquet, and Git blob SHA-1 for every non-LFS file. The initial
+private E2B upload had previously failed closed with `Private repository storage limit reached`, and
+the corresponding early E4B upload-result log was empty; those facts remain historical rather than
+current publication status.
+
+**Cross-engine audit.** Expanded vLLM-versus-unsharded-HF diagnostics used exact stored sequences and
+covered 32 traces per teacher: 1,870 E2B positions and 1,975 E4B positions. The two unsharded-HF
+paths (native Gemma 4 forward and manual projection) had max absolute error 0. Tie-safe top-1 was 0.99572/0.99747,
+top-128 overlap 0.98504/0.97654, weighted absolute log-probability delta mean 0.017996/0.010180,
+probability-L1 mean 0.017343/0.010221, and sampled-token delta p95 0.09419/0.06082 for E2B/E4B.
+Both pass the calibrated diagnostic thresholds, but the engines are not bit-identical.
+
+**Target policy.** Keep each vLLM bundle immutable as the generation record. The intended primary
+distillation path preserves the exact stored IDs and derives a separate unsharded-HF top-128 target overlay
+with full-sequence teacher forcing, BF16+SDPA, causal predecessor scoring, Gemma 4 softcapping, and
+FP32 full-vocabulary normalization. This remains offline precomputation: no online teacher and no
+re-tokenization. A real FSDP2-engine target audit is still required before claiming numerical
+equivalence to the distributed training forward.
+
+**Prepared code.** Added the immutable-index-bound cross-engine audit, a disjoint resumable overlay
+rescorer with exact chunked/native parity mode, focused CPU tests, and guarded operator documentation.
+Added `preflight_gemma4_training_topk_overlay.py` and schema-based launcher routing: an overlay is
+accepted only with its exact source index, parity receipt, target/student identities, and verified
+one-to-one shard/row/token binding. The combined source/overlay/launcher suite passed 48 tests. The
+trace generator now returns a distinct status for deterministic schema failures, and the supervisor
+refuses identical-seed retries. The source-bundle uploader now commits only content-verified staged
+snapshots to an otherwise empty destination branch, pins the observed parent commit, defaults to
+private visibility, and suppresses raw provider exceptions so tokens cannot reappear in formatted
+tracebacks. Bulk GPU rescoring, overlay generation/finalization, and overlay upload were not run.
+
+**Status.** Both immutable source bundles are publicly published and remotely verified. Repository
+review/test/commit/push remains preparation only. Integrated GPU audit, bulk rescore, student smoke,
+both experimental lines, production evaluation, and post-distillation RL remain held.
+
+---
+
 ## 2026-07-30 (fixed run, 100 steps) — verl val-curve parity EXACT; truncation bimodality does NOT reproduce
 
 **Run.** `e1du1oyu` (`nemorl-dapo-gemma4-e2b-pt-DeepScaleR-4of4strict-seed42-8k-local4g-v2`), the

@@ -23,6 +23,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = REPOSITORY_ROOT / "rl-distill-scripts" / "gemma4_topk_distill_fsdp2.sh"
 TEACHER_IDENTITY = "a" * 64
 STUDENT_IDENTITY = "b" * 64
+OVERLAY_SCHEMA_VERSION = "gemma4-hf-bf16-sdpa-topk-overlay-v1"
 
 
 def _write_executable(path: Path, contents: str) -> None:
@@ -74,6 +75,33 @@ def _preflight_output(train_files: list[str], validation_files: list[str], **ove
     return "".join(f"{key}={value}\n" for key, value in values.items())
 
 
+def _write_fake_preflight_python(
+    path: Path,
+    output: str,
+    *,
+    schema_version: str = "gemma4-distill-topk-v1",
+    argv_record: Path | None = None,
+) -> None:
+    record_statement = ""
+    if argv_record is not None:
+        record_statement = f"Path({str(argv_record)!r}).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n"
+    _write_executable(
+        path,
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        f"schema_version = {schema_version!r}\n"
+        "if len(sys.argv) > 1 and sys.argv[1] == '-c':\n"
+        "    print(schema_version)\n"
+        "else:\n"
+        + "    "
+        + record_statement.replace("\n", "\n    ").rstrip()
+        + ("\n" if record_statement else "")
+        + f"    print({output!r}, end='')\n",
+    )
+
+
 def _run_launcher(environment: dict[str, str], *arguments: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(LAUNCHER), *arguments],
@@ -92,10 +120,7 @@ def test_launcher_uses_preflight_hydra_lists_without_eval(tmp_path: Path) -> Non
     train_files = [f"$(touch {sentinel})", "/tmp/train with spaces.parquet"]
     validation_files = ["/tmp/validation.parquet"]
     fake_python = fake_bin / "preflight-python"
-    _write_executable(
-        fake_python,
-        "#!/usr/bin/env python3\n" + "print(" + repr(_preflight_output(train_files, validation_files)) + ", end='')\n",
-    )
+    _write_fake_preflight_python(fake_python, _preflight_output(train_files, validation_files))
     environment["PYTHON_BIN"] = str(fake_python)
 
     result = _run_launcher(environment)
@@ -112,18 +137,13 @@ def test_launcher_uses_preflight_hydra_lists_without_eval(tmp_path: Path) -> Non
 def test_launcher_rejects_identity_changed_after_preflight(tmp_path: Path) -> None:
     environment, fake_bin = _base_environment(tmp_path)
     fake_python = fake_bin / "preflight-python"
-    _write_executable(
+    _write_fake_preflight_python(
         fake_python,
-        "#!/usr/bin/env python3\n"
-        + "print("
-        + repr(
-            _preflight_output(
-                ["/tmp/train.parquet"],
-                ["/tmp/validation.parquet"],
-                STUDENT_IDENTITY_SHA256="f" * 64,
-            )
-        )
-        + ", end='')\n",
+        _preflight_output(
+            ["/tmp/train.parquet"],
+            ["/tmp/validation.parquet"],
+            STUDENT_IDENTITY_SHA256="f" * 64,
+        ),
     )
     environment["PYTHON_BIN"] = str(fake_python)
 
@@ -161,3 +181,59 @@ def test_launcher_rejects_post_preflight_hydra_overrides(tmp_path: Path) -> None
     assert result.returncode == 2
     assert "Hydra overrides are disabled" in result.stderr
     assert not marker.exists()
+
+
+def test_launcher_routes_overlay_schema_to_strict_overlay_preflight(tmp_path: Path) -> None:
+    environment, fake_bin = _base_environment(tmp_path)
+    source_index = tmp_path / "source-dataset-index.json"
+    environment["SOURCE_DATASET_INDEX"] = str(source_index)
+    fake_python = fake_bin / "preflight-python"
+    argv_record = tmp_path / "preflight-argv.json"
+    _write_fake_preflight_python(
+        fake_python,
+        _preflight_output(["/tmp/overlay-train.parquet"], ["/tmp/overlay-validation.parquet"]),
+        schema_version=OVERLAY_SCHEMA_VERSION,
+        argv_record=argv_record,
+    )
+    environment["PYTHON_BIN"] = str(fake_python)
+
+    result = _run_launcher(environment)
+
+    assert result.returncode == 0, result.stderr
+    argv = json.loads(argv_record.read_text(encoding="utf-8"))
+    assert argv[0].endswith("/data/preflight_gemma4_training_topk_overlay.py")
+    source_flag = argv.index("--source-dataset-index")
+    assert argv[source_flag + 1] == str(source_index)
+    assert 'data.train_files=["/tmp/overlay-train.parquet"]' in result.stdout.splitlines()
+
+
+def test_launcher_requires_explicit_source_index_for_overlay(tmp_path: Path) -> None:
+    environment, fake_bin = _base_environment(tmp_path)
+    fake_python = fake_bin / "preflight-python"
+    _write_fake_preflight_python(
+        fake_python,
+        _preflight_output(["/tmp/train.parquet"], ["/tmp/validation.parquet"]),
+        schema_version=OVERLAY_SCHEMA_VERSION,
+    )
+    environment["PYTHON_BIN"] = str(fake_python)
+
+    result = _run_launcher(environment)
+
+    assert result.returncode == 2
+    assert "SOURCE_DATASET_INDEX" in result.stderr
+
+
+def test_launcher_rejects_source_index_for_vllm_bundle(tmp_path: Path) -> None:
+    environment, fake_bin = _base_environment(tmp_path)
+    environment["SOURCE_DATASET_INDEX"] = str(tmp_path / "unexpected-source.json")
+    fake_python = fake_bin / "preflight-python"
+    _write_fake_preflight_python(
+        fake_python,
+        _preflight_output(["/tmp/train.parquet"], ["/tmp/validation.parquet"]),
+    )
+    environment["PYTHON_BIN"] = str(fake_python)
+
+    result = _run_launcher(environment)
+
+    assert result.returncode == 2
+    assert "valid only for an unsharded-HF overlay" in result.stderr
