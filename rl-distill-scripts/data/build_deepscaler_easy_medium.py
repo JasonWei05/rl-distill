@@ -78,7 +78,7 @@ def main() -> None:
         va_v = to_verl(va)
         va_v.to_parquet(f_va, index=False)
         pd.concat([va_v] * 16, ignore_index=True).to_parquet(f_vx, index=False)
-        files[name] = [f_tr, f_va, f_vx]
+        files[name] = [f_tr, f_va]  # x16 replica stays LOCAL only (mean@16 prep artifact)
         vb = va["n_correct"].value_counts()
         tb = tr["n_correct"].value_counts()
         print(f"{name}: train {len(tr)} val {len(va)}")
@@ -108,8 +108,9 @@ Creation (seed 42 throughout):
 3. 10,000 sampled uniformly from the lenient 4/4 bucket (10,053 available).
 4. 500 sampled uniformly as validation; remaining 9,500 are train.
 
-Files: `*_train.parquet`, `*_val500.parquet`, `*_val500_x16.parquet` (16x replica
-for mean@16 validation). verl format: data_source "math" (routes to the repo's
+Files: `*_train.parquet` and `*_val500.parquet` (500 unique held-out questions).
+For mean@16 validation, replicate the val rows 16x locally (verl samples one
+response per row). verl format: data_source "math" (routes to the repo's
 math_verify scorer), prompt = single user message, reward_model.ground_truth,
 extra_info carries lenient/strict pass counts.
 
@@ -137,9 +138,10 @@ questions may appear in this set's TRAIN split (and vice versa). Do not evaluate
 a Medium-trained model on Easy-10k's val (or vice versa); each set is
 self-consistent only with its own split.
 
-Files: `*_train.parquet`, `*_val500.parquet`, `*_val500_x16.parquet` (16x replica
-for mean@16 validation). verl format: data_source "math", prompt = single user
-message, reward_model.ground_truth, extra_info carries lenient/strict pass counts.
+Files: `*_train.parquet` and `*_val500.parquet` (500 unique held-out questions).
+For mean@16 validation, replicate the val rows 16x locally. verl format:
+data_source "math", prompt = single user message, reward_model.ground_truth,
+extra_info carries lenient/strict pass counts.
 
 Built by `rl-distill-scripts/data/build_deepscaler_easy_medium.py` in
 JasonWei05/rl-distill.
