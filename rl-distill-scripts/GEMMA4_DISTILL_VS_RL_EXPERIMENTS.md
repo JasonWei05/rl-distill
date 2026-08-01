@@ -1103,9 +1103,34 @@ test "${GEMMA4_E2B_TO_E4B_PRODUCTION_AUTHORIZED}" = YES && \
   LR=2e-6 LR_WARMUP_STEPS=100 LR_SCHEDULER_TYPE=linear MIN_LR_RATIO=0.1 \
   TOTAL_EPOCHS=2 TOTAL_TRAINING_STEPS=750 SAVE_FREQ=250 TEST_FREQ=10 \
   PROJECT_NAME=gemma4-distill-vs-rl EXP_NAME=e2b-base-to-e4b-topk128-lr2e6-linear-b128-2ep-750-v128-seed42 \
-  HF_PUSH_ENABLE=true HF_PUSH_REPO=JWei05/gemma4-e2b-base-to-e4b-topk128-distill \
+  HF_PUSH_ENABLE=true HF_PUSH_PRIVATE=false \
+  HF_PUSH_REPO=JWei05/gemma4-e2b-base-to-e4b-topk128-distill \
   rl-distill-scripts/gemma4_topk_distill_fsdp2.sh
 ```
+
+### Completed E2B-base-to-E4B production run
+
+The final run used code revision `2f88a4ff` and W&B run `85803e85` under the full name
+`e2b-base-to-e4b-topk128-lr2e6-linear-b128-2ep-750-normalcudnn-v1-2f88a4ff-20260731`.
+It completed all 750 optimizer steps on July 31, 2026 without an OOM or non-finite update. Training
+loss fell from `0.194667` at step 1 to `0.078773` at step 750; validation loss fell from `0.209595`
+at step 0 to `0.093663` at step 750. The final learning rate was `2e-7` and final gradient norm was
+`1.5481`.
+
+W&B correctly records the run as finished. The process returned nonzero only after training because
+the deferred checkpoint uploader targeted a private repository and exhausted its private-storage
+quota. This left the local supervisor in `completion_unverified` even though all training and save
+steps had completed. The final step-750 Transformers export was subsequently uploaded manually to
+the now-public model repository at revision `7bbd25b1df4160afbf94ab9d55cab07a4fb4a097` and verified
+through unauthenticated downloads. The immutable HF-BF16 training overlay is public at revision
+`4f60c51340eb3a58efddff26e6a086a92c6e2123`; its dataset index SHA-256 is
+`124a1b904b60963fb2b1d422107bec593a8ef1053cce34fff40bfb6314d1a16e`.
+
+Only the final step-750 loadable model is published in the model repository. Steps 250 and 500
+remain local diagnostic checkpoints and are not registered comparison endpoints.
+The six-file BF16 Transformers export is also checksum-matched on persistent NFS under
+`/lambda/nfs/utah/rl-distill/checkpoints/gemma4-distill-vs-rl/e2b-base-to-e4b-topk128-lr2e6-linear-b128-2ep-750-normalcudnn-v1-2f88a4ff-20260731/step_750_huggingface_bf16`.
+No FSDP2 model shards, optimizer shards, or exact-resume state are preserved there.
 
 Evaluation remains similarly held. After D33-D40 are resolved, use `eval_math_passk.py` for the
 64-sample generation/scoring pass, `eval_gemma4_math.py` for immutable offline re-aggregation, and
@@ -1443,8 +1468,9 @@ defaults are proposals, not silently adopted decisions.
   equivalence; that requires a separate real-engine audit.
 - **2026-07-31 — E2B-to-E4B preparation reached the clean-HEAD smoke boundary.** The complete
   training-engine overlay, parity, source+overlay preflight, sequential real-FSDP2 audit, focused CPU
-  tests, and guarded operator documentation are prepared. The next action is a fresh clean-HEAD
-  receipt and three-step no-upload E4B gate; the 750-step run has not started.
+  tests, and guarded operator documentation were prepared. At this historical checkpoint the next
+  action was a fresh clean-HEAD receipt and three-step no-upload E4B gate; later entries supersede
+  its then-current statement that the 750-step run had not started.
 - **2026-07-31 — Historical E4B-RL-to-E2B run and three-model evaluation completed.** The final
   step-750 student was compared against base E2B and direct E2B RL on the priority math and OOD
   matrix. This training run predates the newest FSDP2 safety contract and remains labeled as such.
@@ -1476,3 +1502,13 @@ defaults are proposals, not silently adopted decisions.
   gradient spikes are observational metrics rather than a relaunch condition. The deterministic-
   cuDNN/report-v5 experiment was reverted; the supervisor continues to fail on non-finite values,
   crashes, stalls, checkpoint failures, and upload failures.
+- **2026-08-01 — E2B-base-to-E4B production distillation completed.** W&B run `85803e85` finished
+  all 750 steps under the `2e-6` warmup/linear-decay schedule. Validation loss improved from
+  `0.209595` to `0.093663`. The post-training process error came only from the private Hub storage
+  quota and does not indicate a failed optimizer step or checkpoint save.
+- **2026-08-01 — Final model and training overlay published publicly.** The loadable step-750 model
+  and model card are pinned at `7bbd25b1df4160afbf94ab9d55cab07a4fb4a097`. The exact HF-BF16
+  training overlay and dataset card are pinned at `4f60c51340eb3a58efddff26e6a086a92c6e2123`.
+- **2026-08-01 — Preservation limited to BF16 model weights.** Persistent NFS retains the final
+  six-file Transformers export only. The attempted full resumable-checkpoint copy was removed; no
+  FSDP2 or optimizer state is part of the durable artifact set.
