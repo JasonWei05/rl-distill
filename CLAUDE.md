@@ -91,9 +91,11 @@ subclasses verl's `SFTTrainer` and swaps the loss via `set_loss_fn()` — no ver
 ### Reward scoring
 
 Math RL/eval routes through `verl/utils/reward_score/math_verify.py` (`LatexExtractionConfig`
-only — **only `\boxed{}` answers score**; bare numbers do not). Strict single-box grading is the
-default (`VERL_MATH_VERIFY_STRICT_BOXED=0` restores lenient): responses with zero or multiple
-`\boxed{}` score 0. `verl/utils/reward_score/__init__.py` routes `math`, `math_dapo`, `math500`,
+only — **only `\boxed{}` answers score**; bare numbers do not). Boxed-only grading is the
+default (`VERL_MATH_VERIFY_STRICT_BOXED=0` restores lenient): a response with zero `\boxed{}`
+scores 0, and when it has multiple boxes only the **last well-formed** one is graded (so a model
+can correct an earlier answer). Grading is `math_verify` OR a bounded Miles-style SymPy fallback
+in `verl/utils/reward_score/miles_sympy.py`. `verl/utils/reward_score/__init__.py` routes `math`, `math_dapo`, `math500`,
 `olympiadbench`, `minervamath`, `gsm8k`, `beyondaime`, and any `aime*` source to it, returning
 `{"score": s, "acc": s > 0.5, "pred": <extracted boxed answer>}` (`pred` feeds verl's maj@N
 machinery). CPU test: `tests/utils/reward_score/test_math_verify_strict_boxed_on_cpu.py`.

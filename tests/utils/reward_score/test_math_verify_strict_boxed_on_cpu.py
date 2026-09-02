@@ -12,17 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""STRICT boxed-only scoring in verl.utils.reward_score.math_verify (fork change).
+"""Boxed-only scoring in verl.utils.reward_score.math_verify (fork change).
 
 compute_score is strict by default (VERL_MATH_VERIFY_STRICT_BOXED, default on):
-  * score only a SINGLE \\boxed{} answer,
-  * 0 boxes OR >=2 boxes -> 0.0 (no bare-LaTeX-echo credit, no multi-box hedging),
-  * otherwise run math-verify (sympy) on just that one box vs the gold.
+  * require at least one well-formed \\boxed{} or \\fbox{},
+  * score only the last well-formed box so a model can correct itself,
+  * accept if either math_verify or the bounded Miles SymPy grader succeeds,
+  * otherwise return 0.0 without crediting bare-LaTeX echoes.
 
 Motivation (see PROGRESS_LOG 2026-07-22): the old code parsed the *whole* output with
 LatexExtractionConfig and took max over all extracted candidates, so a model could score
-"correct" by echoing a bare expression with no box, or by hedging with several boxes.
+"correct" by echoing a bare expression with no box, or by placing the correct
+answer in any box rather than its final answer.
 """
+
+import time
 
 import pytest
 
@@ -36,7 +40,13 @@ def _warm_verify_pool():
     A cold spawn (worker re-imports Python + math-verify + sympy) can exceed the 30s per-call
     timeout, making the first sympy-backed compute_score() return 0 spuriously. Warm it once.
     """
-    mv._get_pool().submit(mv._verify_in_subprocess, "\\boxed{1}", "\\boxed{1}").result()
+    mv._get_pool().submit(
+        mv._verify_in_subprocess,
+        "\\boxed{15x - 80}",
+        "\\boxed{(15)x - 80.}",
+        "15x - 80",
+        "(15)x - 80.",
+    ).result()
     yield
 
 
@@ -56,30 +66,37 @@ def test_all_boxed_contents(text, expected):
     assert mv._all_boxed_contents(text) == expected
 
 
-# ---- strict scoring (uses sympy verify) ---------------------------------------------
+# ---- boxed-only scoring (uses sympy verify) -----------------------------------------
 @pytest.mark.parametrize(
     "output,gold,expected",
     [
-        (r"reasoning... The final answer is $\boxed{42}$.", "42", 1.0),   # genuine single box
-        (r"The final answer is $\boxed{20}$.", "17", 0.0),                # single, wrong
-        (r"The final answer is $\log_2\frac{1}{16}$.", "-4", 0.0),        # NO box -> 0 (was a false positive)
-        (r"Answer is $\boxed{41}$ or $\boxed{42}$.", "42", 0.0),          # multi-box hedge -> 0
-        (r"$\boxed{1729 + 867}$", "2596", 1.0),                           # single box, sympy-equal
-        (r"$\boxed{\frac{1}{2}}$", "0.5", 1.0),                           # equivalent forms
+        (r"reasoning... The final answer is $\boxed{42}$.", "42", 1.0),
+        (r"The final answer is $\boxed{20}$.", "17", 0.0),
+        (r"The final answer is $\log_2\frac{1}{16}$.", "-4", 0.0),
+        (r"First $\boxed{41}$, but correcting: $\boxed{42}$.", "42", 1.0),
+        (r"First $\boxed{42}$, but final answer: $\boxed{41}$.", "42", 0.0),
+        (r"Correct $\boxed{42}$, then malformed $\boxed{", "42", 1.0),
+        (r"$\boxed{1729 + 867}$", "2596", 1.0),
+        (r"$\boxed{\frac{1}{2}}$", "0.5", 1.0),
+        (r"$\boxed{(15)x - 80.}$", "15x - 80", 1.0),  # SymPy fallback only
     ],
 )
 def test_strict_compute_score(output, gold, expected):
     assert mv.compute_score(output, gold) == expected
 
 
-def test_strict_zero_and_multi_box_short_circuit_without_sympy(monkeypatch):
-    # The len(boxes)!=1 guard must return 0.0 without ever submitting to the verify pool.
+def test_zero_box_short_circuits_without_sympy(monkeypatch):
+    # A response with no well-formed box returns 0.0 without submitting to the verify pool.
     def _boom(*a, **k):
-        raise AssertionError("verify pool should not be reached for 0/multi-box outputs")
+        raise AssertionError("verify pool should not be reached for a zero-box output")
 
     monkeypatch.setattr(mv, "_get_pool", _boom)
     assert mv.compute_score("no box here, answer 42", "42") == 0.0
-    assert mv.compute_score(r"$\boxed{1}$ $\boxed{2}$", "2") == 0.0
+
+
+def test_extract_prediction_uses_last_well_formed_box():
+    assert mv.extract_prediction(r"First \boxed{1}, finally \fbox{2}.") == "2"
+    assert mv.extract_prediction(r"Correct \boxed{2}, then malformed \boxed{") == "2"
 
 
 def test_strict_flag_off_restores_lenient(monkeypatch):
@@ -87,5 +104,17 @@ def test_strict_flag_off_restores_lenient(monkeypatch):
     # (unboxed) LaTeX expression that evaluates to the gold as 1.0; strict (default) scores it 0.
     monkeypatch.setenv("VERL_MATH_VERIFY_STRICT_BOXED", "0")
     assert mv.compute_score(r"The final answer is $\log_2\frac{1}{16}$.", "-4") == 1.0   # lenient: 1.0
-    # (multi-box hedging is NOT a clean lenient win: math_verify.parse returns a single candidate — the
-    # first box 41 here — so lenient also scores this 0; strict likewise returns 0 via the len!=1 guard.)
+
+
+def test_sympy_fallback_has_hard_timeout(monkeypatch):
+    from verl.utils.reward_score import miles_sympy
+
+    def _hang(*_args):
+        time.sleep(10)
+        return True
+
+    monkeypatch.setattr(miles_sympy, "grade_answer_sympy", _hang)
+    monkeypatch.setenv("VERL_MATH_SYMPY_TIMEOUT", "0.1")
+    started = time.monotonic()
+    assert mv._grade_answer_sympy_with_timeout("1", "2") == 0.0
+    assert time.monotonic() - started < 1.0
