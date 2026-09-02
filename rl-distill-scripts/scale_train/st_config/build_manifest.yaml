@@ -38,6 +38,45 @@ build_configs:
     remote:
       registry: 692474966980.dkr.ecr.us-west-2.amazonaws.com
       repository: scale_train/shared/training/tmp
+  train-rl-distill-verl:
+    build_context:
+      root: ../../../
+      include_paths:
+        - .
+      dockerfile: rl-distill-scripts/scale_train/st_config/Dockerfile
+      dockerignore: rl-distill-scripts/scale_train/st_config/.dockerignore.verl
+    local:
+      repository: scale_train/shared/training/tmp
+      tag: rl-distill-verl
+    remote:
+      registry: 692474966980.dkr.ecr.us-west-2.amazonaws.com
+      repository: scale_train/shared/training/tmp
+  train-rl-distill-gemma4-rl:
+    build_context:
+      root: ../../../
+      include_paths:
+        - .
+      dockerfile: rl-distill-scripts/scale_train/st_config/Dockerfile.gemma4-rl
+      dockerignore: rl-distill-scripts/scale_train/st_config/.dockerignore.gemma4-rl
+    local:
+      repository: scale_train/shared/training/tmp
+      tag: rl-distill-gemma4-rl
+    remote:
+      registry: 692474966980.dkr.ecr.us-west-2.amazonaws.com
+      repository: scale_train/shared/training/tmp
+  train-rl-distill-gemma4-trace:
+    build_context:
+      root: ../../../
+      include_paths:
+        - .
+      dockerfile: rl-distill-scripts/scale_train/st_config/Dockerfile.gemma4-trace
+      dockerignore: rl-distill-scripts/scale_train/st_config/.dockerignore.verl
+    local:
+      repository: scale_train/shared/training/tmp
+      tag: rl-distill-gemma4-trace
+    remote:
+      registry: 692474966980.dkr.ecr.us-west-2.amazonaws.com
+      repository: scale_train/shared/training/tmp
   train-rl-distill-nemorl:
     build_context:
       root: ../../../

@@ -91,6 +91,12 @@ def _redacted(command: list[str], secret_keys: set[str]) -> list[str]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cluster", choices=["eks", "gke", "local"], default="eks")
+    parser.add_argument(
+        "--build-env",
+        choices=["local", "remote"],
+        default="local",
+        help="Build locally or submit the Docker context to ScaleTrain's remote image builder",
+    )
     parser.add_argument("--n-instances", type=int, default=2)
     parser.add_argument(
         "--gpus-per-instance",
@@ -106,6 +112,11 @@ def main() -> None:
     parser.add_argument("--allow-borrowing", action="store_true")
     parser.add_argument("--active-deadline-hours", type=int, default=240)
     parser.add_argument("--build-config-key", default="train-rl-distill")
+    parser.add_argument(
+        "--image",
+        default=None,
+        help="Existing remote image URI; skips the local build and push when supplied",
+    )
     parser.add_argument("--build-manifest-path", default="st_config/build_manifest.yaml")
     parser.add_argument("--env-build-values-path", default="st_config/.env.build.values")
     parser.add_argument("--run-file", default="run_gemma3_12b_pt_topk128_distill.sh")
@@ -171,13 +182,15 @@ def main() -> None:
         run_file = str(local_run_file)
 
     command = ["sudo", "-E"] + [f"{key}={value}" for key, value in sorted(env.items())] + ["bash", run_file]
-    secret_keys = dotenv_keys | {key for key in env if "TOKEN" in key or "KEY" in key}
+    secret_keys = dotenv_keys | {
+        key for key in env if key.upper().endswith(("_TOKEN", "_API_KEY", "_SECRET", "_PASSWORD"))
+    }
 
     user = os.getenv("USER", "unknown")
     start = datetime.now().replace(microsecond=0).strftime("%y-%m-%d-%H-%M-%S")
     tmp_dir = Path.home() / "tmp_st_job_configs_rl_distill"
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    job_config_path = tmp_dir / f"rl_distill_st_job_config_{start}.yaml"
+    job_config_path = tmp_dir / f"rl_distill_st_job_config_{start}_{os.getpid()}.yaml"
 
     job = JOB_CONFIG.copy()
     job.update(
@@ -196,6 +209,10 @@ def main() -> None:
 
     with job_config_path.open("w") as f:
         yaml.safe_dump(job, f, default_flow_style=False)
+    # The rendered job command includes runtime credentials loaded from the
+    # dotenv file. Keep the short-lived config private until the launcher
+    # removes it in its finally block.
+    job_config_path.chmod(0o600)
 
     print(f"build_manifest: {build_manifest}")
     print(f"env_build_values: {env_build_values}")
@@ -206,7 +223,7 @@ def main() -> None:
         "scale-train",
         "train",
         "--build-env",
-        "local",
+        args.build_env,
         "--run-env",
         run_env,
         "--build-manifest-path",
@@ -218,6 +235,8 @@ def main() -> None:
         "--env-build-values-path",
         str(env_build_values),
     ]
+    if args.image:
+        launch_cmd.extend(["--image", args.image])
     print(launch_cmd)
 
     if args.dry_run:

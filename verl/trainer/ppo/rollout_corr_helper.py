@@ -611,6 +611,10 @@ def compute_rollout_correction_weights(
         rollout_is_threshold=rollout_is_threshold_upper,
         rollout_is_threshold_lower=rollout_is_threshold_lower,
     )
+    if not use_icepop:
+        # Explicit name for dashboards: this is the fraction of valid weights
+        # capped by upper-bound TIS, not a hard token rejection rate.
+        metrics["rollout_is_truncation_ratio"] = metrics["rollout_is_ratio_fraction_high"]
     if use_icepop:
         assert rollout_is_threshold_lower is not None
         oob_mask = (raw_rollout_is_weights < rollout_is_threshold_lower) | (

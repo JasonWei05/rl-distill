@@ -35,7 +35,7 @@ echo "### [$(date +%H:%M:%S)] install gemma4-capable vllm/transformers + verl tr
 uv pip install \
   "${VLLM_SPEC}" "transformers==5.14.1" "tensordict==0.13.0" \
   accelerate peft "datasets>=3" codetiming hydra-core omegaconf pyarrow pylatexenc torchdata \
-  math-verify \
+  boto3 math-verify \
   ninja \
   "ray[default]" wandb \
   --extra-index-url "${PT_INDEX}" --index-strategy unsafe-best-match
@@ -43,6 +43,12 @@ uv pip install \
 # and dies with FileNotFoundError('ninja') without it. We ALSO disable the flashinfer sampler at
 # runtime (VLLM_USE_FLASHINFER_SAMPLER=0 in the run scripts) — JIT-compiling cu129 flashinfer with
 # a mismatched host nvcc crashed workers natively on ScaleTrain p5 pods.
+
+# vLLM 0.25.1's R3 capturer already understands Gemma 4's ``top_k_experts``
+# while sizing buffers, but one logger argument still dereferences the
+# Qwen-style ``num_experts_per_tok`` name and crashes the engine at startup.
+# Apply a version-gated, idempotent patch and fail closed if the wheel changes.
+python3 rl-distill-scripts/patch_vllm_gemma4_r3.py
 
 echo "### [$(date +%H:%M:%S)] install verl editable (--no-deps: keep our resolved versions)"
 uv pip install --no-deps -e .
@@ -54,13 +60,21 @@ print("torch", torch.__version__, "| cuda", torch.version.cuda, "| avail", torch
 print("vllm", vllm.__version__, "| transformers", transformers.__version__, "| ray", ray.__version__)
 PY
 
-echo "### [$(date +%H:%M:%S)] does transformers 5.14 recognize gemma4 config? (small download)"
+echo "### [$(date +%H:%M:%S)] does transformers 5.14 recognize all matrix configs?"
 python3 - <<'PY'
 from transformers import AutoConfig
-c = AutoConfig.from_pretrained("google/gemma-4-E2B")
-print("gemma-4-E2B model_type:", c.model_type, "| arch:", getattr(c, "architectures", None))
-tc = getattr(c, "text_config", None)
-print("text_config model_type:", getattr(tc, "model_type", None) if tc else None)
+for model, revision in (
+    ("google/gemma-4-E2B", "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"),
+    ("google/gemma-4-E4B", "411aa17b749aa952df1359d2dcea73917a544d9a"),
+    ("google/gemma-4-12B", "023679ed352de9bb66cc873c9009ce3482585c08"),
+):
+    c = AutoConfig.from_pretrained(model, revision=revision)
+    tc = getattr(c, "text_config", None)
+    print(model, "model_type:", c.model_type, "| arch:", getattr(c, "architectures", None))
+    print("  text_config model_type:", getattr(tc, "model_type", None) if tc else None)
+
+from transformers.models.gemma4_unified.modeling_gemma4_unified import Gemma4UnifiedTextDecoderLayer
+print("unified wrap class:", Gemma4UnifiedTextDecoderLayer.__name__)
 PY
 
 echo "### [$(date +%H:%M:%S)] does vllm register a gemma4 model class?"
@@ -72,8 +86,10 @@ try:
     from vllm.model_executor.models.registry import ModelRegistry
     archs = ModelRegistry.get_supported_archs()
     print("gemma4 archs registered:", [a for a in archs if "gemma4" in a.lower() or "Gemma4" in a])
+    assert "Gemma4ForConditionalGeneration" in archs
+    assert "Gemma4UnifiedForConditionalGeneration" in archs
 except Exception as e:
-    print("registry check skipped:", e)
+    raise RuntimeError(f"gemma4 registry check failed: {e}") from e
 PY
 
 echo "### [$(date +%H:%M:%S)] GEMMA4_ENV_CORE_OK"

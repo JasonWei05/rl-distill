@@ -186,7 +186,14 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         # wait for everyone to load checkpoints
         torch.distributed.barrier()
 
-    def save_checkpoint(self, local_path: str, hdfs_path: str = None, global_step: int = 0, max_ckpt_to_keep=None):
+    def save_checkpoint(
+        self,
+        local_path: str,
+        hdfs_path: str = None,
+        global_step: int = 0,
+        max_ckpt_to_keep=None,
+        save_hf_model: bool | None = None,
+    ):
         """
         Save an FSDP checkpoint for this rank.
 
@@ -316,7 +323,8 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         # wait for everyone to dump to local
         torch.distributed.barrier()
 
-        if self.should_save_hf_model:
+        should_save_hf_model = self.should_save_hf_model if save_hf_model is None else save_hf_model
+        if should_save_hf_model:
             # Only rank 0 will save hf model and,
             # offload to cpu to save LLMs which may be too large to fit in one GPU
             state_dict = get_fsdp_full_state_dict(self.model, offload_to_cpu=True, rank0_only=True)

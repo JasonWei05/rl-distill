@@ -39,6 +39,8 @@ uv pip install \
     "hydra-core" \
     "wandb" \
     "huggingface_hub" \
+    "boto3" \
+    "awscli" \
     "datasets" \
     "pandas" "pyarrow" \
     "accelerate" \
@@ -55,7 +57,8 @@ uv pip install \
     "fastapi" \
     "latex2sympy2_extended" \
     "math-verify" \
-    "pre-commit"
+    "pre-commit" \
+    "matplotlib"
 
 # 3. flash-attn must be built against the installed torch (no prebuilt wheel
 #    works for torch 2.9 + cu128 + sm_100 at time of writing).
@@ -63,6 +66,17 @@ uv pip install --no-build-isolation "flash-attn==2.8.3"
 
 # 4. verl, editable, no deps (we already pinned the exact stack above).
 uv pip install --no-deps -e .
+INSTALL_LM_EVAL_HARNESS="${INSTALL_LM_EVAL_HARNESS:-auto}"
+if [ "${INSTALL_LM_EVAL_HARNESS}" = "1" ] || {
+    [ "${INSTALL_LM_EVAL_HARNESS}" = "auto" ] && [ -d ./lm-evaluation-harness ]
+}; then
+    uv pip install -e ./lm-evaluation-harness
+elif [ "${INSTALL_LM_EVAL_HARNESS}" = "0" ] || [ "${INSTALL_LM_EVAL_HARNESS}" = "auto" ]; then
+    echo "Skipping lm-evaluation-harness installation for training-only image"
+else
+    echo "INSTALL_LM_EVAL_HARNESS must be one of: auto, 0, 1" >&2
+    exit 2
+fi
 
 # 5. pre-commit hooks (optional, for contributors)
 pre-commit install || true

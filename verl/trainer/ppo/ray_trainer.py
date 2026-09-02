@@ -133,6 +133,11 @@ def compute_response_mask(data: DataProto):
     return attention_mask[:, -response_length:]
 
 
+def should_calculate_old_log_prob_entropy(actor_config) -> bool:
+    """Return whether the old-log-probability pass should materialize entropy."""
+    return bool(actor_config.get("calculate_entropy", False)) or float(actor_config.get("entropy_coeff", 0.0)) != 0.0
+
+
 def compute_advantage(
     data: DataProto,
     adv_estimator: AdvantageEstimator,
@@ -940,7 +945,7 @@ class RayPPOTrainer:
         # sleep all replicas to load checkpoint
         self.checkpoint_manager.sleep_replicas()
 
-    def _save_checkpoint(self):
+    def _save_checkpoint(self, *, save_hf_model: bool | None = None):
         from verl.utils.fs import local_mkdir_safe
 
         # path: given_path + `/global_step_{global_steps}` + `/actor`
@@ -970,8 +975,15 @@ class RayPPOTrainer:
             self.config.trainer.get("max_critic_ckpt_to_keep", None) if not remove_previous_ckpt_in_save else 1
         )
 
+        actor_save_kwargs = {}
+        if save_hf_model is not None:
+            actor_save_kwargs["save_hf_model"] = save_hf_model
         self.actor_rollout_wg.save_checkpoint(
-            actor_local_path, actor_remote_path, self.global_steps, max_ckpt_to_keep=max_actor_ckpt_to_keep
+            actor_local_path,
+            actor_remote_path,
+            self.global_steps,
+            max_ckpt_to_keep=max_actor_ckpt_to_keep,
+            **actor_save_kwargs,
         )
 
         if self.use_critic:
@@ -1236,24 +1248,25 @@ class RayPPOTrainer:
             # step 2: convert from padding to nopadding
             batch_td = left_right_2_no_padding(batch_td)
             # step 3: add meta info
-            tu.assign_non_tensor(batch_td, calculate_entropy=True, compute_loss=False)
+            calculate_entropy = should_calculate_old_log_prob_entropy(self.config.actor_rollout_ref.actor)
+            tu.assign_non_tensor(batch_td, calculate_entropy=calculate_entropy, compute_loss=False)
             output = self.actor_rollout_wg.compute_log_prob(batch_td)
             # gather output
-            entropy = tu.get(output, "entropy")
             log_probs = tu.get(output, "log_probs")
             routed_experts = tu.get(output, "routed_experts")
 
             old_log_prob_mfu = tu.get(output, "metrics")["mfu"]
             # step 4. No padding to padding
-            entropy = no_padding_2_padding(entropy, batch_td)
             log_probs = no_padding_2_padding(log_probs, batch_td)
             # step 5: rebuild a tensordict and convert to dataproto
+            old_log_prob_tensors = {"old_log_probs": log_probs.float()}
+            if calculate_entropy:
+                entropy = tu.get(output, "entropy")
+                entropy = no_padding_2_padding(entropy, batch_td)
+                old_log_prob_tensors["entropys"] = entropy.float()
             if routed_experts is not None:
-                old_log_prob = tu.get_tensordict(
-                    {"old_log_probs": log_probs.float(), "entropys": entropy.float(), "routed_experts": routed_experts}
-                )
-            else:
-                old_log_prob = tu.get_tensordict({"old_log_probs": log_probs.float(), "entropys": entropy.float()})
+                old_log_prob_tensors["routed_experts"] = routed_experts
+            old_log_prob = tu.get_tensordict(old_log_prob_tensors)
             old_log_prob = DataProto.from_tensordict(old_log_prob)
         else:
             old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)

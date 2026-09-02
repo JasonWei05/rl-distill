@@ -73,8 +73,10 @@ class EngineConfig(BaseConfig):
         "use_dynamic_bsz",
         "max_token_len_per_gpu",
         "micro_batch_size_per_gpu",
+        "max_padded_tokens_per_microbatch",
         "infer_max_token_len_per_gpu",
         "infer_micro_batch_size_per_gpu",
+        "infer_max_padded_tokens_per_microbatch",
         "use_fused_kernels",
         "use_remove_padding",
         "forward_only",
@@ -97,9 +99,13 @@ class EngineConfig(BaseConfig):
     # for training
     max_token_len_per_gpu: int = None
     micro_batch_size_per_gpu: int = None
+    # For padded models with fixed microbatches, cap batch_size * padded_length.
+    # Zero disables the cap and preserves fixed-size splitting.
+    max_padded_tokens_per_microbatch: int = 0
     # for inference
     infer_max_token_len_per_gpu: int = None
     infer_micro_batch_size_per_gpu: int = None
+    infer_max_padded_tokens_per_microbatch: int = 0
     # whether use fuse lm head kernel
     use_fused_kernels: bool = False
     # TODO (this may conflict with the one in model config)

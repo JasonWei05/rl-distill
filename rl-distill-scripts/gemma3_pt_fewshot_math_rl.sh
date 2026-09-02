@@ -60,6 +60,7 @@ CKPTS_DIR=${CKPTS_DIR:-"${RAY_DATA_HOME}/ckpts/${project_name}/${exp_name}"}
 HF_PUSH_REPO=${HF_PUSH_REPO:-"JWei05/DAPO-Gemma3-PT-FewShotMath"}
 HF_PUSH_ENABLE=${HF_PUSH_ENABLE:-True}
 HF_PUSH_DELETE_LOCAL_AFTER=${HF_PUSH_DELETE_LOCAL_AFTER:-False}
+HF_PUSH_REQUIRED=${HF_PUSH_REQUIRED:-True}
 ACTOR_CKPT_SAVE_CONTENTS=${ACTOR_CKPT_SAVE_CONTENTS:-"[model,optimizer,extra,hf_model]"}
 DATA_SEED=${DATA_SEED:-42}
 # FSDP2 transformer-layer wrap class. Gemma 3 -> Gemma3DecoderLayer (default); Gemma 4 (VLM) has a
@@ -215,6 +216,7 @@ python3 -m dapo.main_dapo \
     trainer.save_freq=${save_freq} \
     trainer.max_actor_ckpt_to_keep=${max_actor_ckpt_to_keep} \
     +trainer.hf_push.enable=${HF_PUSH_ENABLE} \
+    +trainer.hf_push.required=${HF_PUSH_REQUIRED} \
     +trainer.hf_push.repo_id="${HF_PUSH_REPO}" \
     +trainer.hf_push.private=False \
     +trainer.hf_push.delete_local_after=${HF_PUSH_DELETE_LOCAL_AFTER} \

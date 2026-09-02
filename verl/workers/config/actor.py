@@ -23,6 +23,7 @@ from verl.utils.profiler.config import ProfilerConfig
 from verl.utils.qat import QATConfig
 
 from .engine import (
+    EngineRouterReplayConfig,
     FSDPEngineConfig,
     McoreEngineConfig,
     MindSpeedEngineConfig,
@@ -312,6 +313,25 @@ class FSDPActorConfig(ActorConfig):
         """Validate FSDP actor configuration parameters."""
         super().__post_init__()
         self.engine = self.fsdp_config
+        actor_replay_mode = self.router_replay.mode
+        engine_replay_mode = self.fsdp_config.router_replay.mode
+        if actor_replay_mode != "disabled":
+            if engine_replay_mode not in ("disabled", actor_replay_mode):
+                raise ValueError(
+                    "actor.router_replay.mode and actor.fsdp_config.router_replay.mode must agree, got "
+                    f"{actor_replay_mode!r} and {engine_replay_mode!r}"
+                )
+            object.__setattr__(
+                self.fsdp_config,
+                "router_replay",
+                EngineRouterReplayConfig(
+                    mode=actor_replay_mode,
+                    record_file=self.router_replay.record_file,
+                    replay_file=self.router_replay.replay_file,
+                ),
+            )
+        if self.fsdp_config.router_replay.mode == "R2":
+            raise ValueError("FSDP/FSDP2 supports rollout router replay mode R3 only; R2 remains Megatron-only")
         # Sync strategy to engine config so engine_workers can pick the right FSDP version.
         # EngineConfig.strategy defaults to None, so without this, engine_workers.py always
         # falls back to FSDP1 even when actor.strategy="fsdp2".

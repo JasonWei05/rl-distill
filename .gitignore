@@ -153,3 +153,9 @@ nohup.out
 artifacts/
 # generated figures (make_plots.py regenerates them from wandb)
 plots/*.png
+
+# rl-distill: local runtime state and artifacts (not code; may contain raw job output)
+.scale_train_supervisors/
+*.pdf
+rl-distill-scripts/results/
+/thesis_proposal.md

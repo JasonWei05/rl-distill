@@ -136,7 +136,11 @@ def monkey_patch_compute_logits(model, vocab_size: int):
 
 def _skip_multimodal_reload_weight(name: str) -> bool:
     """Return whether an async rollout reload weight belongs to an unused MM tower."""
-    mm_tokens = ("vision_tower", "multi_modal_projector")
+    # Gemma 4 Unified names its vision branch ``embed_vision`` rather than the
+    # more common ``vision_tower``. Text-only RL rollouts do not consume any of
+    # these branches, and vLLM's unified model intentionally does not expose
+    # every training-side vision parameter (for example pos_embedding).
+    mm_tokens = ("vision_tower", "multi_modal_projector", "embed_vision")
     parts = name.split(".")
     return any(token in parts for token in mm_tokens)
 

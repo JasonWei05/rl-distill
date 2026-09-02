@@ -62,6 +62,21 @@ strategy: fsdp
 # Mixed precision training param dtype
 dtype: bfloat16 # ["bfloat16", "float16"]
 
+# Router replay configuration for FSDP/FSDP2 engines
+router_replay:
+
+  # Required so Hydra instantiates the nested config instead of passing a plain dict
+  _target_: verl.workers.config.EngineRouterReplayConfig
+
+  # FSDP/FSDP2 supports disabled or rollout replay (R3); R2 is Megatron-only
+  mode: disabled
+
+  # Optional route-recording path
+  record_file: null
+
+  # Optional route-replay path
+  replay_file: null
+
 # QAT (Quantization-Aware Training) configuration
 qat:
 

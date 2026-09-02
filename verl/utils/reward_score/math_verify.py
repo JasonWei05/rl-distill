@@ -15,6 +15,7 @@
 import multiprocessing
 import os
 import re
+import signal
 import threading
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
@@ -63,6 +64,14 @@ _ALLOWED_MATH_WORDS = {
     "prod",
     "int",
 }
+
+
+class _SympyFallbackTimeout(BaseException):
+    pass
+
+
+def _sympy_timeout_handler(_signum, _frame):
+    raise _SympyFallbackTimeout
 
 
 def _get_pool():
@@ -138,8 +147,8 @@ def _extract_fast_boxed_answer(model_output: str) -> str | None:
 def _all_boxed_contents(model_output: str) -> list[str]:
     """Return the contents of every \\boxed{}/\\fbox{} (balanced braces) in order.
 
-    Used for STRICT scoring: score only a single boxed answer, so bare-LaTeX echoes
-    (no box) and multi-box hedging get no credit.
+    Used for boxed-only scoring: bare-LaTeX echoes get no credit, and when a
+    response contains corrections, only its last well-formed box is graded.
     """
     outs = []
     for m in _BOXED_COMMAND_PATTERN.finditer(model_output):
@@ -185,39 +194,40 @@ def _is_plausible_ground_truth(ground_truth: str) -> bool:
 def extract_prediction(model_output: str) -> str:
     """Extract the model's final \\boxed{} answer content for maj@k majority voting.
 
-    General extractor (last boxed span, balanced braces) — unlike _extract_fast_boxed_answer
-    this does not reject valid answers, so identical answers vote together. '' if none.
+    Select the last well-formed balanced box, matching compute_score(). Unlike
+    _extract_fast_boxed_answer, this does not reject valid answer contents, so
+    identical answers vote together. Return ``""`` if no valid box exists.
     """
-    matches = list(_BOXED_COMMAND_PATTERN.finditer(model_output))
-    if not matches:
-        return ""
-    start = matches[-1].end()
-    if start >= len(model_output):
-        return ""
-    if model_output[start] == "{":
-        depth = 0
-        end = None
-        for i in range(start, min(len(model_output), start + 1024)):
-            if model_output[i] == "{":
-                depth += 1
-            elif model_output[i] == "}":
-                depth -= 1
-                if depth == 0:
-                    end = i
-                    break
-        if end is None:
-            return ""
-        content = model_output[start + 1 : end].strip()
-    else:
-        end = start
-        while end < len(model_output) and not model_output[end].isspace() and model_output[end] not in "$\n\r":
-            end += 1
-        content = model_output[start:end].strip()
-    return content[:256]
+    boxes = _all_boxed_contents(model_output)
+    return boxes[-1][:256] if boxes else ""
 
 
-def _verify_in_subprocess(ground_truth_boxed: str, model_output: str) -> float:
-    """Run math_verify in a subprocess where signal.alarm() works."""
+def _grade_answer_sympy_with_timeout(prediction: str, ground_truth: str) -> float:
+    """Run the Miles SymPy fallback under a hard worker-local deadline."""
+    from verl.utils.reward_score.miles_sympy import grade_answer_sympy
+
+    timeout = max(0.1, float(os.getenv("VERL_MATH_SYMPY_TIMEOUT", "5.0")))
+    old_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _sympy_timeout_handler)
+    signal.setitimer(signal.ITIMER_REAL, timeout)
+    try:
+        return 1.0 if grade_answer_sympy(prediction, ground_truth) else 0.0
+    except _SympyFallbackTimeout:
+        return 0.0
+    except Exception:
+        return 0.0
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old_handler)
+
+
+def _verify_in_subprocess(
+    ground_truth_boxed: str,
+    model_output: str,
+    ground_truth: str | None = None,
+    prediction: str | None = None,
+) -> float:
+    """Accept when math_verify or the bounded Miles SymPy grader succeeds."""
     from math_verify.grader import verify
     from math_verify.parser import LatexExtractionConfig, parse
 
@@ -228,26 +238,33 @@ def _verify_in_subprocess(ground_truth_boxed: str, model_output: str) -> float:
     extracted_gold = parse(ground_truth_boxed, gold_targets)
     extracted_pred = parse(model_output, pred_targets)
     if extracted_gold and extracted_pred:
-        return max(1.0 if any(verify(g, p) for g in extracted_gold) else 0.0 for p in extracted_pred)
+        math_verify_score = max(1.0 if any(verify(g, p) for g in extracted_gold) else 0.0 for p in extracted_pred)
+        if math_verify_score > 0:
+            return 1.0
+    if ground_truth is not None and prediction is not None:
+        return _grade_answer_sympy_with_timeout(prediction, ground_truth)
     return 0.0
 
 
 def compute_score(model_output: str, ground_truth: str, timeout_score: float = 0, timeout: float = 30.0) -> float:
     ret_score = 0.0
     ground_truth_boxed = "\\boxed{" + ground_truth + "}"
+    prediction = None
     timeout = float(os.getenv("VERL_MATH_VERIFY_TIMEOUT", timeout))
     max_chars = int(os.getenv("VERL_MATH_VERIFY_MAX_CHARS", "0"))
     if max_chars > 0 and len(model_output) > max_chars:
         model_output = model_output[-max_chars:]
-    # STRICT boxed-only scoring (default on): require exactly ONE \boxed{} answer and verify only
-    # that box. Kills false positives from (a) bare-LaTeX echoes with no box and (b) multi-box hedging
-    # (the old code parsed the whole output and took max over all extracted candidates). Set
-    # VERL_MATH_VERIFY_STRICT_BOXED=0 to restore the old lenient whole-output extraction.
-    if _env_flag("VERL_MATH_VERIFY_STRICT_BOXED", True):
+    # Boxed-only scoring (default on): require at least one well-formed box and
+    # verify only the last one. This rejects bare-LaTeX echoes while allowing a
+    # model to correct an earlier boxed answer. Set VERL_MATH_VERIFY_STRICT_BOXED=0
+    # to restore the old lenient whole-output extraction.
+    strict_boxed = _env_flag("VERL_MATH_VERIFY_STRICT_BOXED", True)
+    if strict_boxed:
         boxes = _all_boxed_contents(model_output)
-        if len(boxes) != 1:
+        if not boxes:
             return 0.0
-        model_output = "\\boxed{" + boxes[0] + "}"
+        prediction = boxes[-1]
+        model_output = "\\boxed{" + prediction + "}"
     if _env_flag("VERL_MATH_VERIFY_FAST_INVALID", False):
         if not _is_plausible_ground_truth(ground_truth):
             return timeout_score
@@ -255,7 +272,7 @@ def compute_score(model_output: str, ground_truth: str, timeout_score: float = 0
         if boxed_answer is None:
             return timeout_score
         model_output = boxed_answer
-        if _env_flag("VERL_MATH_VERIFY_FAST_EQUIV", False):
+        if _env_flag("VERL_MATH_VERIFY_FAST_EQUIV", False) and not strict_boxed:
             from verl.utils.reward_score.math_reward import is_equiv, remove_boxed
 
             try:
@@ -263,7 +280,13 @@ def compute_score(model_output: str, ground_truth: str, timeout_score: float = 0
             except Exception:
                 return timeout_score
     try:
-        future = _get_pool().submit(_verify_in_subprocess, ground_truth_boxed, model_output)
+        future = _get_pool().submit(
+            _verify_in_subprocess,
+            ground_truth_boxed,
+            model_output,
+            ground_truth if strict_boxed else None,
+            prediction,
+        )
         ret_score = future.result(timeout=timeout)
     except (FuturesTimeoutError, TimeoutException):
         ret_score = timeout_score

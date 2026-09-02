@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1.3
+FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONFAULTHANDLER=1
+ENV PYTHONUNBUFFERED=1
+ENV CUDA_HOME=/usr/local/cuda
+ENV CUDA_PATH=/usr/local/cuda
+ENV PATH="/usr/local/cuda/bin:${PATH}"
+ENV PIP_INDEX_URL=https://pypi.org/simple
+ENV UV_INDEX_URL=https://pypi.org/simple
+ENV HF_HOME=/tmp/hf_cache
+ENV XDG_CACHE_HOME=/tmp/.cache
+ENV DD_SERVICE=rl-distill-gemma4-traces
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    build-essential \
+    ca-certificates \
+    curl \
+    git \
+    iproute2 \
+    libnuma-dev \
+    openssh-client \
+    procps \
+    python3 \
+    sudo \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace/rl-distill
+COPY . /workspace/rl-distill
+
+# The worker builds the isolated Gemma-4 venv at runtime. Keep this image lean,
+# but fail the build if the collector or verl's vLLM adapter was omitted from
+# the live context.
+RUN test -f verl/third_party/vllm/__init__.py \
+    && test -f rl-distill-scripts/data/generate_gemma4_distill_traces.py \
+    && test -f rl-distill-scripts/scale_train/run_gemma4_offpolicy_trace_collection.sh \
+    && test -f rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_packed_node.sh \
+    && test -f rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_one_model.sh \
+    && bash -n rl-distill-scripts/scale_train/run_gemma4_offpolicy_trace_collection.sh \
+    && bash -n rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_packed_node.sh \
+    && bash -n rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_one_model.sh
+
+ENV PYTHONPATH="/workspace/rl-distill"

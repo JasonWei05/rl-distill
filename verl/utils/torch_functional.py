@@ -17,6 +17,7 @@ Contain small torch utilities
 
 import math
 from contextlib import contextmanager
+from numbers import Integral
 from typing import Optional
 
 import torch
@@ -69,7 +70,42 @@ def gather_from_labels(data: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
     return output
 
 
-def logprobs_from_logits(logits, labels, inplace_backward=True, softcap=None):
+def _normalize_suppress_token_ids(suppress_token_ids, vocab_size: int) -> tuple[int, ...]:
+    """Validate and deduplicate generation-time token suppression IDs."""
+    if suppress_token_ids is None:
+        return ()
+    if isinstance(suppress_token_ids, torch.Tensor):
+        raise TypeError("suppress_token_ids must be a sequence of Python integers, not a Tensor")
+
+    try:
+        raw_token_ids = tuple(suppress_token_ids)
+    except TypeError as exc:
+        raise TypeError("suppress_token_ids must be a sequence of integers") from exc
+
+    normalized = []
+    seen = set()
+    for token_id in raw_token_ids:
+        if isinstance(token_id, bool) or not isinstance(token_id, Integral):
+            raise TypeError(f"suppressed token ID must be an integer, got {token_id!r}")
+        token_id = int(token_id)
+        if not 0 <= token_id < vocab_size:
+            raise ValueError(f"suppressed token ID {token_id} is outside vocabulary size {vocab_size}")
+        if token_id not in seen:
+            normalized.append(token_id)
+            seen.add(token_id)
+
+    if len(normalized) == vocab_size:
+        raise ValueError("suppress_token_ids cannot suppress the entire vocabulary")
+    return tuple(normalized)
+
+
+def logprobs_from_logits(
+    logits,
+    labels,
+    inplace_backward=True,
+    softcap=None,
+    suppress_token_ids=None,
+):
     """
     Compute per-token log-probabilities for the given labels.
 
@@ -85,18 +121,22 @@ def logprobs_from_logits(logits, labels, inplace_backward=True, softcap=None):
         softcap (float | None): rl-distill fork — gemma-style final-logit softcapping fused into
             the chunked fallback path (flash-attn/NPU fast paths require softcap=None). Note the
             chunked fallback returns fp32 (the previous v2 fallback returned the input dtype).
+        suppress_token_ids (Sequence[int] | None): Token IDs excluded from the normalized
+            distribution, matching generation_config.suppress_tokens in the rollout engine.
+            Suppression is applied after softcapping and before normalization.
 
     Returns:
         Tensor: Log-probabilities of the target labels, shape logits.shape[:-1].
     """
-    if FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE and softcap is None:
+    suppress_token_ids = _normalize_suppress_token_ids(suppress_token_ids, logits.shape[-1])
+    if FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE and softcap is None and not suppress_token_ids:
         batch_dim = logits.shape[:-1]
         last_dim = logits.shape[-1]
         logits = logits.reshape(-1, last_dim)
         labels = labels.reshape(-1)
         output = logprobs_from_logits_flash_attn(logits, labels, inplace_backward=inplace_backward)
         output = output.view(*batch_dim)
-    elif NPU_CROSS_ENTROPY_LOSS_AVAILABLE and softcap is None:
+    elif NPU_CROSS_ENTROPY_LOSS_AVAILABLE and softcap is None and not suppress_token_ids:
         output = logprobs_from_logits_torch_npu(logits, labels)
     else:
         # rl-distill fork: chunked logprobs instead of logprobs_from_logits_v2 or F.cross_entropy.
@@ -113,7 +153,11 @@ def logprobs_from_logits(logits, labels, inplace_backward=True, softcap=None):
         batch_dim = logits.shape[:-1]
         last_dim = logits.shape[-1]
         output = _ChunkedLogprobsFromLogits.apply(
-            logits.reshape(-1, last_dim), labels.reshape(-1), inplace_backward, softcap
+            logits.reshape(-1, last_dim),
+            labels.reshape(-1),
+            inplace_backward,
+            softcap,
+            suppress_token_ids,
         )
         output = output.view(*batch_dim)
     return output
@@ -133,12 +177,18 @@ class _ChunkedLogprobsFromLogits(torch.autograd.Function):
     CHUNK_ROWS = 1024
 
     @staticmethod
-    def forward(ctx, logits, labels, inplace_backward=True, softcap=None):
+    def forward(ctx, logits, labels, inplace_backward=True, softcap=None, suppress_token_ids=()):
         # softcap: gemma-style final-logit softcapping, y = cap * tanh(x / cap), fused per chunk.
         # The model's own softcapping must be disabled by the caller — applied in-model it
         # materializes 2-3 extra full-vocab tensors per forward and tanh retains its output for
         # backward (~21.5 GiB per 22k-token micro-batch at 262k vocab).
         output = torch.empty(logits.shape[0], dtype=torch.float32, device=logits.device)
+        suppressed = torch.tensor(suppress_token_ids, dtype=torch.long, device=logits.device)
+        if suppressed.numel() and (labels.unsqueeze(-1) == suppressed).any().item():
+            raise ValueError(
+                "target labels contain a generation-suppressed token ID; "
+                f"rollout cannot generate any of {suppress_token_ids}"
+            )
         for i in range(0, logits.shape[0], _ChunkedLogprobsFromLogits.CHUNK_ROWS):
             chunk = logits[i : i + _ChunkedLogprobsFromLogits.CHUNK_ROWS].float()
             if softcap is not None:
@@ -148,10 +198,15 @@ class _ChunkedLogprobsFromLogits(torch.autograd.Function):
                 # PPO ratios are exactly 1 at unchanged weights. Without the rounding the two
                 # passes disagree by up to ~0.06 logprob per token (pure numerics noise).
                 chunk = torch.tanh(chunk / softcap).mul_(softcap).to(logits.dtype).float()
+            elif suppressed.numel() and logits.dtype == torch.float32:
+                # Tensor.float() aliases fp32 input. Suppression must not mutate model logits.
+                chunk = chunk.clone()
+            if suppressed.numel():
+                chunk.index_fill_(-1, suppressed, -float("inf"))
             chunk_labels = labels[i : i + _ChunkedLogprobsFromLogits.CHUNK_ROWS]
             gathered = torch.gather(chunk, -1, chunk_labels.unsqueeze(-1)).squeeze(-1)
             output[i : i + _ChunkedLogprobsFromLogits.CHUNK_ROWS] = gathered - torch.logsumexp(chunk, dim=-1)
-        ctx.save_for_backward(logits, labels)
+        ctx.save_for_backward(logits, labels, suppressed)
         ctx.inplace_backward = inplace_backward
         ctx.softcap = softcap
         return output
@@ -165,7 +220,7 @@ class _ChunkedLogprobsFromLogits(torch.autograd.Function):
         # backward is value-free) — callers must pass inplace_backward=False when e.g. a
         # checkpointed entropy recompute will re-read the logits. Same contract as flash-attn's
         # cross_entropy_loss(inplace_backward=True), verl's default on the rmpad path.
-        logits, labels = ctx.saved_tensors
+        logits, labels, suppressed = ctx.saved_tensors
         softcap = ctx.softcap
         grad_logits = logits if ctx.inplace_backward else torch.empty_like(logits)
         for i in range(0, logits.shape[0], _ChunkedLogprobsFromLogits.CHUNK_ROWS):
@@ -175,10 +230,13 @@ class _ChunkedLogprobsFromLogits(torch.autograd.Function):
                 tanh_xc = torch.tanh(xc / softcap)
                 # round capped logits to the input dtype exactly like the forward does, so the
                 # backward softmax is the gradient of the function the forward actually computed
-                probs = torch.softmax((tanh_xc * softcap).to(logits.dtype).float(), dim=-1)
+                normalized_logits = (tanh_xc * softcap).to(logits.dtype).float()
             else:
                 tanh_xc = None
-                probs = torch.softmax(xc, dim=-1)
+                normalized_logits = xc.clone() if suppressed.numel() and logits.dtype == torch.float32 else xc
+            if suppressed.numel():
+                normalized_logits.index_fill_(-1, suppressed, -float("inf"))
+            probs = torch.softmax(normalized_logits, dim=-1)
             grad_chunk = grad_output[i : i + _ChunkedLogprobsFromLogits.CHUNK_ROWS].unsqueeze(-1)
             probs.mul_(-grad_chunk)  # -grad * softmax  (grad wrt softcapped logits y)
             probs.scatter_add_(
@@ -189,7 +247,7 @@ class _ChunkedLogprobsFromLogits(torch.autograd.Function):
             if softcap is not None:
                 probs.mul_(1.0 - tanh_xc.square_())  # chain rule: dy/dx = 1 - tanh^2(x / cap)
             chunk.copy_(probs.to(logits.dtype))
-        return grad_logits, None, None, None
+        return grad_logits, None, None, None, None
 
 
 def logprobs_from_logits_flash_attn(
@@ -313,7 +371,24 @@ def clip_by_value(x: torch.Tensor, tensor_min: torch.Tensor, tensor_max: torch.T
     return clipped
 
 
-def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
+def _entropy_from_logits_impl(logits: torch.Tensor, suppress_token_ids: tuple[int, ...]) -> torch.Tensor:
+    """Entropy implementation with generation-time token suppression."""
+    pd = torch.nn.functional.softmax(logits, dim=-1)
+    log_z = torch.logsumexp(logits, dim=-1)
+    weighted_logits = torch.sum(pd * logits, dim=-1)
+    if not suppress_token_ids:
+        return log_z - weighted_logits
+
+    suppressed = torch.tensor(suppress_token_ids, dtype=torch.long, device=logits.device)
+    suppressed_pd = torch.index_select(pd, -1, suppressed)
+    suppressed_logits = torch.index_select(logits, -1, suppressed)
+    suppressed_mass = suppressed_pd.sum(dim=-1)
+    allowed_mass = (1.0 - suppressed_mass).clamp_min(torch.finfo(pd.dtype).tiny)
+    weighted_allowed_logits = (weighted_logits - torch.sum(suppressed_pd * suppressed_logits, dim=-1)) / allowed_mass
+    return log_z + torch.log(allowed_mass) - weighted_allowed_logits
+
+
+def entropy_from_logits(logits: torch.Tensor, suppress_token_ids=None) -> torch.Tensor:
     """Calculate Shannon entropy from unnormalized logits.
 
     Computes H(p) = -sum(p * log(p)) using the numerically stable formula:
@@ -321,16 +396,20 @@ def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
 
     Args:
         logits: Unnormalized log-probabilities of shape (..., vocab_size).
+        suppress_token_ids: Optional token IDs excluded from the normalized distribution.
 
     Returns:
         torch.Tensor: Entropy values with shape (...,), one per distribution.
     """
-    pd = torch.nn.functional.softmax(logits, dim=-1)
-    entropy = torch.logsumexp(logits, dim=-1) - torch.sum(pd * logits, dim=-1)
-    return entropy
+    suppress_token_ids = _normalize_suppress_token_ids(suppress_token_ids, logits.shape[-1])
+    return _entropy_from_logits_impl(logits, suppress_token_ids)
 
 
-def entropy_from_logits_with_chunking(logits: torch.Tensor, chunk_size: int = 2048) -> torch.Tensor:
+def entropy_from_logits_with_chunking(
+    logits: torch.Tensor,
+    chunk_size: int = 2048,
+    suppress_token_ids=None,
+) -> torch.Tensor:
     """Memory-efficient entropy calculation using chunked processing.
 
     Computes entropy by processing the batch in chunks to reduce peak memory
@@ -339,6 +418,7 @@ def entropy_from_logits_with_chunking(logits: torch.Tensor, chunk_size: int = 20
     Args:
         logits: Unnormalized log-probabilities of shape (batch_size, vocab_size).
         chunk_size: Number of samples to process at once. Defaults to 2048.
+        suppress_token_ids: Optional token IDs excluded from the normalized distribution.
 
     Returns:
         torch.Tensor: Entropy values with shape (batch_size,).
@@ -346,11 +426,11 @@ def entropy_from_logits_with_chunking(logits: torch.Tensor, chunk_size: int = 20
     Note:
         Converts chunks to float32 for numerical stability during computation.
     """
+    suppress_token_ids = _normalize_suppress_token_ids(suppress_token_ids, logits.shape[-1])
     entropy = torch.zeros(logits.shape[0], device=logits.device)
     for i in range(0, logits.shape[0], chunk_size):
         logits_chunk = logits[i : i + chunk_size].float()
-        pd_chunk = torch.nn.functional.softmax(logits_chunk, dim=-1)
-        entropy_chunk = torch.logsumexp(logits_chunk, dim=-1) - torch.sum(pd_chunk * logits_chunk, dim=-1)
+        entropy_chunk = _entropy_from_logits_impl(logits_chunk, suppress_token_ids)
         entropy[i : i + chunk_size] = entropy_chunk
     return entropy
 

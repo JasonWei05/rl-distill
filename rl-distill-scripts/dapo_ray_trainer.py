@@ -16,12 +16,15 @@ FSDP PPO Trainer with Ray-based single controller.
 This trainer supports model-agonistic model initialization with huggingface
 """
 
+import importlib.util
 import json
 import os
 import random
+import traceback
 import uuid
 from collections import defaultdict
 from copy import deepcopy
+from pathlib import Path
 from pprint import pprint
 
 import numpy as np
@@ -29,6 +32,7 @@ import torch
 from tqdm import tqdm
 
 from dapo.hf_push import HFPusher, wait_for_hf_pusher
+from dapo.validation_early_stopping import EARLY_STOPPING_STATE_FILENAME, ValidationEarlyStopping
 from verl import DataProto
 from verl.trainer.ppo.core_algos import agg_loss
 from verl.trainer.ppo.metric_utils import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics
@@ -45,11 +49,346 @@ from verl.utils.metric import reduce_metrics
 from verl.utils.profiler import marked_timer
 from verl.utils.rollout_skip import RolloutSkip
 
+_REWARD_GROUP_KINDS = ("mixed", "all_zero", "all_one")
+
+
+def count_binary_reward_groups(uids, accuracies) -> dict[str, int]:
+    """Count prompt groups by their raw binary-correctness composition."""
+    grouped_accuracies = defaultdict(list)
+    for uid, accuracy in zip(uids, accuracies, strict=True):
+        accuracy_array = np.asarray(accuracy)
+        if accuracy_array.size != 1:
+            raise ValueError(f"Expected scalar accuracy for uid={uid!r}, got shape={accuracy_array.shape}")
+        accuracy_value = accuracy_array.item()
+        if accuracy_value not in (0, 1, False, True):
+            raise ValueError(f"Expected binary accuracy for uid={uid!r}, got {accuracy_value!r}")
+        grouped_accuracies[uid].append(bool(accuracy_value))
+
+    counts = {"total": len(grouped_accuracies), **{kind: 0 for kind in _REWARD_GROUP_KINDS}}
+    for group_accuracies in grouped_accuracies.values():
+        if all(group_accuracies):
+            counts["all_one"] += 1
+        elif any(group_accuracies):
+            counts["mixed"] += 1
+        else:
+            counts["all_zero"] += 1
+    return counts
+
+
+def binary_reward_group_metrics(counts: dict[str, int]) -> dict[str, int | float]:
+    """Build count and 0-100 percentage metrics from accumulated group counts."""
+    total = int(counts.get("total", 0))
+    if total <= 0:
+        return {}
+
+    metrics: dict[str, int | float] = {"train/reward_group/total/count": total}
+    for kind in _REWARD_GROUP_KINDS:
+        count = int(counts.get(kind, 0))
+        metrics[f"train/reward_group/{kind}/count"] = count
+        metrics[f"train/reward_group/{kind}/percent"] = 100.0 * count / total
+    return metrics
+
 
 class RayDAPOTrainer(RayPPOTrainer):
     """
     Note that this trainer runs on the driver process on a single CPU/GPU node.
     """
+
+    @staticmethod
+    def _full_checkpoint_helper():
+        # This trainer is copied from ``rl-distill-scripts`` into ``dapo`` in
+        # the production image. Resolve the helper from the repository root so
+        # both the source-tree and deployed locations work.
+        helper_path = Path(__file__).resolve().parents[1] / "rl-distill-scripts" / "full_checkpoint_s3.py"
+        spec = importlib.util.spec_from_file_location("rl_distill_full_checkpoint_s3", helper_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load full-checkpoint helper from {helper_path}")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        return helper
+
+    @staticmethod
+    def _rolling_checkpoint_frequency() -> int:
+        enabled = os.environ.get("ROLLING_CHECKPOINT_ENABLED", "False").strip().lower()
+        if enabled in {"", "0", "false", "no", "off"}:
+            return 0
+        if enabled not in {"1", "true", "yes", "on"}:
+            raise ValueError(f"invalid ROLLING_CHECKPOINT_ENABLED value: {enabled!r}")
+        frequency = int(os.environ.get("ROLLING_CHECKPOINT_FREQ", "1"))
+        if frequency < 1:
+            raise ValueError(f"ROLLING_CHECKPOINT_FREQ must be positive when enabled, got {frequency}")
+        if not os.environ.get("FULL_CHECKPOINT_S3_URI", "").strip():
+            raise ValueError("ROLLING_CHECKPOINT_ENABLED requires FULL_CHECKPOINT_S3_URI")
+        return frequency
+
+    def _should_save_rolling_checkpoint(self) -> bool:
+        frequency = self._rolling_checkpoint_frequency()
+        return frequency > 0 and self.global_steps % frequency == 0
+
+    def _save_checkpoint(self, *, permanent: bool = True):
+        """Save locally, then publish a permanent or rolling resumable checkpoint."""
+        early_stopping = getattr(self, "_validation_early_stopping", None)
+        if early_stopping is not None:
+            checkpoint_dir = Path(self.config.trainer.default_local_dir) / f"global_step_{self.global_steps}"
+            state_path = early_stopping.save(checkpoint_dir)
+            print(
+                "EARLY_STOPPING_STATE_SAVED "
+                f"step={self.global_steps} best={early_stopping.best_score} "
+                f"best_step={early_stopping.best_step} "
+                f"misses={early_stopping.non_improving_rounds} path={state_path}",
+                flush=True,
+            )
+        # Rolling checkpoints need the sharded model, Adam, scheduler/RNG, and
+        # dataloader cursor, but not a second consolidated HF copy every step.
+        # Permanent checkpoints retain the existing HF-export behavior.
+        super()._save_checkpoint(save_hf_model=permanent)
+        s3_uri = os.environ.get("FULL_CHECKPOINT_S3_URI", "").strip()
+        if not s3_uri:
+            return
+        helper = self._full_checkpoint_helper()
+        checkpoint_root = Path(self.config.trainer.default_local_dir)
+        if permanent:
+            helper.upload_checkpoint(checkpoint_root, self.global_steps, s3_uri)
+            if self._rolling_checkpoint_frequency() > 0:
+                helper.retire_rolling_checkpoint(s3_uri, self.global_steps)
+        else:
+            helper.upload_rolling_checkpoint(checkpoint_root, self.global_steps, s3_uri)
+
+    def _resume_checkpoint_dir(self) -> Path:
+        if self.global_steps <= 0:
+            raise ValueError("a positive restored global step is required")
+        if self.config.trainer.resume_mode == "resume_path":
+            checkpoint_dir = Path(str(self.config.trainer.resume_from_path))
+            if not checkpoint_dir.is_absolute():
+                checkpoint_dir = Path.cwd() / checkpoint_dir
+            return checkpoint_dir
+        return Path(self.config.trainer.default_local_dir) / f"global_step_{self.global_steps}"
+
+    @staticmethod
+    def _early_stopping_migrate_patience_from() -> int | None:
+        raw_value = os.environ.get("EARLY_STOPPING_MIGRATE_PATIENCE_FROM", "").strip()
+        if not raw_value:
+            return None
+        value = int(raw_value)
+        if value < 1:
+            raise ValueError(f"EARLY_STOPPING_MIGRATE_PATIENCE_FROM must be a positive integer, got {raw_value!r}")
+        return value
+
+    def _restore_early_stopping_state(self, early_stopping: ValidationEarlyStopping | None) -> bool:
+        """Restore stopping history and report whether this is a logical resume."""
+        self._validation_early_stopping = early_stopping
+        if early_stopping is None:
+            return False
+
+        encoded_migration = os.environ.get("EARLY_STOPPING_LEGACY_STATE_B64", "").strip()
+        if self.global_steps <= 0:
+            if not encoded_migration:
+                return False
+            source_step = early_stopping.load_legacy_history(
+                encoded_payload=encoded_migration,
+                current_step=0,
+                model=os.environ.get("GEMMA4_MODEL", ""),
+                difficulty=os.environ.get("DIFFICULTY_DATASET", ""),
+            )
+            print(
+                "EARLY_STOPPING_HISTORY_SEEDED "
+                f"source_step={source_step} best={early_stopping.best_score} "
+                f"best_step={early_stopping.best_step} misses={early_stopping.non_improving_rounds}",
+                flush=True,
+            )
+            return True
+
+        checkpoint_dir = self._resume_checkpoint_dir()
+        state_path = checkpoint_dir / EARLY_STOPPING_STATE_FILENAME
+        if not state_path.is_file():
+            if not encoded_migration:
+                raise FileNotFoundError(
+                    "resume checkpoint is missing validation early-stopping state; refusing to reset the "
+                    "all-time best or patience counter silently. Resume from a checkpoint produced by the "
+                    f"updated trainer or explicitly migrate the legacy checkpoint: {state_path}"
+                )
+            early_stopping.migrate_legacy_state(
+                encoded_payload=encoded_migration,
+                checkpoint_dir=checkpoint_dir,
+                checkpoint_step=int(self.global_steps),
+                model=os.environ.get("GEMMA4_MODEL", ""),
+                difficulty=os.environ.get("DIFFICULTY_DATASET", ""),
+            )
+            print(
+                "EARLY_STOPPING_STATE_MIGRATED "
+                f"checkpoint_step={self.global_steps} best={early_stopping.best_score} "
+                f"best_step={early_stopping.best_step} misses={early_stopping.non_improving_rounds} "
+                f"path={state_path}",
+                flush=True,
+            )
+        state_path, patience_migrated = early_stopping.load(
+            checkpoint_dir,
+            migrate_patience_from=self._early_stopping_migrate_patience_from(),
+        )
+        if patience_migrated:
+            print(
+                "EARLY_STOPPING_PATIENCE_MIGRATED "
+                f"checkpoint_step={self.global_steps} active_patience={early_stopping.patience} "
+                f"misses={early_stopping.non_improving_rounds} "
+                f"triggered={early_stopping.last_observed_triggered} path={state_path}",
+                flush=True,
+            )
+        if encoded_migration:
+            historical = ValidationEarlyStopping(
+                metric=early_stopping.metric,
+                patience=early_stopping.patience,
+                mode=early_stopping.mode,
+                min_delta=early_stopping.min_delta,
+                include_initial_validation=early_stopping.include_initial_validation,
+            )
+            source_step = historical.load_legacy_history(
+                encoded_payload=encoded_migration,
+                current_step=int(self.global_steps),
+                model=os.environ.get("GEMMA4_MODEL", ""),
+                difficulty=os.environ.get("DIFFICULTY_DATASET", ""),
+            )
+            if early_stopping.merge_historical_state(historical):
+                early_stopping.save(checkpoint_dir)
+                print(
+                    "EARLY_STOPPING_HISTORY_MERGED "
+                    f"checkpoint_step={self.global_steps} source_step={source_step} "
+                    f"best={early_stopping.best_score} best_step={early_stopping.best_step} "
+                    f"misses={early_stopping.non_improving_rounds} path={state_path}",
+                    flush=True,
+                )
+        if early_stopping.last_observed_step is not None and early_stopping.last_observed_step > self.global_steps:
+            raise ValueError(
+                "early-stopping state is newer than the restored trainer checkpoint: "
+                f"last_observed_step={early_stopping.last_observed_step} global_steps={self.global_steps}"
+            )
+        print(
+            "EARLY_STOPPING_STATE_RESTORED "
+            f"checkpoint_step={self.global_steps} best={early_stopping.best_score} "
+            f"best_step={early_stopping.best_step} misses={early_stopping.non_improving_rounds} "
+            f"last_observed_step={early_stopping.last_observed_step} path={state_path}",
+            flush=True,
+        )
+        return True
+
+    def _finalize_restored_early_stop(self, early_stopping: ValidationEarlyStopping | None) -> bool:
+        """Finalize a checkpoint whose restored patience state is already terminal."""
+        if early_stopping is None or not early_stopping.last_observed_triggered:
+            return False
+        print(
+            "EARLY_STOP_ALREADY_TRIGGERED_ON_RESUME "
+            f"step={self.global_steps} best={early_stopping.best_score} "
+            f"best_step={early_stopping.best_step} "
+            f"misses={early_stopping.non_improving_rounds} metric={early_stopping.metric}",
+            flush=True,
+        )
+        self._save_checkpoint(permanent=True)
+        self._write_run_outcome(early_stopping=early_stopping, stop_reason="early_stopping")
+        return True
+
+    def _should_run_initial_validation(self, *, restored_early_stopping_history: bool) -> bool:
+        if not self.config.trainer.get("val_before_train", True):
+            return False
+        if self.config.trainer.get("val_only", False):
+            return True
+        return self.global_steps <= 0 and not restored_early_stopping_history
+
+    def _fast_forward_fresh_dataloader(self) -> None:
+        """Advance a weight-only continuation to the requested historical data cursor.
+
+        This is intentionally separate from true checkpoint resume. It is used only
+        when an old run retained an HF model export but lost its optimizer checkpoint.
+        """
+        skip_batches = int(os.environ.get("DATALOADER_SKIP_BATCHES", "0"))
+        if skip_batches <= 0:
+            return
+        if self.global_steps != 0:
+            raise ValueError(
+                "DATALOADER_SKIP_BATCHES is valid only for a fresh optimizer continuation; "
+                f"a checkpoint already restored global_steps={self.global_steps}"
+            )
+
+        print(f"Fast-forwarding fresh StatefulDataLoader by {skip_batches} historical batches", flush=True)
+        iterator = iter(self.train_dataloader)
+        for _ in range(skip_batches):
+            try:
+                next(iterator)
+            except StopIteration:
+                iterator = iter(self.train_dataloader)
+                next(iterator)
+        dataloader_state = self.train_dataloader.state_dict()
+        self.train_dataloader.load_state_dict(dataloader_state)
+        print(f"Fast-forwarded StatefulDataLoader by {skip_batches} historical batches", flush=True)
+
+    def _write_run_outcome(
+        self,
+        *,
+        early_stopping: ValidationEarlyStopping | None,
+        stop_reason: str,
+    ) -> Path:
+        """Persist the terminal step and all-time-best checkpoint selection.
+
+        A preemption restores only the newest complete checkpoint locally, so
+        recover an older all-time-best HF export from the full-checkpoint S3
+        prefix before writing the final outcome when necessary.
+        """
+
+        if early_stopping is None or early_stopping.best_step is None:
+            best_step = int(self.global_steps)
+            best_score = None
+            metric = None
+        else:
+            best_step = int(early_stopping.best_step)
+            best_score = float(early_stopping.best_score)
+            metric = early_stopping.metric
+
+        checkpoint_root = Path(self.config.trainer.default_local_dir)
+        if best_step > 0:
+            best_hf_dir = checkpoint_root / f"global_step_{best_step}" / "actor" / "huggingface"
+            s3_uri = os.environ.get("FULL_CHECKPOINT_S3_URI", "").strip()
+            if not best_hf_dir.is_dir() and s3_uri:
+                self._full_checkpoint_helper().restore_hf_export(checkpoint_root, s3_uri, best_step)
+            if not best_hf_dir.is_dir():
+                raise FileNotFoundError(
+                    f"all-time-best HF checkpoint was not retained: best_step={best_step} expected={best_hf_dir}"
+                )
+
+        wandb_run_id = os.environ.get("WANDB_RUN_ID", "").strip()
+        if not wandb_run_id:
+            try:
+                import wandb
+
+                if wandb.run is not None:
+                    wandb_run_id = str(wandb.run.id)
+            except Exception:
+                pass
+
+        outcome = {
+            "protocol": "gemma4_rl_run_outcome_v1",
+            "status": "complete",
+            "stop_reason": stop_reason,
+            "final_step": int(self.global_steps),
+            "best_step": best_step,
+            "best_score": best_score,
+            "early_stopping_metric": metric,
+            "model": os.environ.get("GEMMA4_MODEL", ""),
+            "difficulty": os.environ.get("DIFFICULTY_DATASET", ""),
+            "seed": int(os.environ.get("DATA_SEED", "0")),
+            "wandb_run_id": wandb_run_id,
+            "experiment_name": str(self.config.trainer.experiment_name),
+            "hf_repo": str(self.config.trainer.get("hf_push", {}).get("repo_id", "")),
+        }
+        checkpoint_root.mkdir(parents=True, exist_ok=True)
+        outcome_path = checkpoint_root / "run_outcome.json"
+        temporary = outcome_path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(outcome, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(outcome_path)
+        print(
+            "RUN_OUTCOME_WRITTEN "
+            f"reason={stop_reason} final_step={self.global_steps} best_step={best_step} "
+            f"path={outcome_path}",
+            flush=True,
+        )
+        return outcome_path
 
     def _maybe_push_to_hf(self, step: int):
         """If trainer.hf_push.enable is True, async-push the HF-format checkpoint to HF Hub.
@@ -185,6 +524,7 @@ class RayDAPOTrainer(RayPPOTrainer):
         if n <= 0 or "wandb" not in self.config.trainer.logger:
             return
         import numpy as np
+
         import wandb
 
         if wandb.run is None:
@@ -205,7 +545,17 @@ class RayDAPOTrainer(RayPPOTrainer):
         finally:
             if getattr(self, "_hf_pusher", None) is not None:
                 print("[HFPusher] waiting for pending uploads before exit...", flush=True)
-                wait_for_hf_pusher(self._hf_pusher, timeout=1800)
+                try:
+                    wait_for_hf_pusher(self._hf_pusher, timeout=1800)
+                except Exception as error:
+                    hf_push_cfg = self.config.trainer.get("hf_push", {})
+                    if bool(hf_push_cfg.get("required", True)):
+                        raise
+                    print(
+                        f"[HFPusher] optional publication failed; preserving successful training outcome: {error}",
+                        flush=True,
+                    )
+                    traceback.print_exception(type(error), error, error.__traceback__)
 
     def _fit_impl(self):
         """
@@ -231,17 +581,71 @@ class RayDAPOTrainer(RayPPOTrainer):
 
         # load checkpoint before doing anything
         self._load_checkpoint()
+        self._fast_forward_fresh_dataloader()
+
+        early_stopping = ValidationEarlyStopping.from_trainer_config(self.config.trainer)
+        if early_stopping is not None and self.config.trainer.test_freq <= 0:
+            raise ValueError("validation early stopping requires trainer.test_freq > 0")
+        restored_early_stopping_history = self._restore_early_stopping_state(early_stopping)
+        if self._finalize_restored_early_stop(early_stopping):
+            return
         self.checkpoint_manager.update_weights()
 
         # perform validation before training
         # currently, we only support validation using the reward_function.
-        if self.config.trainer.get("val_before_train", True):
+        initial_early_stop_triggered = False
+        if self._should_run_initial_validation(restored_early_stopping_history=restored_early_stopping_history):
             val_metrics = self._validate()
             assert val_metrics, f"{val_metrics=}"
+            if early_stopping is not None:
+                if early_stopping.should_observe_initial_validation(step=self.global_steps):
+                    initial_early_stop_triggered, initial_early_metrics = early_stopping.observe(
+                        val_metrics, step=self.global_steps
+                    )
+                    val_metrics.update(initial_early_metrics)
+                else:
+                    print(
+                        "EARLY_STOPPING_INITIAL_VALIDATION_IGNORED "
+                        f"checkpoint_step={self.global_steps} "
+                        f"last_observed_step={early_stopping.last_observed_step}",
+                        flush=True,
+                    )
             pprint(f"Initial validation metrics: {val_metrics}")
             logger.log(data=val_metrics, step=self.global_steps)
             if self.config.trainer.get("val_only", False):
                 return
+            if initial_early_stop_triggered:
+                print(
+                    "EARLY_STOP_TRIGGERED_ON_RESUME "
+                    f"step={self.global_steps} best={early_stopping.best_score} "
+                    f"best_step={early_stopping.best_step} "
+                    f"misses={early_stopping.non_improving_rounds} metric={early_stopping.metric}",
+                    flush=True,
+                )
+                self._save_checkpoint(permanent=True)
+                self._write_run_outcome(early_stopping=early_stopping, stop_reason="early_stopping")
+                return
+        elif self.config.trainer.get("val_before_train", True):
+            print(
+                "INITIAL_VALIDATION_SKIPPED_ON_RESUME "
+                f"checkpoint_step={self.global_steps} "
+                f"restored_early_stopping_history={restored_early_stopping_history}",
+                flush=True,
+            )
+
+        # A pod can be preempted after uploading its terminal checkpoint but
+        # before the wrapper publishes the run outcome and best-HF marker. A
+        # resumed terminal checkpoint must finalize idempotently, not execute
+        # an unintended step beyond the configured maximum.
+        if self.global_steps >= self.total_training_steps:
+            print(
+                "TRAINING_ALREADY_AT_MAX_STEPS_ON_RESUME "
+                f"checkpoint_step={self.global_steps} total_training_steps={self.total_training_steps}",
+                flush=True,
+            )
+            self._save_checkpoint(permanent=True)
+            self._write_run_outcome(early_stopping=early_stopping, stop_reason="max_steps")
+            return
 
         if self.config.actor_rollout_ref.rollout.get("skip_rollout", False):
             rollout_skip = RolloutSkip(self.config, self.async_rollout_manager)
@@ -254,6 +658,7 @@ class RayDAPOTrainer(RayPPOTrainer):
         self.global_steps += 1
         self.gen_steps += 1
         last_val_metrics = None
+        stop_reason = "max_steps"
 
         prev_step_profile = False
         curr_step_profile = (
@@ -268,6 +673,7 @@ class RayDAPOTrainer(RayPPOTrainer):
         num_prompt_in_batch = 0
         num_gen_batches = 0
         all_gen_acc = []  # Track accuracy across ALL generated responses (before filtering)
+        all_gen_reward_group_counts = defaultdict(int)
         current_epoch = self.global_steps // len(self.train_dataloader)
 
         training_complete = False
@@ -293,6 +699,7 @@ class RayDAPOTrainer(RayPPOTrainer):
                 )
 
                 is_last_step = self.global_steps >= self.total_training_steps
+                permanent_checkpoint_requested = False
 
                 with marked_timer("step", timing_raw):
                     # generate a batch
@@ -376,7 +783,13 @@ class RayDAPOTrainer(RayPPOTrainer):
 
                     # Collect accuracy on ALL generated responses (before filtering)
                     if "acc" in new_batch.non_tensor_batch:
-                        all_gen_acc.extend(new_batch.non_tensor_batch["acc"].tolist())
+                        generated_acc = new_batch.non_tensor_batch["acc"]
+                        all_gen_acc.extend(generated_acc.tolist())
+                        reward_group_counts = count_binary_reward_groups(
+                            new_batch.non_tensor_batch["uid"], generated_acc
+                        )
+                        for group_kind, count in reward_group_counts.items():
+                            all_gen_reward_group_counts[group_kind] += count
 
                     if not self.config.algorithm.filter_groups.enable:
                         batch = new_batch
@@ -512,9 +925,7 @@ class RayDAPOTrainer(RayPPOTrainer):
                         ):
                             if esi_close_to_expiration:
                                 print("Force saving checkpoint: ESI instance expiration approaching.")
-                            with marked_timer("save_checkpoint", timing_raw, "green"):
-                                self._save_checkpoint()
-                            self._maybe_push_to_hf(self.global_steps)
+                            permanent_checkpoint_requested = True
 
                         with marked_timer("update_weights", timing_raw, "red"):
                             self.checkpoint_manager.update_weights()
@@ -530,14 +941,31 @@ class RayDAPOTrainer(RayPPOTrainer):
                     self._log_train_generations_to_wandb(batch)
 
                 # validate
+                early_stop_triggered = False
                 if self.config.trainer.test_freq > 0 and (
                     is_last_step or self.global_steps % self.config.trainer.test_freq == 0
                 ):
                     with marked_timer("testing", timing_raw, "green"):
                         val_metrics: dict = self._validate()
-                        if is_last_step:
-                            last_val_metrics = val_metrics
+                        last_val_metrics = val_metrics
+                        if early_stopping is not None:
+                            early_stop_triggered, early_metrics = early_stopping.observe(
+                                val_metrics, step=self.global_steps
+                            )
+                            val_metrics.update(early_metrics)
                     metrics.update(val_metrics)
+
+                # Persist validation-driven state before publishing this step's
+                # checkpoint. This keeps the all-time best and patience counter
+                # transactionally aligned with the model/optimizer/data cursor.
+                if early_stop_triggered:
+                    permanent_checkpoint_requested = True
+                rolling_checkpoint_requested = self._should_save_rolling_checkpoint()
+                if permanent_checkpoint_requested or rolling_checkpoint_requested:
+                    with marked_timer("save_checkpoint", timing_raw, "green"):
+                        self._save_checkpoint(permanent=permanent_checkpoint_requested)
+                    if permanent_checkpoint_requested:
+                        self._maybe_push_to_hf(self.global_steps)
 
                 with marked_timer("stop_profile", timing_raw):
                     next_step_profile = (
@@ -580,15 +1008,34 @@ class RayDAPOTrainer(RayPPOTrainer):
                 if all_gen_acc:
                     metrics["train/acc_all_generated"] = float(np.mean(all_gen_acc))
                     metrics["train/num_responses_all_generated"] = len(all_gen_acc)
+                    metrics.update(binary_reward_group_metrics(all_gen_reward_group_counts))
 
                 metrics["train/num_gen_batches"] = num_gen_batches
                 batch = None
                 num_prompt_in_batch = 0
                 num_gen_batches = 0
                 all_gen_acc = []
+                all_gen_reward_group_counts = defaultdict(int)
 
                 # TODO: make a canonical logger that supports various backend
                 logger.log(data=metrics, step=self.global_steps)
+
+                if early_stop_triggered:
+                    if hasattr(self.actor_rollout_wg, "async_calls_finalize_fn_exec"):
+                        self.actor_rollout_wg.async_calls_finalize_fn_exec(blocking=True)
+                    print(
+                        "EARLY_STOP_TRIGGERED "
+                        f"step={self.global_steps} best={early_stopping.best_score} "
+                        f"best_step={early_stopping.best_step} "
+                        f"misses={early_stopping.non_improving_rounds} "
+                        f"metric={early_stopping.metric}",
+                        flush=True,
+                    )
+                    pprint(f"Early-stop validation metrics: {last_val_metrics}")
+                    progress_bar.close()
+                    stop_reason = "early_stopping"
+                    training_complete = True
+                    break
 
                 if is_last_step:
                     if hasattr(self.actor_rollout_wg, "async_calls_finalize_fn_exec"):
@@ -613,3 +1060,4 @@ class RayDAPOTrainer(RayPPOTrainer):
             self._maybe_push_to_hf(self.global_steps)
             metrics = {f"timing/{k}": v for k, v in timing_raw.items()}
             logger.log(data=metrics, step=self.global_steps)
+        self._write_run_outcome(early_stopping=early_stopping, stop_reason=stop_reason)

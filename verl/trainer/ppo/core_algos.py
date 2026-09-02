@@ -1344,6 +1344,11 @@ def compute_policy_loss_vanilla(
         pg_losses1, pg_losses2
     )  # max(-ratio * A, -clip(ratio, 1-cliprange, 1+cliprange) * A)
     pg_clipfrac = verl_F.masked_mean(torch.gt(pg_losses2, pg_losses1).float(), response_mask)
+    ppo_ratio_clipfrac_high = verl_F.masked_mean((ratio > 1 + cliprange_high).float(), response_mask)
+    ppo_ratio_clipfrac_low = verl_F.masked_mean((ratio < 1 - cliprange_low).float(), response_mask)
+    ppo_ratio_clipfrac = verl_F.masked_mean(
+        ((ratio > 1 + cliprange_high) | (ratio < 1 - cliprange_low)).float(), response_mask
+    )
 
     pg_losses3 = -advantages * clip_ratio_c
     clip_pg_losses2 = torch.min(pg_losses3, clip_pg_losses1)
@@ -1365,6 +1370,9 @@ def compute_policy_loss_vanilla(
         "actor/pg_clipfrac": pg_clipfrac.detach().item(),
         "actor/ppo_kl": ppo_kl.detach().item(),
         "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
+        "actor/ppo_ratio_clipfrac": ppo_ratio_clipfrac.detach().item(),
+        "actor/ppo_ratio_clipfrac_high": ppo_ratio_clipfrac_high.detach().item(),
+        "actor/ppo_ratio_clipfrac_low": ppo_ratio_clipfrac_low.detach().item(),
     }
     return pg_loss, pg_metrics
 

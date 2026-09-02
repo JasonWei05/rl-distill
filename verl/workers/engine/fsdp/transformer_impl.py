@@ -33,6 +33,11 @@ from torch.distributed.fsdp.api import FullStateDictConfig, ShardedStateDictConf
 from torch.distributed.tensor import DTensor
 
 import verl.utils.torch_functional as verl_F
+from verl.models.transformers.gemma4_router_replay import (
+    patch_gemma4_router_replay,
+    routed_experts_to_model_input,
+    validate_routed_experts,
+)
 from verl.models.transformers.monkey_patch import apply_monkey_patch
 from verl.trainer.config import CheckpointConfig
 from verl.utils import tensordict_utils as tu
@@ -106,6 +111,26 @@ def _cast_module_parameters_preserving_buffers(module: torch.nn.Module, dtype: t
     module.to(dtype=dtype)
     for submodule, name, buffer in floating_buffers:
         submodule._buffers[name] = buffer
+
+
+def _extract_generation_suppress_token_ids(module: torch.nn.Module) -> tuple[int, ...]:
+    """Read and validate rollout token suppression from a Hugging Face model."""
+    generation_config = getattr(module, "generation_config", None)
+    suppress_token_ids = getattr(generation_config, "suppress_tokens", None)
+    if not suppress_token_ids:
+        return ()
+
+    text_config = getattr(module.config, "text_config", module.config)
+    vocab_size = getattr(text_config, "vocab_size", None)
+    if vocab_size is None and hasattr(module, "get_output_embeddings"):
+        output_embeddings = module.get_output_embeddings()
+        vocab_size = getattr(output_embeddings, "out_features", None)
+        if vocab_size is None:
+            vocab_size = getattr(output_embeddings, "num_embeddings", None)
+    if vocab_size is None:
+        raise ValueError("cannot validate generation_config.suppress_tokens without a model vocabulary size")
+
+    return verl_F._normalize_suppress_token_ids(suppress_token_ids, int(vocab_size))
 
 
 def _set_gemma4_cudnn_sdpa(engine, *, mode: str):
@@ -327,6 +352,7 @@ def _patch_gemma4_skip_lm_head():
 
 
 _patch_gemma4_skip_lm_head()
+patch_gemma4_router_replay()
 
 
 class FSDPEngine(BaseEngine):
@@ -380,6 +406,10 @@ class FSDPEngine(BaseEngine):
         self._is_offload_param = self.engine_config.param_offload
         self._is_offload_optimizer = self.engine_config.optimizer_offload
         self._is_lora = self.model_config.lora_rank > 0
+        self._suppress_token_ids = ()
+        # FSDP2 CPUOffloadPolicy owns CPU/GPU placement. Track it so weight
+        # transfer and checkpoint paths do not manually half-move DTensors.
+        self._uses_fsdp2_cpu_offload_policy = False
 
         # QAT (Quantization-Aware Training)
         self._qat_config = getattr(self.engine_config, "qat", None)
@@ -397,6 +427,9 @@ class FSDPEngine(BaseEngine):
             if self.engine_config.use_torch_compile  #  use torch compile by default
             else entropy_from_logits
         )
+
+    def _compute_entropy_with_generation_config(self, logits: torch.Tensor) -> torch.Tensor:
+        return self.compute_entropy_from_logits(logits, suppress_token_ids=self._suppress_token_ids)
 
     @property
     def is_param_offload_enabled(self) -> bool:
@@ -538,6 +571,17 @@ class FSDPEngine(BaseEngine):
             # attribute at every forward, so nulling it here is a clean runtime switch; rollout
             # (vLLM) reads the untouched checkpoint config and is unaffected.
             _text_cfg = getattr(module.config, "text_config", module.config)
+            self._suppress_token_ids = _extract_generation_suppress_token_ids(module)
+            if self._suppress_token_ids:
+                if use_fused_kernels:
+                    raise ValueError(
+                        "generation_config.suppress_tokens is incompatible with use_fused_kernels "
+                        "because in-model log-probs would normalize over suppressed tokens"
+                    )
+                logger.info(
+                    "[rl-distill] matching rollout generation_config.suppress_tokens=%s in actor log-probs/entropy",
+                    self._suppress_token_ids,
+                )
             self._logit_softcap = getattr(_text_cfg, "final_logit_softcapping", None)
             # only the non-rmpad branch of prepare_model_outputs re-applies the cap, so leave
             # rmpad-capable models (which never hit this memory wall) on stock behavior.
@@ -673,6 +717,7 @@ class FSDPEngine(BaseEngine):
                 self._is_offload_param = False
                 self._is_offload_optimizer = False
                 offload_policy = CPUOffloadPolicy(pin_memory=True)
+                self._uses_fsdp2_cpu_offload_policy = True
 
             fsdp_kwargs = {
                 "mesh": fsdp_mesh,
@@ -1091,11 +1136,17 @@ class FSDPEngine(BaseEngine):
         Save FSDP checkpoint, handling parameter offload as needed.
         """
         origin_module_device = next(self.module.parameters()).device.type
-        if self._is_offload_param or origin_module_device == "cpu":
+        if (self._is_offload_param or origin_module_device == "cpu") and not getattr(
+            self, "_uses_fsdp2_cpu_offload_policy", False
+        ):
             load_fsdp_model_to_gpu(self.module)
 
         self.checkpoint_manager.save_checkpoint(
-            local_path=local_path, hdfs_path=hdfs_path, global_step=global_step, max_ckpt_to_keep=max_ckpt_to_keep
+            local_path=local_path,
+            hdfs_path=hdfs_path,
+            global_step=global_step,
+            max_ckpt_to_keep=max_ckpt_to_keep,
+            save_hf_model=kwargs.get("save_hf_model"),
         )
 
         torch.distributed.barrier()
@@ -1127,7 +1178,12 @@ class FSDPEngine(BaseEngine):
     def get_per_tensor_param(self, layered_summon=False, base_sync_done=False, **kwargs):
         log_gpu_memory_usage("Before load_fsdp_model_to_gpu", logger=logger)
 
-        load_fsdp_model_to_gpu(self.module)
+        # CPUOffloadPolicy owns placement for FSDP2. Calling model.to(device)
+        # here leaves DTensors half-moved and makes state_dict() fail with a
+        # CPU/CUDA storage mismatch. Per-DTensor materialization below already
+        # moves the gathered full tensor to the target device.
+        if not self._uses_fsdp2_cpu_offload_policy:
+            load_fsdp_model_to_gpu(self.module)
 
         log_gpu_memory_usage("After load_fsdp_model_to_gpu", logger=logger)
 
@@ -1257,6 +1313,7 @@ class FSDPEngineWithLMHead(FSDPEngine):
         use_remove_padding = tu.get_non_tensor_data(data=micro_batch, key="use_remove_padding", default=True)
         pad_mode = tu.get_non_tensor_data(data=micro_batch, key="pad_mode", default=DatasetPadMode.NO_PADDING)
         use_fused_kernels = tu.get_non_tensor_data(data=micro_batch, key="use_fused_kernels", default=False)
+        enable_routing_replay = tu.get_non_tensor_data(data=micro_batch, key="enable_routing_replay", default=False)
         temperature = micro_batch["temperature"]
         temperature_item = temperature
         if use_fused_kernels:
@@ -1268,6 +1325,25 @@ class FSDPEngineWithLMHead(FSDPEngine):
         multi_modal_inputs = extract_multi_modal_inputs(micro_batch.get("multi_modal_inputs", []))
         input_ids = micro_batch["input_ids"]
         position_ids = micro_batch["position_ids"]
+        routed_experts = micro_batch.get("routed_experts") if enable_routing_replay else None
+        module_config = getattr(getattr(self.module, "module", self.module), "config", None)
+
+        if enable_routing_replay:
+            replay_mode = getattr(getattr(self.engine_config, "router_replay", None), "mode", "disabled")
+            if replay_mode != "R3":
+                raise ValueError(f"FSDP2 rollout router replay requires router_replay.mode='R3', got {replay_mode!r}")
+            if routed_experts is None:
+                raise ValueError(
+                    "FSDP2 R3 requires routed_experts from rollout; enable rollout routing capture and preserve it "
+                    "in the batch"
+                )
+            text_config = getattr(module_config, "text_config", module_config)
+            if getattr(text_config, "model_type", None) != "gemma4_text":
+                raise NotImplementedError("FSDP2 R3 is currently implemented only for Hugging Face Gemma 4")
+            if self.use_ulysses_sp:
+                raise NotImplementedError(
+                    "Gemma 4 FSDP2 R3 with Ulysses sequence parallelism is not yet supported; use actor DP only"
+                )
 
         if not isinstance(temperature, torch.Tensor):
             temperature = torch.tensor([temperature] * input_ids.shape[0], device=input_ids.device)
@@ -1294,12 +1370,20 @@ class FSDPEngineWithLMHead(FSDPEngine):
             else:
                 raise NotImplementedError(f"pad_mode {pad_mode} not implemented")
 
+            if routed_experts is not None:
+                routed_experts = routed_experts_to_model_input(routed_experts, use_remove_padding=True)
+                validate_routed_experts(
+                    routed_experts,
+                    module_config,
+                    expected_batch_size=input_ids_rmpad.shape[0],
+                    expected_sequence_length=input_ids_rmpad.shape[1],
+                )
+
             # for compute the log_prob
             input_ids_rmpad_rolled = torch.roll(input_ids_rmpad, shifts=-1, dims=1)  # (1, total_nnz)
 
             # pad and slice the inputs if sp > 1
             if self.use_ulysses_sp:
-                module_config = getattr(getattr(self.module, "module", self.module), "config", None)
                 model_type = getattr(module_config, "model_type", None)
                 is_vlm_model = hasattr(module_config, "vision_config") and model_type not in {"gemma3", "gemma3_moe"}
                 if is_vlm_model:
@@ -1360,6 +1444,20 @@ class FSDPEngineWithLMHead(FSDPEngine):
                     input_ids, padding=pad_token_id, output_size=(batch_size, max_seq_len)
                 )
 
+                if routed_experts is not None:
+                    routed_experts = routed_experts_to_model_input(
+                        routed_experts,
+                        use_remove_padding=False,
+                        batch_size=batch_size,
+                        max_sequence_length=max_seq_len,
+                    )
+                    validate_routed_experts(
+                        routed_experts,
+                        module_config,
+                        expected_batch_size=batch_size,
+                        expected_sequence_length=max_seq_len,
+                    )
+
                 if position_ids.dim() == 3:
                     position_ids = torch.nested.to_padded_tensor(
                         position_ids, padding=0, output_size=(batch_size, 4, max_seq_len)
@@ -1393,6 +1491,8 @@ class FSDPEngineWithLMHead(FSDPEngine):
             extra_args["temperature"] = temperature_item
             extra_args["return_dict"] = True
 
+        if routed_experts is not None:
+            model_inputs["routed_experts"] = routed_experts
         model_inputs.update(multi_modal_inputs)
         model_inputs.update(extra_args)
 
@@ -1436,15 +1536,18 @@ class FSDPEngineWithLMHead(FSDPEngine):
                         logits=logits_rmpad,
                         labels=input_ids_rmpad_rolled,
                         inplace_backward=inplace_backward,
+                        suppress_token_ids=self._suppress_token_ids,
                     )
 
                 # compute entropy
                 if calculate_entropy:
                     if not self.engine_config.entropy_checkpointing:
-                        entropy_rmpad = self.compute_entropy_from_logits(logits_rmpad)  # ((total_nnz / sp) + pad)
+                        entropy_rmpad = self._compute_entropy_with_generation_config(
+                            logits_rmpad
+                        )  # ((total_nnz / sp) + pad)
                     else:
                         entropy_rmpad = torch.utils.checkpoint.checkpoint(
-                            self.compute_entropy_from_logits, logits_rmpad
+                            self._compute_entropy_with_generation_config, logits_rmpad
                         )
 
                 # logits_processor_func return tensors with shape (1, total_nnz/sp_size)
@@ -1547,18 +1650,21 @@ class FSDPEngineWithLMHead(FSDPEngine):
                     if self.engine_config.entropy_from_logits_with_chunking:
 
                         def _chunked_entropy(_l):
-                            return verl_F.entropy_from_logits_with_chunking(_l.reshape(-1, _l.shape[-1])).view(
-                                _l.shape[:-1]
-                            )
+                            return verl_F.entropy_from_logits_with_chunking(
+                                _l.reshape(-1, _l.shape[-1]),
+                                suppress_token_ids=self._suppress_token_ids,
+                            ).view(_l.shape[:-1])
 
                         if self.engine_config.entropy_checkpointing and torch.is_grad_enabled():
                             entropy = torch.utils.checkpoint.checkpoint(_chunked_entropy, logits)
                         else:
                             entropy = _chunked_entropy(logits)
                     elif not self.engine_config.entropy_checkpointing:
-                        entropy = verl_F.entropy_from_logits(logits)
+                        entropy = verl_F.entropy_from_logits(logits, suppress_token_ids=self._suppress_token_ids)
                     else:
-                        entropy = torch.utils.checkpoint.checkpoint(verl_F.entropy_from_logits, logits)
+                        entropy = torch.utils.checkpoint.checkpoint(
+                            self._compute_entropy_with_generation_config, logits
+                        )
 
                 if pad_mode == DatasetPadMode.NO_PADDING:
                     cu_seqlens = input_ids.offsets()
@@ -1587,6 +1693,7 @@ class FSDPEngineWithLMHead(FSDPEngine):
                         labels=padded_labels.reshape(-1),
                         inplace_backward=not calculate_entropy,
                         softcap=fused_softcap,
+                        suppress_token_ids=self._suppress_token_ids,
                     ).view(logits.shape[:-1])
                     log_probs = torch.nested.narrow(log_probs, 1, starts, seq_lengths, layout=torch.jagged)
                     log_probs = torch.cat([t for t in log_probs.unbind()])

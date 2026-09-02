@@ -356,6 +356,7 @@ class TrainingWorker(Worker, DistProfilerExtension):
             use_dynamic_bsz=self.engine_config.use_dynamic_bsz,
             max_token_len_per_gpu=self.engine_config.max_token_len_per_gpu,
             micro_batch_size_per_gpu=self.engine_config.micro_batch_size_per_gpu,
+            max_padded_tokens_per_microbatch=self.engine_config.max_padded_tokens_per_microbatch,
             use_fused_kernels=self.engine_config.use_fused_kernels,
         )
 
@@ -410,6 +411,7 @@ class TrainingWorker(Worker, DistProfilerExtension):
             use_dynamic_bsz=self.engine_config.use_dynamic_bsz,
             max_token_len_per_gpu=self.engine_config.infer_max_token_len_per_gpu,
             micro_batch_size_per_gpu=self.engine_config.infer_micro_batch_size_per_gpu,
+            max_padded_tokens_per_microbatch=self.engine_config.infer_max_padded_tokens_per_microbatch,
             use_fused_kernels=self.engine_config.use_fused_kernels,
         )
 
@@ -443,8 +445,23 @@ class TrainingWorker(Worker, DistProfilerExtension):
         return final_output
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
-    def save_checkpoint(self, local_path, hdfs_path=None, global_step=0, max_ckpt_to_keep=None):
-        return self.engine.save_checkpoint(local_path, hdfs_path, global_step, max_ckpt_to_keep)
+    def save_checkpoint(
+        self,
+        local_path,
+        hdfs_path=None,
+        global_step=0,
+        max_ckpt_to_keep=None,
+        save_hf_model=None,
+    ):
+        if save_hf_model is None:
+            return self.engine.save_checkpoint(local_path, hdfs_path, global_step, max_ckpt_to_keep)
+        return self.engine.save_checkpoint(
+            local_path,
+            hdfs_path,
+            global_step,
+            max_ckpt_to_keep,
+            save_hf_model=save_hf_model,
+        )
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def load_checkpoint(self, local_path, hdfs_path=None, del_local_after_load=False):
@@ -491,9 +508,16 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         else:
             tool_config = None
 
-        self.enable_routing_replay = (
-            self.config.actor.strategy == "megatron" and self.config.actor.megatron.router_replay.mode != "disabled"
-        )
+        actor_strategy = self.config.actor.strategy
+        if actor_strategy == "megatron":
+            replay_mode = self.config.actor.megatron.router_replay.mode
+        elif actor_strategy in {"fsdp", "fsdp2"}:
+            actor_replay_mode = self.config.actor.router_replay.mode
+            fsdp_replay_mode = self.config.actor.fsdp_config.router_replay.mode
+            replay_mode = actor_replay_mode if actor_replay_mode != "disabled" else fsdp_replay_mode
+        else:
+            replay_mode = "disabled"
+        self.enable_routing_replay = replay_mode != "disabled"
 
         DistProfilerExtension.__init__(
             self, DistProfiler(rank=self.rank, config=profiler_config, tool_config=tool_config)
@@ -671,9 +695,25 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         self.actor.load_checkpoint(local_path, hdfs_path, del_local_after_load)
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
-    def save_checkpoint(self, local_path, hdfs_path=None, global_step=0, max_ckpt_to_keep=None):
+    def save_checkpoint(
+        self,
+        local_path,
+        hdfs_path=None,
+        global_step=0,
+        max_ckpt_to_keep=None,
+        save_hf_model=None,
+    ):
         assert "actor" in self.role, "save_checkpoint only support actor role"
-        self.actor.save_checkpoint(local_path, hdfs_path, global_step, max_ckpt_to_keep)
+        if save_hf_model is None:
+            self.actor.save_checkpoint(local_path, hdfs_path, global_step, max_ckpt_to_keep)
+            return
+        self.actor.save_checkpoint(
+            local_path,
+            hdfs_path,
+            global_step,
+            max_ckpt_to_keep,
+            save_hf_model=save_hf_model,
+        )
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL, blocking=False)
     async def update_weights(self, global_steps: int = None):

@@ -17,7 +17,7 @@ tmp_st_job_configs_*
 eval_results
 .venv-megatron
 .venv-gemma4
-lm-evaluation-harness
+artifacts
 plots
 third_party/Megatron-Bridge/.git
 third_party/nemo-rl/.git
