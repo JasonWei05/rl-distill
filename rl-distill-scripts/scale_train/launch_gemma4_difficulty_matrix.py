@@ -20,6 +20,7 @@ class JobSpec:
     run_file: str
     logical_runs: tuple[str, ...]
     env: dict[str, str]
+    gpus: int = 8
 
 
 MODEL_REVISIONS = {
@@ -32,6 +33,12 @@ DATASET_REPO = "JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k"
 DATASET_REVISION = "a0ba3c3dc07c7bc27e901670ceb1a0b0ceeaa8db"
 RUN_ARTIFACT_S3_BASE = "s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-20260819"
 FULL_CHECKPOINT_S3_BASE = f"{RUN_ARTIFACT_S3_BASE}-full-checkpoints"
+# E2B bands are rerun from scratch under the new rolling-checkpoint infra. A fresh
+# S3 base (and W&B suffix) keeps them from resuming the original runs' final
+# checkpoints and from colliding with the original W&B curves.
+E2B_RERUN_ARTIFACT_S3_BASE = "s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-e2b-rerun-20260902"
+E2B_RERUN_FULL_CHECKPOINT_S3_BASE = f"{E2B_RERUN_ARTIFACT_S3_BASE}-full-checkpoints"
+E2B_RERUN_WANDB_SUFFIX = "rerun-v2"
 BANDS = ("easy", "medium", "hard")
 
 
@@ -197,6 +204,25 @@ def build_job_specs(*, seed: int, total_steps: int, phase: str) -> list[JobSpec]
         "ROUTER_REPLAY_MODE": "R3",
         "SEQUENTIAL_COOLDOWN_SECONDS": "30",
     }
+    # E2B rerun (dense model, 4 GPUs, one ScaleTrain job per band) under the new
+    # rolling-checkpoint infra, from scratch on a fresh S3 base and W&B suffix.
+    e2b_common = {
+        **common,
+        "EARLY_STOPPING_PATIENCE": "5",
+        "GEMMA4_MODEL": "google/gemma-4-E2B",
+        "GEMMA4_MODEL_REVISION": MODEL_REVISIONS["e2b"],
+        "MICRO_BATCH_SIZE_PER_GPU": "8",
+        "MAX_PADDED_TOKENS_PER_MICROBATCH": "12288",
+        "ROLLOUT_GPU_MEMORY_UTILIZATION": "0.25",
+        "VLLM_KV_CACHE_MEMORY_BYTES": "536870912",
+        "ROLLOUT_ENFORCE_EAGER": "False",
+        "VLLM_DISABLE_COMPILE_CACHE": "0",
+        "ROUTER_REPLAY_MODE": "disabled",
+        "RUN_ARTIFACT_S3_BASE": E2B_RERUN_ARTIFACT_S3_BASE,
+        "FULL_CHECKPOINT_S3_BASE": E2B_RERUN_FULL_CHECKPOINT_S3_BASE,
+        "WANDB_RUN_SUFFIX": E2B_RERUN_WANDB_SUFFIX,
+        "RUN_NAME_SUFFIX": "26b-bands-es5-rerun",
+    }
 
     specs = [
         JobSpec(
@@ -258,6 +284,19 @@ def build_job_specs(*, seed: int, total_steps: int, phase: str) -> list[JobSpec]
             ),
         ]
     )
+    specs.extend(
+        [
+            JobSpec(
+                key=f"e2b-{band}",
+                job_name=f"g4-e2b-{band}-s{seed}-{phase}",
+                run_file="run_gemma4_difficulty_sequential.sh",
+                logical_runs=(f"e2b-{band}",),
+                env={**e2b_common, "DIFFICULTY_SEQUENCE": band},
+                gpus=4,
+            )
+            for band in BANDS
+        ]
+    )
     return specs
 
 
@@ -280,7 +319,7 @@ def launch_command(
         "--n-instances",
         "1",
         "--gpus-per-instance",
-        "8",
+        str(spec.gpus),
         "--priority",
         priority,
         "--team",

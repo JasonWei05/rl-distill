@@ -71,7 +71,7 @@ run_child() {
   local artifact_uri="${RUN_ARTIFACT_S3_BASE%/}/${MODEL_TAG}-${difficulty}"
   local checkpoint_key="${MODEL_TAG#gemma4-}-${difficulty}"
   local checkpoint_uri="${FULL_CHECKPOINT_S3_BASE%/}/${checkpoint_key}"
-  local wandb_run_id="g4ds26b-${checkpoint_key}-s${SEED}-v1"
+  local wandb_run_id="g4ds26b-${checkpoint_key}-s${SEED}-${WANDB_RUN_SUFFIX:-v1}"
   local hf_repo="JWei05/DAPO-${MODEL_TAG}-PT-DeepScaleR-gemma26b-${difficulty}-seed${SEED}-${RUN_NAME_SUFFIX:-26b-bands}"
   local legacy_early_stopping_state_b64=""
   if [ "${EARLY_STOPPING_LEGACY_RUN_KEY:-}" = "${checkpoint_key}" ]; then
