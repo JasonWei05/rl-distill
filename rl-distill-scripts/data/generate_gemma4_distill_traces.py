@@ -31,7 +31,8 @@ import platform
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
-from contextlib import contextmanager
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -65,7 +66,16 @@ from gemma4_model_identity import (
 
 DEFAULT_CHAT_TEMPLATE = Path(__file__).with_name("gemma3_it_fewshot_math.jinja")
 DEFAULT_STOP_STRINGS = ("<end_of_turn>", "<start_of_turn>")
-DIRECTIONS = ("e4b_rl100_to_e2b", "e2b_base_to_e4b")
+DIRECTIONS = (
+    "e4b_rl100_to_e2b",
+    "e2b_base_to_e4b",
+    "e4b_easy_to_e2b",
+    "e4b_medium_to_e2b",
+    "e4b_hard_to_e2b",
+    "12b_easy_to_e2b",
+    "12b_medium_to_e2b",
+    "26b_easy_to_e2b",
+)
 SPLITS = ("train", "validation")
 
 
@@ -429,6 +439,26 @@ def _resolve_teacher_identity(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError("a remote --teacher-model must be pinned by revision, not an unverifiable content hash")
         teacher_identity = generation_teacher_identity(args.teacher_model, args.teacher_revision)
 
+    source_values = (
+        args.teacher_source_repo,
+        args.teacher_source_revision,
+        args.teacher_source_subfolder,
+    )
+    if any(value is not None for value in source_values):
+        if not all(source_values):
+            raise ValueError(
+                "--teacher-source-repo, --teacher-source-revision, and --teacher-source-subfolder "
+                "must be supplied together"
+            )
+        if not _is_hex_revision(args.teacher_source_revision):
+            raise ValueError("--teacher-source-revision must be an immutable 40/64-hex revision")
+        teacher_identity = {
+            **teacher_identity,
+            "source_repo": args.teacher_source_repo,
+            "source_revision": args.teacher_source_revision,
+            "source_subfolder": args.teacher_source_subfolder.strip("/"),
+        }
+
     tokenizer_is_local = Path(args.tokenizer_model or args.teacher_model).exists()
     tokenizer_revision = args.tokenizer_revision or args.teacher_revision
     if not tokenizer_is_local and not _is_hex_revision(tokenizer_revision):
@@ -509,6 +539,9 @@ def _build_run_config(
         "gpu_memory_utilization": args.gpu_memory_utilization,
         "enforce_eager": args.enforce_eager,
         "enable_prefix_caching": args.enable_prefix_caching,
+        "enable_chunked_prefill": args.enable_chunked_prefill,
+        "max_num_seqs": args.max_num_seqs,
+        "max_num_batched_tokens": args.max_num_batched_tokens,
         "distributed_executor_backend": args.distributed_executor_backend,
         "mm_encoder_attn_backend": args.mm_encoder_attn_backend,
     }
@@ -583,6 +616,9 @@ def _make_llm(args: argparse.Namespace) -> tuple[Any, Any, Any, str]:
         "trust_remote_code": args.trust_remote_code,
         "enforce_eager": args.enforce_eager,
         "enable_prefix_caching": args.enable_prefix_caching,
+        "enable_chunked_prefill": args.enable_chunked_prefill,
+        "max_num_seqs": args.max_num_seqs,
+        "max_num_batched_tokens": args.max_num_batched_tokens,
         "seed": args.global_seed,
     }
     if revision and not Path(args.teacher_model).exists():
@@ -695,6 +731,8 @@ def run_generation(args: argparse.Namespace) -> None:
         raise ValueError("--worker-id must be in [0, --num-workers)")
     if args.samples_per_question <= 0 or args.prompts_per_shard <= 0 or args.row_group_rows <= 0:
         raise ValueError("sample/shard/row-group sizes must be positive")
+    if args.max_num_seqs <= 0 or args.max_num_batched_tokens <= 0:
+        raise ValueError("vLLM concurrency limits must be positive")
     if args.max_prompt_tokens + args.max_response_tokens > args.max_model_len:
         raise ValueError("max prompt + response tokens exceeds --max-model-len")
     if args.temperature != 1.0 or args.top_p != 1.0 or args.sampling_top_k != -1:
@@ -704,6 +742,17 @@ def run_generation(args: argparse.Namespace) -> None:
     template_path = Path(args.chat_template)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    mirror = None
+    if args.s3_mirror_uri:
+        from gemma4_trace_s3 import TraceS3Mirror
+
+        mirror = TraceS3Mirror(args.s3_mirror_uri)
+        # Two-GPU fallback runs use independent data-parallel processes with a
+        # shared output directory.  Serialize S3 restoration so they cannot
+        # download/replace the same shard concurrently at startup.
+        with file_lock(output_dir / ".s3_restore.lock"):
+            restored = mirror.restore_directory(output_dir)
+        print(f"[s3] restored {restored} files before generation", flush=True)
     source_sha256 = sha256_file(input_path)
     chat_template = template_path.read_text(encoding="utf-8")
     template_sha256 = sha256_text(chat_template)
@@ -736,6 +785,8 @@ def run_generation(args: argparse.Namespace) -> None:
     )
     run_config["runtime"] = {"llm_kwargs": llm_kwargs, "creator_worker_id": args.worker_id}
     ensure_run_config(output_dir, run_config)
+    if mirror is not None:
+        mirror.upload_file(output_dir / "run_config.json", root=output_dir)
     print(json.dumps(run_config, indent=2, sort_keys=True), flush=True)
     grader = _load_grader()
 
@@ -743,76 +794,85 @@ def run_generation(args: argparse.Namespace) -> None:
     sampling = semantic["sampling"]
     generated_shards = 0
     total_shards = int(semantic["total_shards"])
-    for shard_id in range(total_shards):
-        if shard_id % args.num_workers != args.worker_id:
-            continue
-        if args.max_shards > 0 and generated_shards >= args.max_shards:
-            break
-        parquet_path = output_dir / _shard_filename(args.split, shard_id)
-        with file_lock(output_dir / f".{parquet_path.name}.lock"):
-            if _valid_completed_shard(parquet_path, run_config, tokenizer, shard_id):
-                print(f"[resume] shard {shard_id}/{total_shards} is complete", flush=True)
+    pending_uploads: list[Future[Any]] = []
+    executor_context = ThreadPoolExecutor(max_workers=1) if mirror is not None else nullcontext(None)
+    with executor_context as upload_executor:
+        for shard_id in range(total_shards):
+            if shard_id % args.num_workers != args.worker_id:
                 continue
-            prompt_start = shard_id * args.prompts_per_shard
-            prompt_end = min(prompt_start + args.prompts_per_shard, len(prompts))
-            shard_prompts = prompts[prompt_start:prompt_end]
-            prepared: list[PreparedRequest] = []
-            prompt_requests: list[dict[str, list[int]]] = []
-            sampling_params: list[Any] = []
-            for source in shard_prompts:
-                prompt_ids = _render_prompt(tokenizer, source.messages, chat_template)
-                if len(prompt_ids) > args.max_prompt_tokens:
-                    raise ValueError(
-                        f"source UID {source.source_uid} renders to {len(prompt_ids)} tokens, above "
-                        f"the {args.max_prompt_tokens}-token contract; prompts are never truncated"
-                    )
-                for sample_index in range(args.samples_per_question):
-                    seed = derive_sampling_seed(args.global_seed, args.split, source.source_uid, sample_index)
-                    request = PreparedRequest(source, sample_index, seed, prompt_ids)
-                    prepared.append(request)
-                    prompt_requests.append({"prompt_token_ids": prompt_ids})
-                    sampling_params.append(_sampling_params(SamplingParams, sampling, seed))
-            print(
-                f"[generate] shard {shard_id}/{total_shards}: prompts [{prompt_start}:{prompt_end}], "
-                f"requests={len(prompt_requests)}",
-                flush=True,
-            )
-            outputs = llm.generate(prompt_requests, sampling_params, use_tqdm=True)
-            if len(outputs) != len(prepared):
-                raise RuntimeError(f"vLLM returned {len(outputs)} outputs for {len(prepared)} requests")
-            timestamp = utc_now()
-            records: list[dict[str, Any]] = []
-            for row_within_shard, (request, output) in enumerate(zip(prepared, outputs, strict=True)):
-                if len(output.outputs) != 1:
-                    raise RuntimeError("vLLM returned an unexpected number of completions")
-                response_text = normalized_decode(tokenizer, list(output.outputs[0].token_ids))
-                strict_grade = float(grader.compute_score(response_text, request.source.gold_answer))
-                strict_prediction = str(grader.extract_prediction(response_text))
-                records.append(
-                    build_trace_record(
-                        request=request,
-                        output=output,
-                        shard_id=shard_id,
-                        row_within_shard=row_within_shard,
-                        run_config=run_config,
-                        tokenizer=tokenizer,
-                        strict_grade=strict_grade,
-                        strict_prediction=strict_prediction,
-                        generation_timestamp=timestamp,
-                    )
+            if args.max_shards > 0 and generated_shards >= args.max_shards:
+                break
+            parquet_path = output_dir / _shard_filename(args.split, shard_id)
+            with file_lock(output_dir / f".{parquet_path.name}.lock"):
+                if _valid_completed_shard(parquet_path, run_config, tokenizer, shard_id):
+                    print(f"[resume] shard {shard_id}/{total_shards} is complete", flush=True)
+                    continue
+                prompt_start = shard_id * args.prompts_per_shard
+                prompt_end = min(prompt_start + args.prompts_per_shard, len(prompts))
+                shard_prompts = prompts[prompt_start:prompt_end]
+                prepared: list[PreparedRequest] = []
+                prompt_requests: list[dict[str, list[int]]] = []
+                sampling_params: list[Any] = []
+                for source in shard_prompts:
+                    prompt_ids = _render_prompt(tokenizer, source.messages, chat_template)
+                    if len(prompt_ids) > args.max_prompt_tokens:
+                        raise ValueError(
+                            f"source UID {source.source_uid} renders to {len(prompt_ids)} tokens, above "
+                            f"the {args.max_prompt_tokens}-token contract; prompts are never truncated"
+                        )
+                    for sample_index in range(args.samples_per_question):
+                        seed = derive_sampling_seed(args.global_seed, args.split, source.source_uid, sample_index)
+                        request = PreparedRequest(source, sample_index, seed, prompt_ids)
+                        prepared.append(request)
+                        prompt_requests.append({"prompt_token_ids": prompt_ids})
+                        sampling_params.append(_sampling_params(SamplingParams, sampling, seed))
+                print(
+                    f"[generate] shard {shard_id}/{total_shards}: prompts [{prompt_start}:{prompt_end}], "
+                    f"requests={len(prompt_requests)}",
+                    flush=True,
                 )
-            _write_validated_shard(
-                records,
-                parquet_path=parquet_path,
-                shard_id=shard_id,
-                prompt_start=prompt_start,
-                prompt_end=prompt_end,
-                run_config=run_config,
-                tokenizer=tokenizer,
-                row_group_rows=args.row_group_rows,
-            )
-            generated_shards += 1
-            print(f"[saved] {parquet_path} ({len(records)} rows)", flush=True)
+                outputs = llm.generate(prompt_requests, sampling_params, use_tqdm=True)
+                if len(outputs) != len(prepared):
+                    raise RuntimeError(f"vLLM returned {len(outputs)} outputs for {len(prepared)} requests")
+                timestamp = utc_now()
+                records: list[dict[str, Any]] = []
+                for row_within_shard, (request, output) in enumerate(zip(prepared, outputs, strict=True)):
+                    if len(output.outputs) != 1:
+                        raise RuntimeError("vLLM returned an unexpected number of completions")
+                    response_text = normalized_decode(tokenizer, list(output.outputs[0].token_ids))
+                    strict_grade = float(grader.compute_score(response_text, request.source.gold_answer))
+                    strict_prediction = str(grader.extract_prediction(response_text))
+                    records.append(
+                        build_trace_record(
+                            request=request,
+                            output=output,
+                            shard_id=shard_id,
+                            row_within_shard=row_within_shard,
+                            run_config=run_config,
+                            tokenizer=tokenizer,
+                            strict_grade=strict_grade,
+                            strict_prediction=strict_prediction,
+                            generation_timestamp=timestamp,
+                        )
+                    )
+                _write_validated_shard(
+                    records,
+                    parquet_path=parquet_path,
+                    shard_id=shard_id,
+                    prompt_start=prompt_start,
+                    prompt_end=prompt_end,
+                    run_config=run_config,
+                    tokenizer=tokenizer,
+                    row_group_rows=args.row_group_rows,
+                )
+                generated_shards += 1
+                print(f"[saved] {parquet_path} ({len(records)} rows)", flush=True)
+                if mirror is not None and upload_executor is not None:
+                    pending_uploads.append(upload_executor.submit(mirror.upload_shard, parquet_path, root=output_dir))
+                    if len(pending_uploads) >= 2:
+                        pending_uploads.pop(0).result()
+        for pending_upload in pending_uploads:
+            pending_upload.result()
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -820,6 +880,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--teacher-model", required=True)
     parser.add_argument("--teacher-revision", default=None)
     parser.add_argument("--teacher-content-sha256", default=None)
+    parser.add_argument("--teacher-source-repo", default=None)
+    parser.add_argument("--teacher-source-revision", default=None)
+    parser.add_argument("--teacher-source-subfolder", default=None)
     parser.add_argument("--tokenizer-model", default=None)
     parser.add_argument("--tokenizer-revision", default=None)
     parser.add_argument("--input-parquet", required=True)
@@ -848,8 +911,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--trust-remote-code", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--enforce-eager", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--enable-prefix-caching", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--enable-chunked-prefill", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--max-num-seqs", type=int, default=64)
+    parser.add_argument("--max-num-batched-tokens", type=int, default=32768)
     parser.add_argument("--distributed-executor-backend", default=None)
     parser.add_argument("--mm-encoder-attn-backend", default=None)
+    parser.add_argument("--s3-mirror-uri", default=None)
     return parser.parse_args(argv)
 
 
