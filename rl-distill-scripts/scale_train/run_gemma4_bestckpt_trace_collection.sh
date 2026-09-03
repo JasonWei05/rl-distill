@@ -132,7 +132,13 @@ EXPECTED_TRAIN_QUESTIONS="$(count_unique_uids "${TRAIN_PARQUET}")"
 EXPECTED_VALIDATION_QUESTIONS="$(count_unique_uids "${VALIDATION_PARQUET}")"
 SOURCE_DATASET="${DIFFICULTY_DATASET_REPO}@${DIFFICULTY_DATASET_REVISION}:${BAND}-seed${GLOBAL_SEED}"
 
-if [[ -n ${CUDA_VISIBLE_DEVICES:-} ]]; then
+# TRACE_GPU_IDS pins this collection to explicit physical GPU indices (used by the
+# async queue orchestrator, which does NOT set a parent CUDA_VISIBLE_DEVICES mask so
+# each worker can re-select its absolute device). Falls back to CUDA_VISIBLE_DEVICES,
+# then all visible GPUs.
+if [[ -n ${TRACE_GPU_IDS:-} ]]; then
+  IFS=',' read -r -a GPU_IDS <<< "${TRACE_GPU_IDS}"
+elif [[ -n ${CUDA_VISIBLE_DEVICES:-} ]]; then
   IFS=',' read -r -a GPU_IDS <<< "${CUDA_VISIBLE_DEVICES}"
 else
   mapfile -t GPU_IDS < <(nvidia-smi --query-gpu=index --format=csv,noheader | tr -d ' ')

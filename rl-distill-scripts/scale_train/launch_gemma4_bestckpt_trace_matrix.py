@@ -23,11 +23,17 @@ class TraceJob:
     job_name: str
     trace_spec: str
     gpus: int
+    run_file: str = "run_gemma4_bestckpt_trace_collection.sh"
 
 
 # Only completely-finished runs. Excludes 12b-hard (training), 26b-medium (queued),
 # 26b-hard (migrated off-cluster). best step is baked into the run-file per spec.
+#
+# "queue" packs all six collections into ONE 8-GPU job with an async GPU-pool
+# scheduler (2-GPU runs first, then 1-GPU, refilling as each finishes). The per-spec
+# jobs remain available for launching a single collection standalone.
 TRACE_JOBS = (
+    TraceJob("queue", "g4tr-queue", "", 8, run_file="run_gemma4_bestckpt_trace_queue.sh"),
     TraceJob("e4b-easy", "g4tr-e4b-easy", "e4b-easy", 1),
     TraceJob("e4b-medium", "g4tr-e4b-med", "e4b-medium", 1),
     TraceJob("e4b-hard", "g4tr-e4b-hard", "e4b-hard", 1),
@@ -71,10 +77,10 @@ def launch_command(
         "--job-name",
         job.job_name,
         "--run-file",
-        "run_gemma4_bestckpt_trace_collection.sh",
-        "--env-vars",
-        f"TRACE_SPEC={job.trace_spec}",
+        job.run_file,
     ]
+    if job.trace_spec:
+        command += ["--env-vars", f"TRACE_SPEC={job.trace_spec}"]
     if allow_borrowing:
         command.append("--allow-borrowing")
     if image:
@@ -98,7 +104,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     available = {job.key for job in TRACE_JOBS}
-    selected = set(args.select) if args.select else available
+    # Default (no --select) is the six per-spec jobs; the packed "queue" is opt-in
+    # (and is mutually exclusive with the per-spec jobs — do not run both).
+    selected = set(args.select) if args.select else (available - {"queue"})
     unknown = selected.difference(available)
     if unknown:
         raise SystemExit(f"unknown --select values: {sorted(unknown)}; available: {sorted(available)}")
