@@ -114,6 +114,49 @@ VENV="$PWD/.venv-gemma4" \
 - **Fresh W&B run:** set `EXP_NAME=<your-name>` and omit `WANDB_RUN_ID`.
 - **No W&B:** leave `WANDB_API_KEY` out of `.env`.
 
+## 3b. Faster update phase (measured) and local checkpoint cadence
+
+The block above is the original ScaleTrain recipe. On a single 8xH100 node it spends 75% of each step
+in `update_actor`, because the FSDP2 CPU offload policy moves parameters and gradients over PCIe for
+every one of the 128 single-sequence micro-batches per GPU. Measured on the same step-51 batch from the
+step-50 checkpoint (2026-09-03):
+
+| Config | gen | old log-prob | update_actor | step |
+|---|---|---|---|---|
+| recipe: mbsz 1, 4096 padded cap, `FSDP_CPU_OFFLOAD_POLICY=True`, vLLM resident | 410 s | 109 s | 1625 s | 2157 s |
+| mbsz 4, 8192 cap, offload policy on | 416 s | 47 s | 553 s | 1025 s |
+| **mbsz 4, 8192 cap, `FSDP_CPU_OFFLOAD_POLICY=False OFFLOAD=True`, vLLM sleep mode** | 267 s | 42 s | **110 s** | **439 s** |
+
+Gradient norms and the vLLM/trainer importance ratio were unchanged across the three. The micro-batch
+size is gradient-neutral because the token-mean loss is normalized by the global token count. The
+winning row keeps the fp32 master/Adam state on GPU only during the update (one bulk copy per phase)
+and puts the 52 GB bf16 vLLM copy to sleep in host RAM during it (`VLLM_SLEEP_MODE=True`, level 1);
+peak update memory was 76.8 GB/GPU, bounded by `MAX_PADDED_TOKENS_PER_MICROBATCH`. Fully removing
+offload is not possible on 80 GB cards: fp32 master + grads + Adam is 51.6 GB/GPU and a TP=1 vLLM copy
+another ~56 GB; sharding vLLM with `GEN_TP=8` made it worse (one engine holding all 1024 sequences
+replicates full-vocab logits on every rank, ~49 GB/GPU during generation).
+
+`rl-distill-scripts/resume_gemma4_26b_hard_local.sh` wraps the recipe with these defaults plus a local
+checkpoint cadence (`SAVE_FREQ=2`, `MAX_ACTOR_CKPT_TO_KEEP=2`, validation and HF push every 10 steps):
+
+```bash
+CKPTS_DIR="$HOME/gemma4-26b-hard-s42/ckpts" bash rl-distill-scripts/resume_gemma4_26b_hard_local.sh
+```
+
+Every knob is `${VAR:-default}`; `VLLM_SLEEP_MODE=False FSDP_CPU_OFFLOAD_POLICY=True OFFLOAD=False
+MICRO_BATCH_SIZE_PER_GPU=1 MAX_PADDED_TOKENS_PER_MICROBATCH=4096` reproduces the original recipe.
+
+Two operational notes:
+
+- verl prunes only checkpoints written by the current process, so `global_step_*` directories left by
+  earlier resumes (~334 GB each) must be deleted by hand.
+- HF snapshot pushes are bounded to the newest `HF_PUSH_MAX_TO_KEEP` (default 3): the pusher prunes the
+  repo before each upload and squashes history, since deleting LFS pointers alone does not free Hub quota.
+  On a free-tier account the Hub rejects commits at the account cap
+  (`You have exceeded your public storage space`), and freed space is reflected with delay; pushes are
+  non-fatal (`HF_PUSH_REQUIRED=False`) so this cannot fail a finished run. Keep >= 3 so the
+  early-stopping best (patience 2) is always still on the Hub.
+
 ## 4. Confirm the resume actually restored optimizer + dataset position
 
 In the first minutes of the log you should see (not a cold start):

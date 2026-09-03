@@ -174,6 +174,13 @@ VLLM_KV_CACHE_MEMORY_BYTES="${VLLM_KV_CACHE_MEMORY_BYTES:-536870912}"
 ROLLOUT_ENFORCE_EAGER="${ROLLOUT_ENFORCE_EAGER:-True}"
 VERL_SKIP_VLLM_MM_WEIGHT_RELOAD="${VERL_SKIP_VLLM_MM_WEIGHT_RELOAD:-0}"
 ROUTER_REPLAY_MODE="${ROUTER_REPLAY_MODE:-disabled}"
+# vLLM sleep mode (see the rollout overrides below). Off by default to keep the validated ScaleTrain behavior.
+VLLM_SLEEP_MODE="${VLLM_SLEEP_MODE:-False}"
+case "${VLLM_SLEEP_MODE,,}" in
+  true|1|yes|on) VLLM_SLEEP_MODE=True ;;
+  false|0|no|off) VLLM_SLEEP_MODE=False ;;
+  *) echo "FATAL: VLLM_SLEEP_MODE must be True or False; got ${VLLM_SLEEP_MODE}" >&2; exit 2 ;;
+esac
 ROUTER_Z_LOSS_COEF="${ROUTER_Z_LOSS_COEF:-0.0}"
 if [ "${ROUTER_Z_LOSS_COEF}" != 0 ] && [ "${ROUTER_Z_LOSS_COEF}" != 0.0 ]; then
   echo "FATAL: Gemma 4 FSDP2 router z-loss is not implemented in this trainer; use ROUTER_Z_LOSS_COEF=0.0" >&2
@@ -396,11 +403,14 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu="${MICRO_BATCH_SIZE_PER_GPU}" \
       actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu="${MICRO_BATCH_SIZE_PER_GPU}" \
       actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu="${MICRO_BATCH_SIZE_PER_GPU}" \
-      `# vLLM sleep/wake (cumem) is fragile on this stack (wake_up OOM after Adam states materialize;` \
-      `# also cumem invalid-argument on E4B). Disable sleep entirely: engine stays resident at a small` \
-      `# util (0.3 via env) and weight-sync loads into the live engine. Trainer gets ~54GB vs ~40 peak.` \
-      actor_rollout_ref.rollout.free_cache_engine=False \
-      ++actor_rollout_ref.rollout.enable_sleep_mode=False \
+      `# vLLM sleep mode. VLLM_SLEEP_MODE=False (default): engine stays resident and weight-sync loads into` \
+      `# the live engine -- chosen when cumem sleep/wake was fragile (wake_up OOM once Adam states lived on` \
+      `# GPU; cumem invalid-argument on E4B). VLLM_SLEEP_MODE=True: level-1 sleep parks the bf16 weights in` \
+      `# host RAM during the update, freeing ~52 GB/GPU for 26B-A4B; with OFFLOAD=True and no FSDP CPU` \
+      `# offload policy that cut update_actor from 1625 s to 110 s (8xH100, 2026-09-03, see` \
+      `# RESUME_GEMMA4_26B_HARD_LOCAL.md).` \
+      actor_rollout_ref.rollout.free_cache_engine="${VLLM_SLEEP_MODE}" \
+      ++actor_rollout_ref.rollout.enable_sleep_mode="${VLLM_SLEEP_MODE}" \
       ++trainer.early_stopping.enabled="${EARLY_STOPPING_ENABLED:-False}" \
       ++trainer.early_stopping.metric="${EARLY_STOPPING_METRIC:-val-core/math/acc/mean@16}" \
       ++trainer.early_stopping.mode="${EARLY_STOPPING_MODE:-max}" \
