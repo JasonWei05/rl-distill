@@ -10,7 +10,7 @@ no S3), so it works on any 8-GPU node.
 | Band | HuggingFace repo (public) | Step | Best mean@16 (at upload) |
 |---|---|---:|---|
 | hard | `JWei05/gemma-4-26B-A4B-DeepScaleR-hard-s42-fullckpt-step47` | 47 | 0.211 @ 40 |
-| medium | `JWei05/gemma-4-26B-A4B-DeepScaleR-medium-s42-fullckpt-step80` | 80 | 0.649 @ 80 |
+| medium | `JWei05/gemma-4-26B-A4B-DeepScaleR-medium-s42-fullckpt-step90` | 90 | 0.656 @ 90 |
 
 Both are FSDP2-sharded at `world_size=8`, so they **must** resume on **exactly 8 GPUs**
 (80 GB cards assumed; the memory knobs below target that). The `medium` checkpoint is a
@@ -28,7 +28,7 @@ Set these three once; every command below uses them.
 
 ```bash
 export BAND=medium                                                            # medium | hard
-export STEP=80                                                                # 80 for medium, 47 for hard
+export STEP=90                                                                # 90 for medium, 47 for hard
 export HF_REPO=JWei05/gemma-4-26B-A4B-DeepScaleR-${BAND}-s42-fullckpt-step${STEP}
 ```
 
