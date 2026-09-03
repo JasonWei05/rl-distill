@@ -81,3 +81,74 @@ def test_wait_helper_preserves_primary_training_failure(capsys):
     assert "upload failed" in capsys.readouterr().err
     if hasattr(exc_info.value, "__notes__"):
         assert any("upload failed" in note for note in exc_info.value.__notes__)
+
+
+class _FakeHubApi:
+    """Minimal stand-in for HfApi covering what HFPusher._prune touches."""
+
+    def __init__(self, step_folders):
+        self.step_folders = set(step_folders)
+        self.deleted = []
+        self.squashes = 0
+
+    def list_repo_tree(self, repo_id, repo_type):
+        class _Entry:
+            def __init__(self, path):
+                self.path = path
+
+        return [_Entry(f"step_{s:06d}") for s in sorted(self.step_folders)] + [_Entry("README.md")]
+
+    def delete_folder(self, path_in_repo, repo_id, repo_type, commit_message):
+        self.step_folders.discard(int(path_in_repo.removeprefix("step_")))
+        self.deleted.append(path_in_repo)
+
+    def super_squash_history(self, repo_id, repo_type):
+        self.squashes += 1
+
+
+def _pusher_with_fake_hub(step_folders, max_to_keep):
+    pusher = HFPusher(repo_id="test/repo", token="test-token", enable_hf_transfer=False, max_to_keep=max_to_keep)
+    pusher._api = _FakeHubApi(step_folders)
+    return pusher
+
+
+def test_prune_lists_hub_keeps_newest_and_squashes(monkeypatch):
+    monkeypatch.delenv("HF_PUSH_SQUASH_AFTER_PRUNE", raising=False)
+    pusher = _pusher_with_fake_hub([50, 60, 70, 80, 90], max_to_keep=3)
+    pusher._pushed_steps = [90]  # only this process's push is tracked; older folders came from an earlier run
+    pusher._prune()
+    assert pusher._api.deleted == ["step_000050", "step_000060"]
+    assert pusher._remote_step_folders() == [70, 80, 90]
+    assert pusher._api.squashes == 1
+    pusher.wait(timeout=5)
+
+
+def test_prune_squash_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("HF_PUSH_SQUASH_AFTER_PRUNE", "0")
+    pusher = _pusher_with_fake_hub([10, 20, 30], max_to_keep=2)
+    pusher._prune()
+    assert pusher._api.deleted == ["step_000010"]
+    assert pusher._api.squashes == 0
+    pusher.wait(timeout=5)
+
+
+def test_prune_is_noop_when_within_limit_or_unbounded():
+    bounded = _pusher_with_fake_hub([10, 20], max_to_keep=2)
+    bounded._prune()
+    unbounded = _pusher_with_fake_hub([10, 20, 30, 40], max_to_keep=None)
+    unbounded._prune()
+    assert bounded._api.deleted == [] and unbounded._api.deleted == []
+    bounded.wait(timeout=5)
+    unbounded.wait(timeout=5)
+
+
+def test_make_room_before_upload_prunes_to_one_below_limit(monkeypatch):
+    monkeypatch.setenv("HF_PUSH_SQUASH_AFTER_PRUNE", "0")
+    pusher = _pusher_with_fake_hub([70, 80, 90], max_to_keep=3)
+    pusher._make_room_before_upload()
+    assert pusher._api.deleted == ["step_000070"]
+    single = _pusher_with_fake_hub([70, 80, 90], max_to_keep=1)
+    single._make_room_before_upload()  # keep=1 must never delete everything before the upload
+    assert single._api.deleted == []
+    pusher.wait(timeout=5)
+    single.wait(timeout=5)

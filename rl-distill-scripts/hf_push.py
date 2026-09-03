@@ -105,7 +105,7 @@ def _remote_upload_impl(
     api = _HfApi(token=token)
     if not private:
         try:
-            api.update_repo_visibility(repo_id=repo_id, private=False, token=token, repo_type="model")
+            api.update_repo_settings(repo_id=repo_id, private=False, repo_type="model")
         except Exception as e:
             print(f"[HFPusher] repo visibility update skipped: {e}", flush=True)
     for attempt in range(1, max_retries + 1):
@@ -205,7 +205,8 @@ class HFPusher:
     token: str | None = None
     enable_hf_transfer: bool = True
     max_retries: int = 3
-    # Keep last N step-folders on the hub (None = keep all). Oldest get deleted.
+    # Keep the newest N step-folders on the Hub (None = keep all). Before each upload the repo is pruned to
+    # N-1 and after it to N; pruned LFS blobs are released by squashing history (see _prune).
     max_to_keep: int | None = None
 
     _pushed_steps: list = field(default_factory=list)
@@ -264,12 +265,7 @@ class HFPusher:
         )
         if not self.private:
             try:
-                self._api.update_repo_visibility(
-                    repo_id=self.repo_id,
-                    private=False,
-                    repo_type="model",
-                    token=self.token,
-                )
+                self._api.update_repo_settings(repo_id=self.repo_id, private=False, repo_type="model")
             except Exception as e:
                 print(f"[HFPusher] repo visibility update skipped: {e}", flush=True)
         self._repo_ready = True
@@ -296,12 +292,36 @@ class HFPusher:
         print(f"[HFPusher] step {step} giving up after {self.max_retries} retries", flush=True)
         return False
 
-    def _prune(self):
-        """Delete oldest step-folders on the Hub, keeping only max_to_keep."""
-        if self.max_to_keep is None or len(self._pushed_steps) <= self.max_to_keep:
+    def _remote_step_folders(self) -> list[int]:
+        """Return the sorted step numbers of top-level ``step_NNNNNN`` folders currently on the Hub."""
+        steps = set()
+        for entry in self._api.list_repo_tree(repo_id=self.repo_id, repo_type="model"):
+            name = getattr(entry, "path", "")
+            if name.startswith("step_") and name[5:].isdigit():
+                steps.add(int(name[5:]))
+        return sorted(steps)
+
+    def _prune(self, keep: int | None = None):
+        """Keep only the newest ``keep`` (default ``max_to_keep``) step-folders on the Hub, then squash history.
+
+        The Hub is listed directly (not just this process's ``_pushed_steps``) so folders pushed by a
+        previous run/resume are pruned too. Deleting LFS pointers alone does not free storage quota on
+        the Hub; ``super_squash_history`` rewrites the repo to a single commit so the deleted blobs are
+        actually released (quota reflects it within ~36h). Disable with HF_PUSH_SQUASH_AFTER_PRUNE=0.
+        """
+        keep = self.max_to_keep if keep is None else keep
+        if keep is None:
             return
-        to_drop = self._pushed_steps[: -self.max_to_keep]
-        self._pushed_steps = self._pushed_steps[-self.max_to_keep :]
+        try:
+            remote_steps = self._remote_step_folders()
+        except Exception as e:
+            print(f"[HFPusher] prune: could not list {self.repo_id}: {e}", flush=True)
+            remote_steps = sorted(set(self._pushed_steps))
+        if len(remote_steps) <= keep:
+            return
+        to_drop = remote_steps[:-keep]
+        self._pushed_steps = [s for s in self._pushed_steps if s not in to_drop]
+        dropped_any = False
         for step in to_drop:
             path = f"step_{step:06d}"
             try:
@@ -311,13 +331,28 @@ class HFPusher:
                     repo_type="model",
                     commit_message=f"prune {path}",
                 )
+                dropped_any = True
                 print(f"[HFPusher] pruned {path} from hub", flush=True)
             except Exception as e:
                 print(f"[HFPusher] prune {path} failed: {e}", flush=True)
+        squash = os.environ.get("HF_PUSH_SQUASH_AFTER_PRUNE", "1").strip().lower() not in {"0", "false", "no", "off"}
+        if dropped_any and squash:
+            try:
+                self._api.super_squash_history(repo_id=self.repo_id, repo_type="model")
+                print(f"[HFPusher] squashed history of {self.repo_id} to release pruned LFS storage", flush=True)
+            except Exception as e:
+                print(f"[HFPusher] super_squash_history failed (storage not released): {e}", flush=True)
+
+    def _make_room_before_upload(self):
+        """Prune to max_to_keep-1 BEFORE uploading: the Hub checks storage quota at commit time, so
+        uploading first would require a full extra snapshot of headroom on an account near its cap."""
+        if self.max_to_keep is not None and self.max_to_keep > 1:
+            self._prune(keep=self.max_to_keep - 1)
 
     def _do_one_local(self, local_dir: str, step: int, delete_local_after: bool):
         path_in_repo = f"step_{step:06d}"
         self._ensure_repo()
+        self._make_room_before_upload()
         ok = self._upload_with_retry(local_dir, path_in_repo, step)
         if ok:
             self._pushed_steps.append(step)
