@@ -160,6 +160,7 @@ def build_math_command(
     request_batch_size: int,
     questions_per_batch: int = 1,
     kv_cache_memory_gib: float | None = None,
+    predictive_topk_width: int | None = None,  # None = the manifest value
 ) -> list[str]:
     sampling = data_manifest["sampling"]
     command = [
@@ -196,7 +197,7 @@ def build_math_command(
         "--max_model_len",
         str(sampling["max_model_len"]),
         "--predictive_topk_width",
-        str(sampling["predictive_topk_width"]),
+        str(sampling["predictive_topk_width"] if predictive_topk_width is None else predictive_topk_width),
         "--tensor_parallel_size",
         str(tensor_parallel_size),
         "--gpu_memory_utilization",

@@ -3,8 +3,10 @@
 # EVAL_QUEUE_SLOTS_PER_GPU slots (default 2 on 80 GB H100s), one model per slot; the model runs its
 # whole suite (math: 3 bands + MATH500 + GSM8K, then OOD: MMLU-Pro / GPQA-Diamond / MMLU-14k) via
 # run_gemma4_rl_distill_eval_one_model.sh, and the next model starts the moment a slot frees up.
-# Models share a GPU because the math eval is CPU-bound on vLLM's per-token top-128 logprob
-# processing (~2 cores and little GPU per model). Each vLLM instance gets a FIXED KV-cache budget
+# Generation is run WITHOUT per-token logprobs (EVAL_PREDICTIVE_TOPK_WIDTH=0): the study does not use
+# the predictive-entropy diagnostics, and requesting top-128 logprobs made each eval CPU-bound on
+# vLLM's Python output processing (~5 req/s per instance with the GPU mostly idle). Two models share
+# a GPU so 8 models progress at once. Each vLLM instance gets a FIXED KV-cache budget
 # (EVAL_KV_CACHE_GIB, default 16) instead of profiling-based sizing: vLLM's profiler measures
 # device-wide memory, so concurrent startups on one GPU otherwise mis-count each other and die with
 # "No available memory for the cache blocks". Budget per slot: E4B 15.5 GiB weights + ~4 GiB
@@ -58,6 +60,7 @@ COMMIT_DOC="${EVAL_QUEUE_COMMIT_DOC:-true}"
 if [[ -n ${EVAL_QUEUE_GPUS:-} ]]; then IFS=',' read -r -a GPUS <<< "${EVAL_QUEUE_GPUS}"; else mapfile -t GPUS < <(nvidia-smi --query-gpu=index --format=csv,noheader | tr -d ' '); fi
 SLOTS_PER_GPU="${EVAL_QUEUE_SLOTS_PER_GPU:-2}"
 export EVAL_KV_CACHE_GIB="${EVAL_KV_CACHE_GIB:-16}"
+export EVAL_PREDICTIVE_TOPK_WIDTH="${EVAL_PREDICTIVE_TOPK_WIDTH:-0}"   # 0 = no logprobs (set 128 to restore the entropy diagnostics)
 LAUNCH_STAGGER="${EVAL_QUEUE_LAUNCH_STAGGER:-20}"
 export EVAL_GPU_MEMORY_UTILIZATION="${EVAL_GPU_MEMORY_UTILIZATION:-$(awk -v s="${SLOTS_PER_GPU}" 'BEGIN{printf "%.2f", int(90/s)/100}')}"
 FREE_GPUS=(); for ((s = 0; s < SLOTS_PER_GPU; s++)); do FREE_GPUS+=("${GPUS[@]}"); done   # round-robin slots over GPUs
@@ -119,7 +122,7 @@ reap() {
   return "${progressed}"
 }
 
-echo "EVAL_QUEUE start gpus=[${GPUS[*]}] slots_per_gpu=${SLOTS_PER_GPU} kv_cache_gib=${EVAL_KV_CACHE_GIB} gpu_mem_util=${EVAL_GPU_MEMORY_UTILIZATION} registry=${REGISTRY} results=${RESULTS_BASE}"
+echo "EVAL_QUEUE start gpus=[${GPUS[*]}] slots_per_gpu=${SLOTS_PER_GPU} kv_cache_gib=${EVAL_KV_CACHE_GIB} topk_logprobs=${EVAL_PREDICTIVE_TOPK_WIDTH} gpu_mem_util=${EVAL_GPU_MEMORY_UTILIZATION} registry=${REGISTRY} results=${RESULTS_BASE}"
 poll=0
 while true; do
   if ((poll % REFRESH_EVERY == 0)); then refresh_registry; fi

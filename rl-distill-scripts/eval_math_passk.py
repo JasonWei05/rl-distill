@@ -386,6 +386,28 @@ def _logprob_field(entry: Any, field_name: str) -> Any:
     return getattr(entry, field_name, None)
 
 
+def _no_predictive_statistics() -> dict[str, Any]:
+    """Placeholder statistics when logprobs are not requested (``predictive_topk_width == 0``).
+
+    Requesting per-token top-k logprobs makes vLLM's Python output processing the bottleneck
+    (~1 core per instance, GPU mostly idle); the study does not use the entropy diagnostics, so the
+    queue runs generation-only. Sampled tokens are unaffected (logprobs are read-only).
+    """
+    return {
+        "predictive_entropy_kind": None,
+        "predictive_topk_width": 0,
+        "sequence_entropy": None,
+        "token_entropy_sum": 0.0,
+        "token_entropy_count": 0,
+        "predictive_topk_mass_sum": 0.0,
+        "predictive_topk_mass_count": 0,
+        "predictive_topk_mass_mean": None,
+        "sampled_token_logprob_sum": 0.0,
+        "sampled_token_logprob_count": 0,
+        "sampled_token_logprob_mean": None,
+    }
+
+
 def _extract_predictive_statistics(
     completion: Any,
     *,
@@ -499,7 +521,7 @@ def _make_sampling_params(
         top_k=top_k,
         max_tokens=max_tokens,
         stop=list(STOP_STRINGS),
-        logprobs=predictive_topk_width,
+        logprobs=predictive_topk_width if predictive_topk_width > 0 else None,
         seed=seed,
     )
 
@@ -544,8 +566,8 @@ def evaluate_questions(
 
     if samples_per_question <= 0:
         raise ValueError("samples_per_question must be positive")
-    if predictive_topk_width <= 0:
-        raise ValueError("predictive_topk_width must be positive")
+    if predictive_topk_width < 0:
+        raise ValueError("predictive_topk_width must be non-negative (0 disables logprobs)")
     if request_batch_size <= 0:
         raise ValueError("request_batch_size must be positive")
     if questions_per_batch <= 0:
@@ -613,11 +635,15 @@ def evaluate_questions(
                 score = float(grader.compute_score(text, request.question.gold_answer))
                 prediction = grader.extract_prediction(text)
                 prediction = None if prediction is None or not str(prediction).strip() else str(prediction)
-                predictive = _extract_predictive_statistics(
-                    completion,
-                    topk_width=predictive_topk_width,
-                    store_topk_logprobs=store_topk_logprobs,
-                    store_per_token_diagnostics=store_per_token_diagnostics,
+                predictive = (
+                    _extract_predictive_statistics(
+                        completion,
+                        topk_width=predictive_topk_width,
+                        store_topk_logprobs=store_topk_logprobs,
+                        store_per_token_diagnostics=store_per_token_diagnostics,
+                    )
+                    if predictive_topk_width > 0
+                    else _no_predictive_statistics()
                 )
                 traces_by_question[group_index].append(
                     {
@@ -719,7 +745,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--top_k", type=int, default=-1)
-    parser.add_argument("--predictive_topk_width", type=int, default=DEFAULT_PREDICTIVE_TOPK_WIDTH)
+    parser.add_argument(
+        "--predictive_topk_width",
+        type=int,
+        default=DEFAULT_PREDICTIVE_TOPK_WIDTH,
+        help="top-k logprobs per token for the predictive-entropy diagnostics; 0 = request no logprobs (much faster)",
+    )
     parser.add_argument("--store_predictive_topk_logprobs", action="store_true")
     parser.add_argument(
         "--store_per_token_diagnostics",
@@ -766,8 +797,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
     if args.max_prompt_tokens + args.max_tokens > args.max_model_len:
         raise ValueError("max_prompt_tokens + max_tokens exceeds max_model_len")
-    if args.predictive_topk_width <= 0:
-        raise ValueError("predictive_topk_width must be positive")
+    if args.predictive_topk_width < 0:
+        raise ValueError("predictive_topk_width must be non-negative (0 disables logprobs)")
     if args.request_batch_size <= 0:
         raise ValueError("request_batch_size must be positive")
     if args.questions_per_batch <= 0:
@@ -826,13 +857,18 @@ def main(argv: Sequence[str] | None = None) -> None:
             "max_model_len": args.max_model_len,
             "predictive_topk_width": args.predictive_topk_width,
         }
-        if cli_sampling != manifest["sampling"]:
+        manifest_sampling = dict(manifest["sampling"])
+        if args.predictive_topk_width == 0:
+            # generation-only mode: logprobs are not part of sampling, so the pinned width is not enforced
+            cli_sampling.pop("predictive_topk_width")
+            manifest_sampling.pop("predictive_topk_width", None)
+        if cli_sampling != manifest_sampling:
             raise ValueError(
                 "CLI sampling settings do not match the dataset protocol manifest: "
-                f"expected {manifest['sampling']}, found {cli_sampling}"
+                f"expected {manifest_sampling}, found {cli_sampling}"
             )
     resolved_config = vars(args).copy()
-    resolved_config["predictive_entropy_kind"] = PREDICTIVE_ENTROPY_KIND
+    resolved_config["predictive_entropy_kind"] = PREDICTIVE_ENTROPY_KIND if args.predictive_topk_width > 0 else None
     resolved_config["model_identity"] = model_identity
     resolved_config["excluded_question_sha256s"] = sorted(excluded_question_sha256s)
     resolved_config["dataset_protocol_entries"] = dataset_protocol

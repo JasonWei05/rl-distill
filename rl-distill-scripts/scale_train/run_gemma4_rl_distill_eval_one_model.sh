@@ -94,6 +94,7 @@ RESOLVED_REGISTRY="${MODEL_ROOT}/resolved_model_registry.json"
   --output-root "${RESULT_ROOT}" \
   --gpu-memory-utilization "${EVAL_GPU_MEMORY_UTILIZATION:-0.9}" \
   ${EVAL_KV_CACHE_GIB:+--kv-cache-memory-gib "${EVAL_KV_CACHE_GIB}"} \
+  ${EVAL_PREDICTIVE_TOPK_WIDTH:+--predictive-topk-width "${EVAL_PREDICTIVE_TOPK_WIDTH}"} \
   --request-batch-size "${MATH_REQUEST_BATCH_SIZE:-8}" --questions-per-batch "${MATH_QUESTIONS_PER_BATCH:-1}" --execute
 
 upload_results

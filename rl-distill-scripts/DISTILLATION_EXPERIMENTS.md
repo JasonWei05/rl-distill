@@ -127,9 +127,17 @@ Each teacher's traces are generated once and reused across its student(s).
    2 GPUs (fp32 master + Adam do not fit smaller). Final distilled export = **step 500**. ✅
 5. **Still-training teachers** — e2b-medium and 26b-a4b medium/hard are pinned at their W&B peaks
    at pin time (§1 ▸); re-pin (W&B best → Hub step → commit) if they are frozen later. ✅
-6. **Evaluation** — only the e2b/e4b RL teachers, every distilled student, and the two bases are
-   evaluated (§7); the 12b/26b teachers are not. In-distribution = the model's own 300-q band
+6. **Evaluation** — only the e2b/e4b RL teachers and every distilled student are evaluated (§7);
+   the 12b/26b teachers are not, and the two untrained bases were dropped on 2026-09-04 (already
+   evaluated in the earlier three-model study). In-distribution = the model's own 300-q band
    (all three bands are run; the other two are cross-band transfer). ✅
+7. **Eval throughput (2026-09-04)** — the math eval was CPU-bound: the protocol's per-token top-128
+   logprobs (predictive-entropy diagnostic) made vLLM's Python output processing the bottleneck
+   (~5 req/s per instance, GPU mostly idle; batching 64 questions per call only gave 1.4×). Decisions:
+   (a) generation runs **without logprobs** (`EVAL_PREDICTIVE_TOPK_WIDTH=0`; entropy fields are null,
+   sampled tokens unaffected, mean@k/pass@k/maj@k unchanged); (b) two models per 80 GB H100 with a
+   fixed 16 GiB KV budget per vLLM instance (`kv_cache_memory_bytes` — the profiler is device-wide and
+   concurrent startups on a shared GPU otherwise abort); (c) every model has its own results root. ✅
 
 ## 6. Two-node execution plan (plain local scripts — no ScaleTrain)
 
@@ -214,16 +222,20 @@ splits; results are kept apart under `s3://scale-ml/genai/rl-distill/gemma4-dist
 Per model ≈ 33k math generations + 26k OOD items. The untrained E2B/E4B bases are not re-run here
 (evaluated in the earlier three-model study; the queue's base runs were cancelled on 2026-09-04).
 
-Generation batches 64 questions × their seeded samples per vLLM call (`MATH_QUESTIONS_PER_BATCH`,
-`MATH_REQUEST_BATCH_SIZE`; every request carries its own deterministic seed, so the sampled set does
-not depend on batching — the one-question-at-a-time default left a B200 ~35 % busy).
+Runtime knobs (all defaults set by the queue; the manifest protocol itself is unchanged):
+`MATH_QUESTIONS_PER_BATCH=64` / `MATH_REQUEST_BATCH_SIZE=1024` batch several questions' seeded
+requests per vLLM call (every request carries its own deterministic seed, so the sampled set does not
+depend on batching); `EVAL_PREDICTIVE_TOPK_WIDTH=0` requests **no per-token logprobs** (the
+predictive-entropy diagnostics are recorded as null; with top-128 logprobs each eval was CPU-bound in
+vLLM's Python output processing at ~5 req/s); `EVAL_KV_CACHE_GIB=16` fixes each vLLM instance's KV
+budget so two models can share an 80 GB H100; `EVAL_GPU_MEMORY_UTILIZATION=0.45`.
 
 ```bash
-# Local GPU-pool queue (the way the study is evaluated): 2 models per 80 GB H100 (EVAL_QUEUE_SLOTS_PER_GPU;
-# the math eval is CPU-bound on vLLM's top-128 logprob processing, ~2 cores and little GPU per model). Each
-# vLLM instance gets a fixed EVAL_KV_CACHE_GIB=16 KV budget (vLLM's memory profiler is device-wide, so
-# concurrent startups on a shared GPU otherwise mis-size each other and abort). Full suite per model
-# (math -> OOD -> RUN_COMPLETE.json); the next roster entry starts as soon as a slot frees. The roster
+# Local GPU-pool queue (the way the study is evaluated): 2 models per 80 GB H100 (EVAL_QUEUE_SLOTS_PER_GPU),
+# no per-token logprobs (EVAL_PREDICTIVE_TOPK_WIDTH=0), fixed EVAL_KV_CACHE_GIB=16 KV budget per vLLM
+# instance (its memory profiler is device-wide, so concurrent startups on a shared GPU otherwise mis-size
+# each other and abort). Full suite per model (math -> OOD -> RUN_COMPLETE.json); the next roster entry
+# starts as soon as a slot frees. Override any knob by exporting it before launch. The roster
 # is refreshed from the Hub every 10 polls, so distilled students are picked up as they finish;
 # models with RUN_COMPLETE.json are skipped (safe to restart). After every completed model §8 below
 # is regenerated from the result files and committed/pushed.
