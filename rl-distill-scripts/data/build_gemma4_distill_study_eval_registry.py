@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build the eval-source registry for the Gemma 4 distillation study.
 
-Roster = the six small RL teachers (e2b/e4b x easy/medium/hard, pinned to immutable Hub commits)
-and every distilled student found on the Hub. The two base students were evaluated in the earlier
-three-model study and are only added with ``--include-bases``. Distilled repos are
+Roster = the two untrained base students (E2B/E4B, pinned), the six small RL teachers (e2b/e4b x
+easy/medium/hard, pinned to immutable Hub commits) and every distilled student found on the Hub.
+``--no-bases`` drops the bases. Distilled repos are
 discovered by name (the two node prefixes ``Distill-gemma4-`` and ``gemma4-distill-v2-``), keep
 only repos that already hold a ``step_NNNNNN/`` export (the model is pushed at the final step),
 take the latest step, and pin the repo's current ``main`` commit so a later push cannot change
@@ -123,7 +123,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--skip-discovery", action="store_true", help="do not query the Hub for distilled models")
-    parser.add_argument("--include-bases", action="store_true", help="also roster the two untrained base models (evaluated before; off by default)")
+    parser.add_argument("--no-bases", action="store_true", help="do not roster the two untrained base models")
     args = parser.parse_args()
 
     existing: dict[str, dict[str, Any]] = {}
@@ -131,7 +131,7 @@ def main() -> int:
         existing = {m["tag"]: m for m in json.loads(args.output.read_text())["models"] if m["category"] == "distilled"}
 
     models: list[dict[str, Any]] = []
-    for architecture, (repo, revision) in (BASES.items() if args.include_bases else []):
+    for architecture, (repo, revision) in ([] if args.no_bases else BASES.items()):
         student = architecture.split("-")[-1].lower()
         models.append(
             {
