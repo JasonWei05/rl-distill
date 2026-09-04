@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "protocol": "gemma4_rl_distill_eval_sources_v1",
-  "created_at_utc": "2026-09-04T19:44:26.679335+00:00",
+  "created_at_utc": "2026-09-04T20:06:30.608517+00:00",
   "study": "gemma4-distill-study",
   "models": [
     {
@@ -373,6 +373,28 @@
       }
     },
     {
+      "tag": "distill_e4b_hard_to_e2b",
+      "display_name": "Distilled E2B base <- e4b RL hard teacher (step_000500)",
+      "category": "distilled",
+      "architecture": "gemma-4-E2B",
+      "trained_on": "hard",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/Distill-gemma4-e4b-hard-to-e2b-base",
+        "revision": "2c6f3e84c4345c78ad10bdd8a4d1eb3ee9226e30",
+        "subfolder": "step_000500",
+        "metadata_repo": "google/gemma-4-E2B",
+        "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+      }
+    },
+    {
       "tag": "distill_12b_easy_to_e2b",
       "display_name": "Distilled E2B base <- 12b RL easy teacher (step_000500)",
       "category": "distilled",
@@ -414,6 +436,28 @@
         "subfolder": "step_000500",
         "metadata_repo": "google/gemma-4-E4B",
         "metadata_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_12b_hard_to_e2b",
+      "display_name": "Distilled E2B base <- 12b RL hard teacher (step_000500)",
+      "category": "distilled",
+      "architecture": "gemma-4-E2B",
+      "trained_on": "hard",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/gemma4-distill-v2-12b-hard-to-e2b-base",
+        "revision": "3b49204ad8414457ea52ebacf12855deae1f32ea",
+        "subfolder": "step_000500",
+        "metadata_repo": "google/gemma-4-E2B",
+        "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
       }
     },
     {
@@ -461,6 +505,28 @@
       }
     },
     {
+      "tag": "distill_e4b_easy_to_e2b",
+      "display_name": "Distilled E2B base <- e4b RL easy teacher (step_000500)",
+      "category": "distilled",
+      "architecture": "gemma-4-E2B",
+      "trained_on": "easy",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/gemma4-distill-v2-e4b-easy-to-e2b-base",
+        "revision": "57ca81ca706e2878d86d13ca699f3a4b789e00d7",
+        "subfolder": "step_000500",
+        "metadata_repo": "google/gemma-4-E2B",
+        "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+      }
+    },
+    {
       "tag": "distill_e4b_easy_to_e4b",
       "display_name": "Distilled E4B base <- e4b RL easy teacher (step_000500)",
       "category": "distilled",
@@ -480,6 +546,28 @@
         "subfolder": "step_000500",
         "metadata_repo": "google/gemma-4-E4B",
         "metadata_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_e4b_medium_to_e2b",
+      "display_name": "Distilled E2B base <- e4b RL medium teacher (step_000500)",
+      "category": "distilled",
+      "architecture": "gemma-4-E2B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/gemma4-distill-v2-e4b-medium-to-e2b-base",
+        "revision": "a6b16b9ebb0998dada77a0227873d4c020fb0dbc",
+        "subfolder": "step_000500",
+        "metadata_repo": "google/gemma-4-E2B",
+        "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
       }
     }
   ]

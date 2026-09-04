@@ -87,6 +87,7 @@ def _source(repo: str, revision: str, subfolder: str, architecture: str) -> dict
 
 def discover_distilled(session: requests.Session, existing: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     models = []
+    seen: dict[str, str] = {}  # tag -> repo already rostered (the two nodes may create the same direction twice)
     listing = _get(session, f"{HF_API}/models?author=JWei05&limit=500")
     for item in sorted(listing, key=lambda m: m["id"]):
         match = DISTILLED_NAME.match(item["id"])
@@ -94,6 +95,10 @@ def discover_distilled(session: requests.Session, existing: dict[str, dict[str, 
             continue
         teacher, band, student = match["teacher"], match["band"], match["student"]
         tag = f"distill_{teacher}_{band}_to_{student}"
+        if tag in seen:
+            print(f"  WARNING {item['id']}: same direction as {seen[tag]} (tag {tag}); not rostered -- add by hand with a distinct tag if both runs matter")
+            continue
+        seen[tag] = existing[tag]["source"]["repo_id"] if tag in existing else item["id"]
         if tag in existing:  # keep the earlier pin; re-pinning would silently change the evaluated weights
             models.append(existing[tag])
             continue
