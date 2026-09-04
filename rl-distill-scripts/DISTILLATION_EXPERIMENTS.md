@@ -300,12 +300,11 @@ numbers (repo `\boxed{}` verifier = the RL reward) and OOD accuracies (lm-eval-h
 separate families — do not compare across them. Bold = a model's own band (in-distribution).
 All percentages; `mean@k` = average accuracy over k samples, `pass@k` = any-of-k.
 
-**Status (2026-09-04 18:35Z):** math suite complete for all 20 models exported so far (2 bases, 6 RL,
-12 distilled) — generation 16:58–18:34Z on 7 H100s, 2 models per GPU, no logprobs. OOD deferred (`EVAL_PHASES=math`).
-The queue is idle and re-scans the Hub every ~10 min; the 9 distilled students still training on the nodes
-(12b-medium/hard→e2b, e4b-easy/medium/hard→e2b, e4b-medium/hard→e4b, 26b-easy/medium→e4b) are evaluated
-automatically once their `step_000500` export lands. Every RL model's own-band mean@16 matched its W&B
-validation best within ~1 point.
+**Status (2026-09-04 19:50Z):** math suite complete for all 22 models exported so far (2 bases, 6 RL,
+14 distilled) — generation 16:58–19:50Z on 7 H100s, 2 models per GPU, no logprobs. OOD deferred (`EVAL_PHASES=math`).
+The queue is idle and re-scans the Hub every ~10 min; the 7 distilled students still training on the nodes
+(12b-medium/hard→e2b, e4b-easy/medium/hard→e2b, e4b-medium/hard→e4b) are evaluated automatically once their
+`step_000500` export lands. Every RL model's own-band mean@16 matched its W&B validation best within ~1 point.
 
 **Pipeline check (2026-09-04):** a 1-GPU smoke of `rl_e2b_easy` on `id_easy` (300 q × 16, same verifier
 and prompt as the queue) gave mean@16 **40.8** / pass@16 77.0 / maj@16 47.0 — the RL run's own W&B
