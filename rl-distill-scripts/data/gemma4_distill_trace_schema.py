@@ -393,13 +393,9 @@ def validate_trace_record(
             "chat_template_path": expected_semantic_config["chat_template"]["path"],
             "chat_template_sha256": expected_semantic_config["chat_template"]["sha256"],
             "global_seed": expected_semantic_config["global_seed"],
+            "generator_commit": expected_semantic_config["generator"]["commit"],
             "generator_source_sha256": expected_semantic_config["generator"]["source_sha256"],
         }
-        # The repository commit is deliberately NOT part of the semantic (hashed) config any more:
-        # shards must stay resumable across commits when the generator source is byte-identical. Rows
-        # still record the commit that wrote them; only compare it when the config pins one.
-        if "commit" in expected_semantic_config["generator"]:
-            expected_fields["generator_commit"] = expected_semantic_config["generator"]["commit"]
         for field_name, expected_value in expected_fields.items():
             if record[field_name] != expected_value:
                 raise TraceValidationError(f"{field_name} does not match the run configuration")
