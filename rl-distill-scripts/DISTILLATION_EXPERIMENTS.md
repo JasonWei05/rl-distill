@@ -314,7 +314,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-04 21:53Z — math complete for 27/27 models, OOD complete for 0/27. Partial rows are shown as they finish._
+_Updated 2026-09-04 22:33Z — math complete for 28/28 models, OOD complete for 0/28. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -347,6 +347,7 @@ _Updated 2026-09-04 21:53Z — math complete for 27/27 models, OOD complete for 
 | `distill_26b_hard_to_e4b` | distilled | hard | 67.8 / 99.3 | 32.8 / 88.7 | **17.6 / 72.0** | 33.2 / 73.2 | 66.2 / 92.8 |
 | `distill_12b_medium_to_e4b` | distilled | medium | 68.0 / 96.3 | **32.9 / 82.7** | 19.3 / 65.0 | 33.5 / 67.6 | 69.0 / 93.3 |
 | `distill_26b_medium_to_e4b` | distilled | medium | 71.3 / 99.0 | **37.5 / 89.3** | 20.4 / 69.7 | 34.3 / 71.8 | 67.3 / 92.1 |
+| `distill_e4b_medium_to_e4b` | distilled | medium | 62.2 / 93.7 | **28.5 / 75.7** | 16.2 / 55.0 | 26.1 / 60.2 | 64.1 / 88.6 |
 
 **Out-of-domain** — accuracy (%), lm-eval-harness 5-shot CoT (different scorer; not comparable to the math family).
 
@@ -379,6 +380,7 @@ _Updated 2026-09-04 21:53Z — math complete for 27/27 models, OOD complete for 
 | `distill_26b_hard_to_e4b` | — | — | — |
 | `distill_12b_medium_to_e4b` | — | — | — |
 | `distill_26b_medium_to_e4b` | — | — | — |
+| `distill_e4b_medium_to_e4b` | — | — | — |
 <!-- results:end -->
 
 ### 8.1 pass@k curves — E4B student
