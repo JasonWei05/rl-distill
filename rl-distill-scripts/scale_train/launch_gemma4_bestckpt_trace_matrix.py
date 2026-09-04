@@ -2,7 +2,7 @@
 """Resolve or launch off-policy trace collectors for the completed difficulty-band
 RL checkpoints (e4b/12b/26b easy/medium/hard that finished training).
 
-One ScaleTrain job per completed checkpoint: 16 responses per training question +
+One ScaleTrain job per completed checkpoint: 8 responses per training question +
 1 per validation question, training sampling, RL few-shot prompt, top-128 teacher
 logprobs + token ids. e4b runs on 1 GPU; 12b/26b on 2 GPUs (DP-2, TP-1).
 """
@@ -26,10 +26,10 @@ class TraceJob:
     run_file: str = "run_gemma4_bestckpt_trace_collection.sh"
 
 
-# Only completely-finished runs. Excludes 26b-medium (queued) and 26b-hard
-# (migrated off-cluster). best step is baked into the run-file per spec.
+# All twelve (model, band) best RL checkpoints. e4b/12b/26b-easy come from S3; e2b and
+# 26b-medium/hard from their Hub exports. Best step is baked into the run-file per spec.
 #
-# "queue" packs all seven collections into ONE 8-GPU job with an async GPU-pool
+# "queue" packs all twelve collections into ONE 8-GPU job with an async GPU-pool
 # scheduler (2-GPU runs first, then 1-GPU, refilling as each finishes). The per-spec
 # jobs remain available for launching a single collection standalone.
 TRACE_JOBS = (
@@ -41,6 +41,12 @@ TRACE_JOBS = (
     TraceJob("12b-medium", "g4tr-12b-med", "12b-medium", 2),
     TraceJob("12b-hard", "g4tr-12b-hard", "12b-hard", 2),
     TraceJob("26b-easy", "g4tr-26b-easy", "26b-easy", 2),
+    # HF-sourced teachers (runs continued off-cluster / rerun locally; see the collection script).
+    TraceJob("26b-medium", "g4tr-26b-med", "26b-medium", 2),
+    TraceJob("26b-hard", "g4tr-26b-hard", "26b-hard", 2),
+    TraceJob("e2b-easy", "g4tr-e2b-easy", "e2b-easy", 1),
+    TraceJob("e2b-medium", "g4tr-e2b-med", "e2b-medium", 1),
+    TraceJob("e2b-hard", "g4tr-e2b-hard", "e2b-hard", 1),
 )
 
 
@@ -98,14 +104,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--priority", choices=("normal", "high"), default="high")
     parser.add_argument("--build-env", choices=("local", "remote"), default="remote")
     parser.add_argument("--image", default=None, help="Reuse an existing remote image for every selected job (skips build).")
-    parser.add_argument("--select", action="append", default=[], help="Job key(s); default is all seven.")
+    parser.add_argument("--select", action="append", default=[], help="Job key(s); default is all twelve.")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     available = {job.key for job in TRACE_JOBS}
-    # Default (no --select) is the seven per-spec jobs; the packed "queue" is opt-in
+    # Default (no --select) is the twelve per-spec jobs; the packed "queue" is opt-in
     # (and is mutually exclusive with the per-spec jobs — do not run both).
     selected = set(args.select) if args.select else (available - {"queue"})
     unknown = selected.difference(available)

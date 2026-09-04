@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Async GPU-pool queue for all seven best-checkpoint trace collections in ONE 8-GPU
+# Async GPU-pool queue for all twelve best-checkpoint trace collections in ONE 8-GPU
 # pod. Packs the 8 GPUs greedily: 2-GPU collections first (12b/26b), then 1-GPU
 # collections (e4b), and starts the next queued collection the moment GPUs free up.
 # No per-model synchronization barrier — every (model, band) is independent.
@@ -23,9 +23,14 @@ QUEUE=(
   "12b-medium:2"
   "12b-hard:2"
   "26b-easy:2"
+  "26b-medium:2"
+  "26b-hard:2"
   "e4b-easy:1"
   "e4b-medium:1"
   "e4b-hard:1"
+  "e2b-easy:1"
+  "e2b-medium:1"
+  "e2b-hard:1"
 )
 
 if [[ -f .env ]]; then set -a; source .env; set +a; fi

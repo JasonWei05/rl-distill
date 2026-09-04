@@ -76,6 +76,11 @@ DIRECTIONS = (
     "12b_medium_to_e2b",
     "12b_hard_to_e2b",
     "26b_easy_to_e2b",
+    "26b_medium_to_e2b",
+    "26b_hard_to_e2b",
+    "e2b_easy_to_e2b",
+    "e2b_medium_to_e2b",
+    "e2b_hard_to_e2b",
 )
 SPLITS = ("train", "validation")
 
@@ -571,6 +576,9 @@ def _build_run_config(
         "row_group_rows": args.row_group_rows,
         "total_shards": math.ceil(len(prompts) / args.prompts_per_shard),
         "teacher": dict(teacher_identity),
+        # Native architecture the teacher is served as; loading Gemma 4 through a
+        # text-only override distorts the logprobs (see _teacher_architectures).
+        "teacher_load_architectures": _teacher_architectures(args.teacher_model),
         "tokenizer": {
             "model": tokenizer_model,
             "revision": tokenizer_revision,
@@ -600,21 +608,20 @@ def _build_run_config(
     }
 
 
-def _causal_lm_hf_overrides(teacher_model: str) -> dict[str, Any]:
-    """Force vLLM onto the text-only causal-LM architecture for Gemma 4 checkpoints.
+def _teacher_architectures(teacher_model: str) -> list[str]:
+    """Native ``architectures`` the teacher loads as (recorded in the run config).
 
-    Gemma 4 RL checkpoints are the *unified* (text+vision+audio) architecture, but
-    we only generate text and the actor checkpoints carry no ``preprocessor_config.json``.
-    Loading them as-is makes vLLM demand a multimodal feature extractor and fail; the
-    causal-LM architecture loads the same weights and skips the processor.
+    Gemma 4 RL checkpoints are the *unified* (text+vision+audio) architecture and must be
+    loaded as such -- exactly like the RL rollout. Forcing the text-only causal-LM
+    architecture via ``hf_overrides`` instead mis-maps the multimodal placeholder rows of
+    the LM head: their logits inflate, steal softmax mass from the real tokens (distorting
+    the top-k logprobs), and ``<image|>`` leaks into ~70% of sampled responses. A text-only
+    teacher dir only needs the base model's ``processor_config.json`` next to the weights.
     """
     config_path = Path(teacher_model) / "config.json"
     if not config_path.exists():
-        return {}
-    architectures = json.loads(config_path.read_text()).get("architectures") or []
-    if any("ForConditionalGeneration" in arch or "Unified" in arch for arch in architectures):
-        return {"architectures": ["Gemma4ForCausalLM"]}
-    return {}
+        return []
+    return list(json.loads(config_path.read_text()).get("architectures") or [])
 
 
 def _make_llm(args: argparse.Namespace) -> tuple[Any, Any, Any, str]:
@@ -647,9 +654,6 @@ def _make_llm(args: argparse.Namespace) -> tuple[Any, Any, Any, str]:
         llm_kwargs["distributed_executor_backend"] = args.distributed_executor_backend
     if args.mm_encoder_attn_backend:
         llm_kwargs["mm_encoder_attn_backend"] = args.mm_encoder_attn_backend
-    causal_override = _causal_lm_hf_overrides(args.teacher_model)
-    if causal_override:
-        llm_kwargs["hf_overrides"] = causal_override
     return LLM(**llm_kwargs), SamplingParams, llm_kwargs, vllm_version
 
 

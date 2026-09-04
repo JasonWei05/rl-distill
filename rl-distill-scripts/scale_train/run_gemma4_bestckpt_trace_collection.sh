@@ -2,7 +2,7 @@
 # Collect off-policy top-128 teacher traces from a COMPLETED difficulty-band RL
 # checkpoint, over the exact training/validation data that checkpoint trained on.
 #
-# Per checkpoint: 16 responses per training question + 1 response per validation
+# Per checkpoint: 8 responses per training question + 1 response per validation
 # question, at training sampling (temp 1.0 / top-p 1.0 / top-k -1), rendered with
 # the RL few-shot template, capturing token ids + top-128 teacher logprobs.
 #
@@ -17,14 +17,22 @@ cd "${PROJECT_ROOT}"
 
 TRACE_SPEC="${TRACE_SPEC:?TRACE_SPEC is required}"
 # run_key = full-checkpoint subdir; band = dataset band; best_step = checkpoint step.
+TEACHER_HF_REPO=""  # set for teachers whose best export lives on the Hub instead of S3
 case "${TRACE_SPEC}" in
-  e4b-easy)   RUN_KEY=e4b-easy;       BAND=easy;   BEST_STEP=130; DIRECTION=e4b_easy_to_e2b   ;;
-  e4b-medium) RUN_KEY=e4b-medium;     BAND=medium; BEST_STEP=100; DIRECTION=e4b_medium_to_e2b ;;
+  e4b-easy)   RUN_KEY=e4b-easy;       BAND=easy;   BEST_STEP=100; DIRECTION=e4b_easy_to_e2b   ;;
+  e4b-medium) RUN_KEY=e4b-medium;     BAND=medium; BEST_STEP=90;  DIRECTION=e4b_medium_to_e2b ;;
   e4b-hard)   RUN_KEY=e4b-hard;       BAND=hard;   BEST_STEP=120; DIRECTION=e4b_hard_to_e2b   ;;
   12b-easy)   RUN_KEY=12b-easy;       BAND=easy;   BEST_STEP=70;  DIRECTION=12b_easy_to_e2b   ;;
   12b-medium) RUN_KEY=12b-medium;     BAND=medium; BEST_STEP=120; DIRECTION=12b_medium_to_e2b ;;
   12b-hard)   RUN_KEY=12b-hard;       BAND=hard;   BEST_STEP=140; DIRECTION=12b_hard_to_e2b   ;;
   26b-easy)   RUN_KEY=26b-a4b-easy;   BAND=easy;   BEST_STEP=80;  DIRECTION=26b_easy_to_e2b   ;;
+  # HF-sourced teachers: runs continued off-cluster / rerun locally, exported to the Hub in
+  # step_NNNNNN/ subdirs (processor_config.json included). Best steps = W&B mean@16 peaks.
+  e2b-easy)   RUN_KEY=e2b-easy;       BAND=easy;   BEST_STEP=130; DIRECTION=e2b_easy_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-easy-seed42-local2gpu ;;
+  e2b-medium) RUN_KEY=e2b-medium;     BAND=medium; BEST_STEP=190; DIRECTION=e2b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-medium-seed42-local2gpu ;;
+  e2b-hard)   RUN_KEY=e2b-hard;       BAND=hard;   BEST_STEP=190; DIRECTION=e2b_hard_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-hard-seed42-local2gpu ;;
+  26b-medium) RUN_KEY=26b-a4b-medium; BAND=medium; BEST_STEP=120; DIRECTION=26b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5 ;;
+  26b-hard)   RUN_KEY=26b-a4b-hard;   BAND=hard;   BEST_STEP=160; DIRECTION=26b_hard_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-hard-seed42 ;;
   *)
     echo "FATAL: unsupported TRACE_SPEC=${TRACE_SPEC}" >&2
     exit 2
@@ -82,13 +90,64 @@ export VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-0}"
 # --- Teacher: the completed checkpoint's consolidated HF model, from S3 ---
 MODEL_DIR="${MODEL_DIR:-/tmp/gemma4_trace_models/${TRACE_SPEC}}"
 mkdir -p "${MODEL_DIR}"
-echo "TEACHER_DOWNLOAD spec=${TRACE_SPEC} s3=${TEACHER_S3_URI}"
-aws s3 cp --recursive --only-show-errors "${TEACHER_S3_URI}" "${MODEL_DIR}"
+if [[ -n ${TEACHER_HF_REPO} ]]; then
+  TEACHER_HF_SUBDIR="$(printf 'step_%06d' "${BEST_STEP}")"
+  TEACHER_SOURCE_URI="hf://${TEACHER_HF_REPO}/${TEACHER_HF_SUBDIR}"
+  TEACHER_SOURCE_SUBFOLDER="${TEACHER_HF_SUBDIR}"
+  echo "TEACHER_DOWNLOAD spec=${TRACE_SPEC} hf=${TEACHER_SOURCE_URI}"
+  # Pull only the best-step subdir, onto local disk (not the EFS HF cache), then flatten it
+  # into MODEL_DIR so the rest of the pipeline is source-agnostic.
+  "${VENV}/bin/python" - "${TEACHER_HF_REPO}" "${TEACHER_HF_SUBDIR}" "${MODEL_DIR}" <<'PY'
+import shutil
+import sys
+from pathlib import Path
+
+from huggingface_hub import snapshot_download
+
+repo, subdir, model_dir = sys.argv[1], sys.argv[2], Path(sys.argv[3])
+staged = Path(
+    snapshot_download(repo, allow_patterns=[f"{subdir}/*"], local_dir=str(model_dir.with_name(model_dir.name + "_hf")))
+)
+for path in (staged / subdir).iterdir():
+    shutil.copy2(path, model_dir / path.name)
+PY
+else
+  TEACHER_SOURCE_URI="${TEACHER_S3_URI}"
+  TEACHER_SOURCE_SUBFOLDER="actor/huggingface"
+  echo "TEACHER_DOWNLOAD spec=${TRACE_SPEC} s3=${TEACHER_S3_URI}"
+  aws s3 cp --recursive --only-show-errors "${TEACHER_S3_URI}" "${MODEL_DIR}"
+fi
 if [[ ! -f ${MODEL_DIR}/config.json ]]; then
   echo "FATAL: teacher HF model missing config.json after S3 download (${MODEL_DIR})" >&2
   exit 2
 fi
 
+# Some actor exports (the 12b runs) omit processor_config.json. vLLM needs it to build the
+# unified (text+vision+audio) Gemma 4 model, which is exactly how the RL rollout served these
+# checkpoints. Never fall back to a text-only architecture override: it mis-maps the
+# multimodal rows of the LM head, inflating their logits (stealing softmax mass from the real
+# tokens, i.e. corrupting the top-k logprobs) and leaking <image|> into most responses. The
+# base model's processor_config is byte-compatible (identical multimodal token ids). Added
+# before the content hash, which covers weights only, so the teacher identity is unchanged.
+if [[ ! -f ${MODEL_DIR}/processor_config.json ]]; then
+  case "${RUN_KEY}" in
+    e2b-*)     BASE_MODEL_REPO=google/gemma-4-E2B ;;
+    e4b-*)     BASE_MODEL_REPO=google/gemma-4-E4B ;;
+    12b-*)     BASE_MODEL_REPO=google/gemma-4-12B ;;
+    26b-a4b-*) BASE_MODEL_REPO=google/gemma-4-26B-A4B ;;
+    *) echo "FATAL: no base-model repo mapping for RUN_KEY=${RUN_KEY}" >&2; exit 2 ;;
+  esac
+  echo "PROCESSOR_CONFIG_PROVISION spec=${TRACE_SPEC} from=${BASE_MODEL_REPO}"
+  "${VENV}/bin/python" - "${BASE_MODEL_REPO}" "${MODEL_DIR}" <<'PY'
+import shutil
+import sys
+
+from huggingface_hub import hf_hub_download
+
+repo, model_dir = sys.argv[1], sys.argv[2]
+shutil.copy(hf_hub_download(repo, "processor_config.json"), f"{model_dir}/processor_config.json")
+PY
+fi
 TEACHER_CONTENT_SHA256="$(${VENV}/bin/python - "${MODEL_DIR}" <<'PY'
 import sys
 from pathlib import Path
@@ -105,7 +164,7 @@ fi
 
 # --- Source: the band's training + validation data (same as RL) ---
 GLOBAL_SEED="${GLOBAL_SEED:-42}"
-TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}"
+TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}"
 VALIDATION_SAMPLES_PER_QUESTION="${VALIDATION_SAMPLES_PER_QUESTION:-1}"
 PROMPTS_PER_SHARD="${PROMPTS_PER_SHARD:-8}"
 ROW_GROUP_ROWS="${ROW_GROUP_ROWS:-2}"
@@ -114,8 +173,13 @@ MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-32768}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.88}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
 MAX_WORKER_ATTEMPTS="${MAX_WORKER_ATTEMPTS:-5}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-/tmp/gemma4_bestckpt_traces/${TRACE_SPEC}}"
-TRACE_OUTPUT_S3_URI="${TRACE_OUTPUT_S3_URI:-s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v1/${TRACE_SPEC}}"
+# Separate local root per trace version: the generator refuses to write into a directory
+# holding a different generation configuration, so v2 must not share v1's local dirs
+# (their stale v1 run_config.json would block every spec that ran under v1).
+OUTPUT_ROOT="${OUTPUT_ROOT:-/tmp/gemma4_bestckpt_traces_v2/${TRACE_SPEC}}"
+# v2: v1 was generated through a text-only architecture override that corrupted the
+# top-k logprobs and leaked <image|> into ~70% of responses; v1 must not be used.
+TRACE_OUTPUT_S3_URI="${TRACE_OUTPUT_S3_URI:-s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2/${TRACE_SPEC}}"
 TRACE_S3_MIRROR_ENABLE="${TRACE_S3_MIRROR_ENABLE:-true}"
 DATA_DIR="${DATA_DIR:-${OUTPUT_ROOT}/source}"
 TRAIN_DIR="${OUTPUT_ROOT}/train"
@@ -200,9 +264,9 @@ run_worker() {
       rl-distill-scripts/data/generate_gemma4_distill_traces.py
       --teacher-model "${MODEL_DIR}"
       --teacher-content-sha256 "${TEACHER_CONTENT_SHA256}"
-      --teacher-source-repo "${TEACHER_S3_URI}"
+      --teacher-source-repo "${TEACHER_SOURCE_URI}"
       --teacher-source-revision "${TEACHER_CONTENT_SHA256}"
-      --teacher-source-subfolder "actor/huggingface"
+      --teacher-source-subfolder "${TEACHER_SOURCE_SUBFOLDER}"
       --input-parquet "${input_parquet}"
       --source-dataset "${SOURCE_DATASET}"
       --output-dir "${output_dir}"
@@ -225,6 +289,8 @@ run_worker() {
       --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}"
       --max-num-seqs "${MAX_NUM_SEQS}"
       --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}"
+      # TRACE_MAX_SHARDS>0 = smoke run through the exact production path (default: all).
+      --max-shards "${TRACE_MAX_SHARDS:--1}"
     )
     if [[ ${TRACE_S3_MIRROR_ENABLE,,} == true ]]; then
       generator_args+=(--s3-mirror-uri "${TRACE_OUTPUT_S3_URI}/${s3_subdir}")
@@ -233,10 +299,14 @@ run_worker() {
     setsid env CUDA_VISIBLE_DEVICES="${gpu_slice}" PYTHONDONTWRITEBYTECODE=1 \
       "${VENV}/bin/python" "${generator_args[@]}" >>"${log_path}" 2>&1 &
     worker_pid=$!
-    if wait "${worker_pid}"; then
+    # Capture wait's status directly: `status=$?` after `if wait ...; fi` reads the if
+    # statement's own status (always 0), which hid every real exit code and defeated the
+    # no-retry check below.
+    wait "${worker_pid}"; status=$?
+    if ((status == 0)); then
       worker_pid=; echo "[supervisor] split=${split} worker=${worker_id} complete" | tee -a "${log_path}"; return 0
     fi
-    status=$?; worker_pid=
+    worker_pid=
     echo "[supervisor] split=${split} worker=${worker_id} failed status=${status}" | tee -a "${log_path}" >&2
     if ((status == 3)); then
       echo "[supervisor] deterministic validation failure; not retrying" | tee -a "${log_path}" >&2
