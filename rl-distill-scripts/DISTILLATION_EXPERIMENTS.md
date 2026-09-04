@@ -300,12 +300,12 @@ numbers (repo `\boxed{}` verifier = the RL reward) and OOD accuracies (lm-eval-h
 separate families — do not compare across them. Bold = a model's own band (in-distribution).
 All percentages; `mean@k` = average accuracy over k samples, `pass@k` = any-of-k.
 
-**Status (2026-09-04 21:00Z):** math suite complete for 26 of the 27 models exported so far (2 bases, 6 RL,
-19 distilled; `distill_12b_medium_to_e2b` running, ETA ~21:40Z). OOD deferred (`EVAL_PHASES=math`). The queue
-re-scans the Hub every ~10 min; the last 2 distilled students (e4b-medium/hard→e4b) are evaluated automatically
-once their `step_000500` export lands. Every RL model's own-band mean@16 matched its W&B validation best within
-~1 point. Note: `e4b-hard→e2b` exists twice on the Hub (`Distill-gemma4-…` and `gemma4-distill-v2-…`); only
-the first is rostered (the builder dedupes directions and warns).
+**Status (2026-09-04 21:53Z):** math suite complete for all 27 models exported so far (2 bases, 6 RL,
+19 distilled — the full E2B grid and 7 of 9 E4B students). OOD deferred (`EVAL_PHASES=math`). The queue re-scans the
+Hub every ~10 min; the last 2 distilled students (e4b-medium/hard→e4b) are evaluated automatically once their
+`step_000500` export lands. Every RL model's own-band mean@16 matched its W&B validation best within ~1 point.
+Note: `e4b-hard→e2b` exists twice on the Hub (`Distill-gemma4-…` and `gemma4-distill-v2-…`); only the first is
+rostered (the builder dedupes directions and warns).
 
 **Pipeline check (2026-09-04):** a 1-GPU smoke of `rl_e2b_easy` on `id_easy` (300 q × 16, same verifier
 and prompt as the queue) gave mean@16 **40.8** / pass@16 77.0 / maj@16 47.0 — the RL run's own W&B
