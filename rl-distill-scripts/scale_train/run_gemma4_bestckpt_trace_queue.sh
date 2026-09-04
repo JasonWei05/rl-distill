@@ -41,14 +41,19 @@ if [[ ! -x ${VENV}/bin/python ]]; then
   VENV="${VENV}" GEMMA4_CUDA_VARIANT="${GEMMA4_CUDA_VARIANT}" bash rl-distill-scripts/setup_env_gemma4.sh
 fi
 
-# Physical GPU pool.
-mapfile -t FREE_GPUS < <(nvidia-smi --query-gpu=index --format=csv,noheader | tr -d ' ')
+# Physical GPU pool. TRACE_QUEUE_GPUS pins to explicit indices (for running on a
+# shared box's free GPUs); otherwise use every visible GPU.
+if [[ -n ${TRACE_QUEUE_GPUS:-} ]]; then
+  IFS=',' read -r -a FREE_GPUS <<< "${TRACE_QUEUE_GPUS}"
+else
+  mapfile -t FREE_GPUS < <(nvidia-smi --query-gpu=index --format=csv,noheader | tr -d ' ')
+fi
 TOTAL_GPUS=${#FREE_GPUS[@]}
 if ((TOTAL_GPUS < 2)); then echo "FATAL: need >=2 GPUs, saw ${TOTAL_GPUS}" >&2; exit 2; fi
 echo "QUEUE start gpus=${TOTAL_GPUS} queue=[${QUEUE[*]}]"
 
-declare -A PID_SPEC=() PID_GPUS=() SPEC_STATUS=()
-head=0
+declare -A PID_SPEC=() PID_GPUS=() SPEC_STATUS=() LAUNCHED=()
+launched_count=0
 
 launch_spec() {
   local spec="$1" need="$2"
@@ -88,15 +93,25 @@ reap_finished() {
 }
 
 while true; do
-  # Fill: launch the next queued collection whenever enough GPUs are free.
-  while ((head < ${#QUEUE[@]})); do
-    entry="${QUEUE[$head]}"; spec="${entry%%:*}"; need="${entry##*:}"
-    ((need <= ${#FREE_GPUS[@]})) || break
-    launch_spec "${spec}" "${need}"
-    ((head++))
+  # Fill: launch ANY not-yet-launched queued collection that fits the free GPUs
+  # (indices are tried in order, so 2-GPU runs are preferred, but a later 1-GPU
+  # run fills a lone free GPU instead of leaving it idle behind a 2-GPU head).
+  filled=1
+  while ((filled == 1)); do
+    filled=0
+    for idx in "${!QUEUE[@]}"; do
+      [[ -n "${LAUNCHED[$idx]:-}" ]] && continue
+      entry="${QUEUE[$idx]}"; spec="${entry%%:*}"; need="${entry##*:}"
+      if ((need <= ${#FREE_GPUS[@]})); then
+        launch_spec "${spec}" "${need}"
+        LAUNCHED[$idx]=1
+        ((launched_count++))
+        filled=1
+      fi
+    done
   done
-  # Done when nothing is running and the queue is drained.
-  if ((${#PID_SPEC[@]} == 0 && head >= ${#QUEUE[@]})); then break; fi
+  # Done when nothing is running and every collection has been launched.
+  if ((${#PID_SPEC[@]} == 0 && launched_count >= ${#QUEUE[@]})); then break; fi
   # Wait for a collection to finish, then loop to refill freed GPUs.
   if ! reap_finished; then
     sleep "${POLL_SECONDS}"
