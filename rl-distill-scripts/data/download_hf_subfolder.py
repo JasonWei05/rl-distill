@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 from pathlib import Path
@@ -46,17 +47,39 @@ def _has_model_files(path: Path) -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-id", required=True)
+    parser.add_argument("--revision", default=None)
     parser.add_argument("--subfolder", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--repo-type", default="model")
     parser.add_argument("--metadata-repo", default=None)
+    parser.add_argument("--metadata-revision", default=None)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
     output = Path(args.output_dir)
+    source_manifest = {
+        "repo_id": args.repo_id,
+        "revision": args.revision,
+        "subfolder": args.subfolder.strip("/"),
+        "repo_type": args.repo_type,
+        "metadata_repo": args.metadata_repo,
+        "metadata_revision": args.metadata_revision,
+    }
+    source_manifest_path = output / ".hf_subfolder_source.json"
     if _has_model_files(output) and not args.overwrite:
+        if args.revision:
+            if not source_manifest_path.is_file():
+                raise RuntimeError(
+                    f"existing model lacks pinned source provenance: {source_manifest_path}; "
+                    "use --overwrite to replace it"
+                )
+            existing_source = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+            if existing_source != source_manifest:
+                raise RuntimeError(
+                    f"existing model source does not match the requested pinned subfolder: {output}"
+                )
         if args.metadata_repo:
-            _patch_metadata(args.metadata_repo, output)
+            _patch_metadata(args.metadata_repo, args.metadata_revision, output)
         print(f"model already present: {output}")
         return
 
@@ -67,13 +90,16 @@ def main() -> None:
         shutil.rmtree(output)
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    snapshot_download(
+    snapshot_kwargs = dict(
         repo_id=args.repo_id,
         repo_type=args.repo_type,
         allow_patterns=f"{args.subfolder.rstrip('/')}/*",
         local_dir=str(staging),
         token=os.environ.get("HF_TOKEN"),
     )
+    if args.revision:
+        snapshot_kwargs["revision"] = args.revision
+    snapshot_download(**snapshot_kwargs)
 
     src = staging / args.subfolder.strip("/")
     if not src.joinpath("config.json").exists():
@@ -85,14 +111,19 @@ def main() -> None:
     shutil.rmtree(staging, ignore_errors=True)
 
     if args.metadata_repo:
-        _patch_metadata(args.metadata_repo, output)
+        _patch_metadata(args.metadata_repo, args.metadata_revision, output)
+    source_manifest_path.write_text(json.dumps(source_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     print(f"downloaded {args.repo_id}/{args.subfolder} -> {output}")
 
 
-def _patch_metadata(metadata_repo: str, output: Path) -> None:
+def _patch_metadata(metadata_repo: str, metadata_revision: str | None, output: Path) -> None:
     api = HfApi(token=os.environ.get("HF_TOKEN"))
-    for filename in api.list_repo_files(repo_id=metadata_repo, repo_type="model"):
+    for filename in api.list_repo_files(
+        repo_id=metadata_repo,
+        repo_type="model",
+        revision=metadata_revision,
+    ):
         if "/" in filename or _is_weight_or_model_config(filename):
             continue
         target = output / filename
@@ -102,6 +133,7 @@ def _patch_metadata(metadata_repo: str, output: Path) -> None:
             hf_hub_download(
                 repo_id=metadata_repo,
                 repo_type="model",
+                revision=metadata_revision,
                 filename=filename,
                 local_dir=str(output),
                 token=os.environ.get("HF_TOKEN"),

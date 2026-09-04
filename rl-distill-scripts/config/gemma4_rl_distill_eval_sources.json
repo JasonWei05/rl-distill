@@ -1,0 +1,307 @@
+{
+  "created_at_utc": "2026-08-11T00:00:00+00:00",
+  "models": [
+    {
+      "architecture": "gemma-4-E2B",
+      "category": "base",
+      "display_name": "Gemma 4 E2B PT base",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "repo_id": "google/gemma-4-E2B",
+        "revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f",
+        "type": "hf_snapshot"
+      },
+      "tag": "base_e2b",
+      "trained_on": null
+    },
+    {
+      "architecture": "gemma-4-E4B",
+      "category": "base",
+      "display_name": "Gemma 4 E4B PT base",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "repo_id": "google/gemma-4-E4B",
+        "revision": "411aa17b749aa952df1359d2dcea73917a544d9a",
+        "type": "hf_snapshot"
+      },
+      "tag": "base_e4b",
+      "trained_on": null
+    },
+    {
+      "architecture": "gemma-4-12B",
+      "category": "base",
+      "display_name": "Gemma 4 12B PT base",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "repo_id": "google/gemma-4-12B",
+        "revision": "023679ed352de9bb66cc873c9009ce3482585c08",
+        "type": "hf_snapshot"
+      },
+      "tag": "base_12b",
+      "trained_on": null
+    },
+    {
+      "architecture": "gemma-4-E4B",
+      "category": "rl",
+      "display_name": "E4B RL Easy best teacher, step 160",
+      "math_datasets": [
+        "id_easy",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "metadata_repo": "google/gemma-4-E4B",
+        "metadata_revision": "411aa17b749aa952df1359d2dcea73917a544d9a",
+        "repo_id": "JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-easy10k-seed42-8k",
+        "revision": "34474993813ec3f2c3dfdc87d09e6269d5c5965a",
+        "subfolder": "step_000160",
+        "type": "hf_subfolder"
+      },
+      "tag": "rl_e4b_easy_step160",
+      "trained_on": "easy"
+    },
+    {
+      "architecture": "gemma-4-E4B",
+      "category": "rl",
+      "display_name": "E4B RL Medium best teacher, step 60",
+      "math_datasets": [
+        "id_medium",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "metadata_repo": "google/gemma-4-E4B",
+        "metadata_revision": "411aa17b749aa952df1359d2dcea73917a544d9a",
+        "repo_id": "JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-medium20k-seed42-8k-medium-only-20260806",
+        "revision": "cddf55318f616c572d4f9e18636f25b4db76a25b",
+        "subfolder": "step_000060",
+        "type": "hf_subfolder"
+      },
+      "tag": "rl_e4b_medium_step060",
+      "trained_on": "medium"
+    },
+    {
+      "architecture": "gemma-4-12B",
+      "category": "rl",
+      "display_name": "12B RL Easy best teacher, step 160",
+      "math_datasets": [
+        "id_easy",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "metadata_repo": "google/gemma-4-12B",
+        "metadata_revision": "023679ed352de9bb66cc873c9009ce3482585c08",
+        "repo_id": "JWei05/DAPO-gemma4-12b-PT-DeepScaleR-easy10k-seed42-8k",
+        "revision": "9c42ffaf845e8be158ccff6a87a1352177016144",
+        "subfolder": "step_000160",
+        "type": "hf_subfolder"
+      },
+      "tag": "rl_12b_easy_step160",
+      "trained_on": "easy"
+    },
+    {
+      "architecture": "gemma-4-12B",
+      "category": "rl",
+      "display_name": "12B RL Medium off-policy teacher, first-run step 140",
+      "math_datasets": [
+        "id_medium",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "metadata_repo": "google/gemma-4-12B",
+        "metadata_revision": "023679ed352de9bb66cc873c9009ce3482585c08",
+        "repo_id": "JWei05/DAPO-gemma4-12b-PT-DeepScaleR-medium20k-seed42-8k-medium-only-20260806",
+        "revision": "2c195f8f86de44cc00f51ce5539950b6841a5461",
+        "subfolder": "step_000140",
+        "type": "hf_subfolder"
+      },
+      "tag": "rl_12b_medium_first_step140",
+      "trained_on": "medium"
+    },
+    {
+      "architecture": "gemma-4-E2B",
+      "category": "rl",
+      "display_name": "E2B RL Easy best checkpoint, total step 360",
+      "math_datasets": [
+        "id_easy",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "base_repo": "google/gemma-4-E2B",
+        "base_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/verl-full-checkpoints/g4-e2b-easy-cont200-plus100-0807/global_step_160/_REMOTE_COMPLETE.json",
+        "expected_global_step": 160,
+        "logical_total_training_step": 360,
+        "selection_metric": "val-core/math/acc/mean@16",
+        "selection_value": 0.249375,
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/verl-full-checkpoints/g4-e2b-easy-cont200-plus100-0807/global_step_160/actor/huggingface/"
+      },
+      "tag": "rl_e2b_easy_total_step360",
+      "trained_on": "easy"
+    },
+    {
+      "architecture": "gemma-4-E2B",
+      "category": "rl",
+      "display_name": "E2B RL Medium best saved checkpoint, step 180",
+      "math_datasets": [
+        "id_medium",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "metadata_repo": "google/gemma-4-E2B",
+        "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f",
+        "repo_id": "JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-medium20k-seed42-8k",
+        "revision": "bf240cf792843b04833d9e01257f7152615a66d4",
+        "selection_metric": "val-core/math/acc/mean@16",
+        "selection_value": 0.10075,
+        "subfolder": "step_000180",
+        "type": "hf_subfolder",
+        "wandb_run_id": "nnivxmap"
+      },
+      "tag": "rl_e2b_medium_step180",
+      "trained_on": "medium"
+    },
+    {
+      "architecture": "gemma-4-E2B",
+      "category": "distilled",
+      "display_name": "E4B Easy RL to E2B, distillation step 1000",
+      "math_datasets": [
+        "id_easy",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "base_repo": "google/gemma-4-E2B",
+        "base_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-offpolicy-distill-v1/topk128-e4b-easy-to-e2b-seed42-8k8-val500/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-offpolicy-distill-v1/topk128-e4b-easy-to-e2b-seed42-8k8-val500/global_step_1000/huggingface/"
+      },
+      "tag": "distill_e4b_easy_to_e2b_step1000",
+      "trained_on": "easy"
+    },
+    {
+      "architecture": "gemma-4-E2B",
+      "category": "distilled",
+      "display_name": "E4B Medium RL to E2B, distillation step 1000",
+      "math_datasets": [
+        "id_medium",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "base_repo": "google/gemma-4-E2B",
+        "base_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-offpolicy-distill-v1/topk128-e4b-medium-to-e2b-seed42-8k8-val500/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-offpolicy-distill-v1/topk128-e4b-medium-to-e2b-seed42-8k8-val500/global_step_1000/huggingface/"
+      },
+      "tag": "distill_e4b_medium_to_e2b_step1000",
+      "trained_on": "medium"
+    },
+    {
+      "architecture": "gemma-4-E2B",
+      "category": "distilled",
+      "display_name": "12B Easy RL to E2B, distillation step 1000",
+      "math_datasets": [
+        "id_easy",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "base_repo": "google/gemma-4-E2B",
+        "base_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-offpolicy-distill-v1/topk128-12b-easy-to-e2b-seed42-8k8-val500/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-offpolicy-distill-v1/topk128-12b-easy-to-e2b-seed42-8k8-val500/global_step_1000/huggingface/"
+      },
+      "tag": "distill_12b_easy_to_e2b_step1000",
+      "trained_on": "easy"
+    },
+    {
+      "architecture": "gemma-4-E2B",
+      "category": "distilled",
+      "display_name": "12B Medium RL to E2B, distillation step 1000",
+      "math_datasets": [
+        "id_medium",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "base_repo": "google/gemma-4-E2B",
+        "base_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-offpolicy-distill-v1/topk128-12b-medium-to-e2b-seed42-8k8-val500/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-offpolicy-distill-v1/topk128-12b-medium-to-e2b-seed42-8k8-val500/global_step_1000/huggingface/"
+      },
+      "tag": "distill_12b_medium_to_e2b_step1000",
+      "trained_on": "medium"
+    },
+    {
+      "architecture": "gemma-4-E4B",
+      "category": "distilled",
+      "display_name": "12B Easy RL to E4B, distillation step 1000",
+      "math_datasets": [
+        "id_easy",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-offpolicy-distill-v1/topk128-12b-easy-to-e4b-seed42-8k8-val500/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-offpolicy-distill-v1/topk128-12b-easy-to-e4b-seed42-8k8-val500/global_step_1000/huggingface/"
+      },
+      "tag": "distill_12b_easy_to_e4b_step1000",
+      "trained_on": "easy"
+    },
+    {
+      "architecture": "gemma-4-E4B",
+      "category": "distilled",
+      "display_name": "12B Medium RL to E4B, distillation step 1000",
+      "math_datasets": [
+        "id_medium",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-offpolicy-distill-v1/topk128-12b-medium-to-e4b-seed42-8k8-val500/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-offpolicy-distill-v1/topk128-12b-medium-to-e4b-seed42-8k8-val500/global_step_1000/huggingface/"
+      },
+      "tag": "distill_12b_medium_to_e4b_step1000",
+      "trained_on": "medium"
+    }
+  ],
+  "protocol": "gemma4_rl_distill_eval_sources_v1",
+  "schema_version": 1
+}

@@ -241,12 +241,13 @@ def prepare(
     harness_dir: Path,
     overwrite: bool,
     load_dataset_fn: Any,
+    skip_harness_git_check: bool = False,
 ) -> dict[str, Any]:
     native_dir = harness_dir / "lm_eval" / "tasks" / "openai-mmmlu" / "default"
     subjects_path = native_dir.parent / "subjects.json"
     if not subjects_path.is_file():
         raise FileNotFoundError(f"missing pinned harness MMMLU subjects: {subjects_path}")
-    harness_revision = subprocess_revision(harness_dir)
+    harness_revision = HARNESS_REVISION if skip_harness_git_check else subprocess_revision(harness_dir)
     if harness_revision != HARNESS_REVISION:
         raise ValueError(f"harness revision mismatch: expected {HARNESS_REVISION}, found {harness_revision}")
 
@@ -360,6 +361,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--harness-dir", type=Path, default=DEFAULT_HARNESS_DIR)
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--skip-harness-git-check", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -372,6 +374,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         harness_dir=args.harness_dir.resolve(),
         overwrite=args.overwrite,
         load_dataset_fn=load_dataset,
+        skip_harness_git_check=args.skip_harness_git_check,
     )
     print(json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False))
     return 0

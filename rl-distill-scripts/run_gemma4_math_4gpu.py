@@ -34,6 +34,7 @@ from typing import Any, Mapping, Sequence
 import pandas as pd
 from eval_math_passk import PREDICTIVE_ENTROPY_KIND
 from gemma4_eval_metrics import aggregate_math_traces
+from gemma4_eval_registry import load_resolved_registry, select_models
 from run_gemma4_three_model_evals import (
     DEFAULT_BASE_MODEL,
     DEFAULT_DATA_MANIFEST,
@@ -44,6 +45,7 @@ from run_gemma4_three_model_evals import (
     _load_json,
     build_math_command,
     resolve_models,
+    select_named_math_datasets,
     select_math_datasets,
 )
 
@@ -369,23 +371,14 @@ def merge_model_results(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gpus", nargs="+", default=["0", "1", "2", "3"])
-    parser.add_argument(
-        "--models",
-        nargs="+",
-        choices=("base_e2b", "distilled_e2b_step750", "rl_e2b_step125"),
-        default=["base_e2b", "distilled_e2b_step750", "rl_e2b_step125"],
-    )
+    parser.add_argument("--models", nargs="+", default=None)
+    parser.add_argument("--resolved-model-registry", type=Path, default=None)
     parser.add_argument("--base-model", type=Path, default=DEFAULT_BASE_MODEL)
     parser.add_argument("--distilled-model", type=Path, default=DEFAULT_DISTILLED_MODEL)
     parser.add_argument("--rl-model", type=Path, default=DEFAULT_RL_MODEL)
     parser.add_argument("--data-manifest", type=Path, default=DEFAULT_DATA_MANIFEST)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
-    parser.add_argument(
-        "--datasets",
-        nargs="+",
-        choices=MATH_DATASET_NAMES,
-        default=list(MATH_DATASET_NAMES),
-    )
+    parser.add_argument("--datasets", nargs="+", default=None)
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.9)
     parser.add_argument("--request-batch-size", type=int, default=8)
@@ -400,26 +393,56 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("--gpus must contain unique GPU identifiers")
     data_manifest_path = args.data_manifest.resolve()
     data_manifest = _load_json(data_manifest_path)
-    registered = select_math_datasets(data_manifest, id_validation="both")
-    registered_by_name = {str(entry["name"]): entry for entry in registered}
-    selected = [registered_by_name[name] for name in args.datasets]
-    by_name = {str(entry["name"]): entry for entry in selected}
-    full_entry = by_name.get(FULL_ID_NAME)
-    clean_entry = by_name.get(CLEAN_ID_NAME)
-    if clean_entry is not None and full_entry is None:
-        raise ValueError("selecting id_validation_clean also requires id_validation_full")
-    generation_datasets = [entry for entry in selected if entry["name"] != CLEAN_ID_NAME]
-    models = resolve_models(
-        SimpleNamespace(
-            models=args.models,
-            base_model=args.base_model,
-            distilled_model=args.distilled_model,
-            rl_model=args.rl_model,
+    registry_mode = args.resolved_model_registry is not None
+    if registry_mode:
+        _, registered_models = load_resolved_registry(args.resolved_model_registry)
+        resolved = select_models(registered_models, args.models)
+        models = [
+            ModelSpec(model.tag, model.model, model.expected_model_identity_sha256)
+            for model in resolved
+        ]
+        dataset_names_by_model = {model.tag: list(model.math_datasets) for model in resolved}
+        if args.datasets:
+            requested = set(args.datasets)
+            dataset_names_by_model = {
+                tag: [name for name in names if name in requested]
+                for tag, names in dataset_names_by_model.items()
+            }
+            empty = [tag for tag, names in dataset_names_by_model.items() if not names]
+            if empty:
+                raise ValueError(f"--datasets removes every registered dataset for models: {empty}")
+    else:
+        requested_models = args.models or ["base_e2b", "distilled_e2b_step750", "rl_e2b_step125"]
+        invalid_models = set(requested_models) - {"base_e2b", "distilled_e2b_step750", "rl_e2b_step125"}
+        if invalid_models:
+            raise ValueError(f"unknown legacy model tags: {sorted(invalid_models)}")
+        selected_names = args.datasets or list(MATH_DATASET_NAMES)
+        invalid_datasets = set(selected_names) - set(MATH_DATASET_NAMES)
+        if invalid_datasets:
+            raise ValueError(f"unknown legacy dataset names: {sorted(invalid_datasets)}")
+        models = resolve_models(
+            SimpleNamespace(
+                models=requested_models,
+                base_model=args.base_model,
+                distilled_model=args.distilled_model,
+                rl_model=args.rl_model,
+            )
         )
-    )
+        dataset_names_by_model = {model.tag: list(selected_names) for model in models}
     output_root = args.output_root.resolve()
     tasks: list[MathTask] = []
+    full_entries_by_model: dict[str, dict[str, Any] | None] = {}
+    clean_entries_by_model: dict[str, dict[str, Any] | None] = {}
     for model in models:
+        selected = select_named_math_datasets(data_manifest, dataset_names_by_model[model.tag])
+        by_name = {str(entry["name"]): entry for entry in selected}
+        full_entry = by_name.get(FULL_ID_NAME)
+        clean_entry = by_name.get(CLEAN_ID_NAME)
+        if clean_entry is not None and full_entry is None:
+            raise ValueError("selecting id_validation_clean also requires id_validation_full")
+        full_entries_by_model[model.tag] = full_entry
+        clean_entries_by_model[model.tag] = clean_entry
+        generation_datasets = [entry for entry in selected if entry["name"] != CLEAN_ID_NAME]
         for shard_index, shard in enumerate(partition_datasets(generation_datasets, len(args.gpus))):
             task_id = f"{model.tag}__shard_{shard_index:02d}"
             task_root = output_root / "_math_tasks" / task_id
@@ -437,6 +460,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 gpu_memory_utilization=args.gpu_memory_utilization,
                 request_batch_size=args.request_batch_size,
             )
+            command.extend(["--subset_strategy", "monte_carlo", "--monte_carlo_resamples", "4096"])
             _replace_arg(command, "--out", str(metrics_path))
             _replace_arg(command, "--trace_dir", str(trace_dir))
             tasks.append(
@@ -455,22 +479,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_root.mkdir(parents=True, exist_ok=True)
     plan = {
         "schema_version": 1,
-        "protocol": "gemma4_three_model_math_4gpu_v1",
+        "protocol": "gemma4_registered_math_4gpu_v1" if registry_mode else "gemma4_three_model_math_4gpu_v1",
         "created_at_utc": _utc_now(),
         "mode": "execute" if args.execute else "dry_run",
         "gpus": args.gpus,
         "models": [asdict(model) for model in models],
         "data_manifest": str(data_manifest_path),
-        "selected_datasets": list(args.datasets),
-        "clean_id_derivation": (
-            {
-                "source": FULL_ID_NAME,
-                "derived": CLEAN_ID_NAME,
-                "avoided_generations_per_model": int(clean_entry["total_requests"]),
-            }
-            if clean_entry is not None
-            else None
-        ),
+        "selected_datasets_by_model": dataset_names_by_model,
+        "clean_id_derivation_by_model": {
+            model.tag: (
+                {
+                    "source": FULL_ID_NAME,
+                    "derived": CLEAN_ID_NAME,
+                    "avoided_generations": int(clean_entries_by_model[model.tag]["total_requests"]),
+                }
+                if clean_entries_by_model[model.tag] is not None
+                else None
+            )
+            for model in models
+        },
         "tasks": [
             {
                 "task_id": task.task_id,
@@ -498,8 +525,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             merge_model_results(
                 model=model,
                 tasks=tasks,
-                full_entry=full_entry,
-                clean_entry=clean_entry,
+                full_entry=full_entries_by_model[model.tag],
+                clean_entry=clean_entries_by_model[model.tag],
                 output_root=output_root,
                 data_manifest_path=data_manifest_path,
             )
@@ -508,7 +535,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ]
     completion = {
         "schema_version": 1,
-        "protocol": "gemma4_three_model_math_4gpu_v1",
+        "protocol": "gemma4_registered_math_4gpu_v1" if registry_mode else "gemma4_three_model_math_4gpu_v1",
         "completed_at_utc": _utc_now(),
         "state": str(state_path),
         "merged_metrics": merged,

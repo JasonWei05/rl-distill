@@ -33,6 +33,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Sequence
 
+from gemma4_eval_registry import load_resolved_registry, select_models
 from run_gemma4_three_model_evals import (
     DEFAULT_BASE_MODEL,
     DEFAULT_DISTILLED_MODEL,
@@ -97,7 +98,10 @@ def _wait_for_math(math_complete: Path, math_state: Path, poll_seconds: int) -> 
                 raise RuntimeError(f"math failed; refusing to start OOD: {math_state}")
         time.sleep(poll_seconds)
     completion = json.loads(math_complete.read_text(encoding="utf-8"))
-    if completion.get("protocol") != "gemma4_three_model_math_4gpu_v1":
+    if completion.get("protocol") not in {
+        "gemma4_three_model_math_4gpu_v1",
+        "gemma4_registered_math_4gpu_v1",
+    }:
         raise ValueError(f"unexpected math completion protocol in {math_complete}")
 
 
@@ -338,18 +342,18 @@ def _run_workers(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gpus", nargs="+", default=["0", "1", "2", "3"])
-    parser.add_argument(
-        "--models",
-        nargs="+",
-        choices=("base_e2b", "distilled_e2b_step750", "rl_e2b_step125"),
-        default=["base_e2b", "distilled_e2b_step750", "rl_e2b_step125"],
-    )
+    parser.add_argument("--models", nargs="+", default=None)
+    parser.add_argument("--resolved-model-registry", type=Path, default=None)
+    parser.add_argument("--benchmarks", nargs="+", choices=BENCHMARKS, default=list(BENCHMARKS))
     parser.add_argument("--base-model", type=Path, default=DEFAULT_BASE_MODEL)
     parser.add_argument("--distilled-model", type=Path, default=DEFAULT_DISTILLED_MODEL)
     parser.add_argument("--rl-model", type=Path, default=DEFAULT_RL_MODEL)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument("--lm-eval-executable", default="/tmp/.venv-gemma4-e2e/bin/lm_eval")
+    parser.add_argument("--mmmlu-task-dir", type=Path, default=None)
+    parser.add_argument("--mmmlu-manifest", type=Path, default=None)
+    parser.add_argument("--skip-harness-git-check", action="store_true")
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.9)
     parser.add_argument("--poll-seconds", type=int, default=30)
     parser.add_argument("--no-wait-for-math", action="store_true")
@@ -364,21 +368,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("--gpus must contain unique GPU identifiers")
     if args.poll_seconds <= 0:
         raise ValueError("--poll-seconds must be positive")
-    models = resolve_models(
-        SimpleNamespace(
-            models=args.models,
-            base_model=args.base_model,
-            distilled_model=args.distilled_model,
-            rl_model=args.rl_model,
+    registry_mode = args.resolved_model_registry is not None
+    if registry_mode:
+        _, registered_models = load_resolved_registry(args.resolved_model_registry)
+        resolved = select_models(registered_models, args.models)
+        models = [
+            ModelSpec(model.tag, model.model, model.expected_model_identity_sha256)
+            for model in resolved
+        ]
+    else:
+        requested_models = args.models or ["base_e2b", "distilled_e2b_step750", "rl_e2b_step125"]
+        invalid_models = set(requested_models) - {"base_e2b", "distilled_e2b_step750", "rl_e2b_step125"}
+        if invalid_models:
+            raise ValueError(f"unknown legacy model tags: {sorted(invalid_models)}")
+        models = resolve_models(
+            SimpleNamespace(
+                models=requested_models,
+                base_model=args.base_model,
+                distilled_model=args.distilled_model,
+                rl_model=args.rl_model,
+            )
         )
-    )
     output_root = args.output_root.resolve()
     tasks = []
     for model in models:
-        for benchmark in BENCHMARKS:
+        for benchmark in args.benchmarks:
             task_id = f"{model.tag}__{benchmark}"
             output_dir = output_root / model.tag / "ood" / benchmark
-            command = (
+            command = [
                 args.python_executable,
                 str(SCRIPT_DIR / "eval_gemma4_ood.py"),
                 "--model",
@@ -401,7 +418,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 str(args.gpu_memory_utilization),
                 "--max-model-len",
                 "8192",
-            )
+            ]
+            if args.mmmlu_task_dir is not None:
+                command.extend(["--mmmlu-task-dir", str(args.mmmlu_task_dir.resolve())])
+            if args.mmmlu_manifest is not None:
+                command.extend(["--mmmlu-manifest", str(args.mmmlu_manifest.resolve())])
+            if args.skip_harness_git_check:
+                command.append("--skip-harness-git-check")
             tasks.append(
                 OODTask(
                     task_id=task_id,
@@ -411,7 +434,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     output_dir=output_dir,
                     log_path=output_root / "logs" / "ood" / f"{task_id}.log",
                     completion_path=output_dir / "complete.json",
-                    command=command,
+                    command=tuple(command),
                 )
             )
 
@@ -419,7 +442,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     math_state = output_root / "math_4gpu_state.json"
     plan = {
         "schema_version": 1,
-        "protocol": "gemma4_three_model_ood_4gpu_v1",
+        "protocol": "gemma4_registered_ood_4gpu_v1" if registry_mode else "gemma4_three_model_ood_4gpu_v1",
         "created_at_utc": _utc_now(),
         "mode": "execute" if args.execute else "dry_run",
         "gpus": args.gpus,
@@ -451,7 +474,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     _run_workers(tasks, gpus=args.gpus, state_path=state_path, resume=not args.no_resume)
     completion = {
         "schema_version": 1,
-        "protocol": "gemma4_three_model_ood_4gpu_v1",
+        "protocol": "gemma4_registered_ood_4gpu_v1" if registry_mode else "gemma4_three_model_ood_4gpu_v1",
         "completed_at_utc": _utc_now(),
         "state": str(state_path),
         "task_completions": [str(task.completion_path) for task in tasks],

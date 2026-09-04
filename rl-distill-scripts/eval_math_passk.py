@@ -114,18 +114,29 @@ def load_dataset_protocol_manifest(path: str | Path) -> dict[str, dict[str, Any]
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError(f"cannot read dataset protocol manifest {manifest_path}: {error}") from error
-    if manifest.get("schema_version") != 1 or manifest.get("protocol") != "gemma4_three_model_math_eval_v1":
+    supported_protocols = {
+        "gemma4_three_model_math_eval_v1",
+        "gemma4_rl_distill_math_eval_v1",
+    }
+    if manifest.get("schema_version") != 1 or manifest.get("protocol") not in supported_protocols:
         raise ValueError(f"unsupported dataset protocol manifest: {manifest_path}")
     repetition_rule = manifest.get("repetition_rule")
     if not isinstance(repetition_rule, dict):
         raise ValueError("dataset protocol manifest has no repetition_rule")
-    threshold = repetition_rule.get("threshold")
-    if isinstance(threshold, bool) or not isinstance(threshold, int) or threshold < 0:
-        raise ValueError("dataset protocol repetition threshold must be a non-negative integer")
-    if repetition_rule.get("comparison") != "strictly_greater_than":
-        raise ValueError("dataset protocol repetition comparison must be strictly_greater_than")
     if repetition_rule.get("allowed_factors") != "powers_of_two":
         raise ValueError("dataset protocol repetition factors must be powers_of_two")
+    fixed_counts = repetition_rule.get("samples_per_question")
+    fixed_policy = repetition_rule.get("policy") == "fixed_by_dataset"
+    if fixed_policy:
+        if not isinstance(fixed_counts, dict):
+            raise ValueError("fixed_by_dataset repetition policy requires samples_per_question")
+        threshold = None
+    else:
+        threshold = repetition_rule.get("threshold")
+        if isinstance(threshold, bool) or not isinstance(threshold, int) or threshold < 0:
+            raise ValueError("dataset protocol repetition threshold must be a non-negative integer")
+        if repetition_rule.get("comparison") != "strictly_greater_than":
+            raise ValueError("dataset protocol repetition comparison must be strictly_greater_than")
     if manifest.get("sampling") != EXPECTED_SAMPLING_PROTOCOL:
         raise ValueError("dataset protocol manifest does not use the registered Gemma 4 sampling settings")
     datasets = manifest.get("datasets")
@@ -154,9 +165,14 @@ def load_dataset_protocol_manifest(path: str | Path) -> dict[str, dict[str, Any]
             raise ValueError(f"samples_per_question must be a power of two for {output_path}")
         if isinstance(unique_questions, bool) or not isinstance(unique_questions, int) or unique_questions <= 0:
             raise ValueError(f"invalid unique_questions for {output_path}")
-        expected_sample_count = 1
-        while unique_questions * expected_sample_count <= threshold:
-            expected_sample_count *= 2
+        if fixed_policy:
+            expected_sample_count = fixed_counts.get(name)
+            if not isinstance(expected_sample_count, int) or expected_sample_count <= 0:
+                raise ValueError(f"fixed sample count is missing or invalid for {name!r}")
+        else:
+            expected_sample_count = 1
+            while unique_questions * expected_sample_count <= threshold:
+                expected_sample_count *= 2
         if sample_count != expected_sample_count:
             raise ValueError(
                 f"samples_per_question is not the smallest registered power of two for {output_path}: "

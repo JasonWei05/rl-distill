@@ -112,7 +112,9 @@ def resolve_models(args: argparse.Namespace) -> list[ModelSpec]:
     return [_resolve_model_spec(tag, Path(model), expected) for tag, model, expected in candidates if tag in requested]
 
 
-def select_math_datasets(manifest: dict[str, Any], *, id_validation: str) -> list[dict[str, Any]]:
+def select_named_math_datasets(
+    manifest: dict[str, Any], names_to_select: Sequence[str]
+) -> list[dict[str, Any]]:
     entries = manifest.get("datasets")
     if not isinstance(entries, list):
         raise ValueError("math data manifest has no datasets list")
@@ -120,16 +122,10 @@ def select_math_datasets(manifest: dict[str, Any], *, id_validation: str) -> lis
     if len(set(names)) != len(names):
         raise ValueError("math data manifest contains duplicate dataset names")
     by_name = dict(zip(names, entries, strict=True))
-    id_names = {
-        "full": ("id_validation_full",),
-        "clean": ("id_validation_clean",),
-        "both": ("id_validation_full", "id_validation_clean"),
-    }[id_validation]
-    selected_names = (*id_names, *DEFAULT_MATH_DATASETS)
-    missing = [name for name in selected_names if name not in by_name]
+    missing = [name for name in names_to_select if name not in by_name]
     if missing:
         raise ValueError(f"math data manifest is missing datasets: {missing}")
-    selected = [by_name[name] for name in selected_names]
+    selected = [by_name[name] for name in names_to_select]
     for entry in selected:
         path = Path(str(entry["output_path"]))
         actual_sha256 = _sha256_file(path)
@@ -139,6 +135,16 @@ def select_math_datasets(manifest: dict[str, Any], *, id_validation: str) -> lis
                 f"found {actual_sha256}"
             )
     return selected
+
+
+def select_math_datasets(manifest: dict[str, Any], *, id_validation: str) -> list[dict[str, Any]]:
+    id_names = {
+        "full": ("id_validation_full",),
+        "clean": ("id_validation_clean",),
+        "both": ("id_validation_full", "id_validation_clean"),
+    }[id_validation]
+    selected_names = (*id_names, *DEFAULT_MATH_DATASETS)
+    return select_named_math_datasets(manifest, selected_names)
 
 
 def build_math_command(
