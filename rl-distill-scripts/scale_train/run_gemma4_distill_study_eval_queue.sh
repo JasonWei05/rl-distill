@@ -91,6 +91,22 @@ refresh_registry() {
   "${PY}" rl-distill-scripts/data/build_gemma4_distill_study_eval_registry.py --output "${REGISTRY}" >"${LOG_ROOT}/registry_refresh.log" 2>&1 || echo "EVAL_QUEUE warning: registry refresh failed (keeping previous roster)" >&2
 }
 is_complete() { [[ -s ${RESULTS_BASE}/$1/RUN_COMPLETE.json ]]; }
+external_running_tags() {  # MODEL_TAGs of live runner processes we did not start (e.g. orphans of a previous queue) -> never double-launch
+  "${PY}" - "${!PID_TAG[@]}" <<'PYX'
+import os, sys
+from pathlib import Path
+mine = set(sys.argv[1:]); me = os.getuid(); tags = set()
+for p in Path("/proc").iterdir():
+    if not p.name.isdigit() or p.name in mine: continue
+    try:
+        if p.stat().st_uid != me: continue
+        env = (p / "environ").read_bytes().split(b"\0")
+        tag = next((e.split(b"=", 1)[1].decode() for e in env if e.startswith(b"MODEL_TAG=")), None)
+        if tag and b"run_gemma4_rl_distill_eval_one_model.sh" in (p / "cmdline").read_bytes(): tags.add(tag)
+    except OSError: pass
+print("\n".join(sorted(tags)))
+PYX
+}
 
 update_doc() {
   "${PY}" rl-distill-scripts/update_distill_study_results_doc.py --results-base "${RESULTS_BASE}" --registry "${REGISTRY}" \
@@ -101,7 +117,7 @@ update_doc() {
        fi
 }
 
-declare -A PID_TAG=() PID_GPU=() TAG_STATUS=() LAUNCHED=()
+declare -A PID_TAG=() PID_GPU=() TAG_STATUS=() LAUNCHED=() WAITED_EXTERNAL=()
 launch() {
   local tag="$1" gpu="${FREE_GPUS[0]}"; FREE_GPUS=("${FREE_GPUS[@]:1}")
   echo "EVAL_QUEUE launch model=${tag} gpu=${gpu} $(date -u +%FT%TZ)"
@@ -128,11 +144,16 @@ poll=0
 while true; do
   if ((poll % REFRESH_EVERY == 0)); then refresh_registry; fi
   mapfile -t TAGS < <(roster)
+  mapfile -t EXTERNAL < <(external_running_tags)
   pending=0
   for tag in "${TAGS[@]}"; do
     [[ -n ${LAUNCHED[$tag]:-} ]] && continue
     if is_complete "${tag}"; then LAUNCHED[$tag]=1; TAG_STATUS[$tag]=0; echo "EVAL_QUEUE skip model=${tag} (already complete)"; continue; fi
-    if ((${#FREE_GPUS[@]} > 0)); then launch "${tag}"; else pending=$((pending + 1)); fi
+    if [[ " ${EXTERNAL[*]} " == *" ${tag} "* ]]; then
+      [[ -n ${WAITED_EXTERNAL[$tag]:-} ]] || { echo "EVAL_QUEUE waiting model=${tag} (running outside this queue; will launch when it exits)"; WAITED_EXTERNAL[$tag]=1; }
+      pending=$((pending + 1)); continue
+    fi
+    if ((${#FREE_GPUS[@]} > ${#EXTERNAL[@]})); then launch "${tag}"; else pending=$((pending + 1)); fi   # external runners hold slots we cannot see
   done
   # Finished when nothing runs and nothing is pending; distilled models still training on the
   # nodes will appear in later registry refreshes, so keep polling while EVAL_QUEUE_WAIT_FOR_NEW=true.

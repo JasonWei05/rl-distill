@@ -258,7 +258,10 @@ MODEL_TAG=rl_e2b_easy GPU_COUNT=1 PACKED_PHYSICAL_GPU_IDS=4 \
 ### 7.1 Splitting the suite across machines (OOD elsewhere)
 
 `EVAL_PHASES` (runner and queue; default `math,ood`) selects the suites, so the math family can run
-here while the out-of-domain benchmarks run on another box. Per-model results are independent files,
+here while the out-of-domain benchmarks run on another box. **Current policy (2026-09-04): the local
+queue runs `EVAL_PHASES=math` — all math first, OOD later/elsewhere.** A queue never double-launches a
+model whose runner is alive from a previous queue (it waits, then launches it math-only; the math
+runner resumes from finished shards, so nothing is regenerated). Per-model results are independent files,
 and `RUN_COMPLETE.json` records the phases a machine finished.
 
 **Other machine, once** (any CUDA 12.x/13 host; needs `HF_TOKEN` in `.env`):
