@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# GPU-pool queue for the distillation-study evaluation suite: one model per GPU, the model runs its
-# whole suite (math: 3 bands + MATH500 + GSM8K, then OOD: MMLU-Pro / GPQA-Diamond / MMLU-14k) via
-# run_gemma4_rl_distill_eval_one_model.sh, and the next model starts the moment a GPU frees up.
+# GPU-pool queue for the distillation-study evaluation suite: every GPU is split into
+# EVAL_QUEUE_SLOTS_PER_GPU slots (default 4), one model per slot; the model runs its whole suite
+# (math: 3 bands + MATH500 + GSM8K, then OOD: MMLU-Pro / GPQA-Diamond / MMLU-14k) via
+# run_gemma4_rl_distill_eval_one_model.sh, and the next model starts the moment a slot frees up.
+# Several models share a GPU because the math eval is CPU-bound on vLLM's per-token top-128 logprob
+# processing (~2 cores and a few % of a B200 per model); each vLLM instance gets 0.85/slots of GPU memory.
 #
 #   EVAL_QUEUE_GPUS=4,5,6,7 bash rl-distill-scripts/scale_train/run_gemma4_distill_study_eval_queue.sh
 #
@@ -33,12 +36,22 @@ export SHARED_MMMLU_ROOT="${SHARED_MMMLU_ROOT:-${STUDY_ROOT}/mmmlu14k_tasks}"
 export RESULT_ROOT_OVERRIDE="${RESULT_ROOT_OVERRIDE:-${STUDY_ROOT}/results}"
 export SOURCE_REGISTRY="${REGISTRY}"
 export EVAL_S3_ENABLE="${EVAL_S3_ENABLE:-true}"
+# Result mirroring to S3 needs the ml-worker profile (the bare instance role cannot PutObject).
+export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-west-2}" AWS_REGION="${AWS_REGION:-us-west-2}"
+if [[ -z "${AWS_PROFILE:-}" ]] && aws configure list-profiles 2>/dev/null | grep -qx ml-worker; then export AWS_PROFILE=ml-worker; fi
+# One model per GPU: generate 64 questions x 16 seeded samples per vLLM call (~10x the throughput of the
+# one-question-at-a-time default; per-request seeds make the sampled set independent of batching).
+export MATH_QUESTIONS_PER_BATCH="${MATH_QUESTIONS_PER_BATCH:-64}"
+export MATH_REQUEST_BATCH_SIZE="${MATH_REQUEST_BATCH_SIZE:-1024}"
 LOG_ROOT="${STUDY_ROOT}/queue_logs"; mkdir -p "${LOG_ROOT}" "${RESULT_ROOT_OVERRIDE}"
 POLL_SECONDS="${EVAL_QUEUE_POLL_SECONDS:-60}"
 REFRESH_EVERY="${EVAL_QUEUE_REFRESH_EVERY:-10}"   # registry refresh every N polls
 COMMIT_DOC="${EVAL_QUEUE_COMMIT_DOC:-true}"
 
-if [[ -n ${EVAL_QUEUE_GPUS:-} ]]; then IFS=',' read -r -a FREE_GPUS <<< "${EVAL_QUEUE_GPUS}"; else mapfile -t FREE_GPUS < <(nvidia-smi --query-gpu=index --format=csv,noheader | tr -d ' '); fi
+if [[ -n ${EVAL_QUEUE_GPUS:-} ]]; then IFS=',' read -r -a GPUS <<< "${EVAL_QUEUE_GPUS}"; else mapfile -t GPUS < <(nvidia-smi --query-gpu=index --format=csv,noheader | tr -d ' '); fi
+SLOTS_PER_GPU="${EVAL_QUEUE_SLOTS_PER_GPU:-4}"
+export EVAL_GPU_MEMORY_UTILIZATION="${EVAL_GPU_MEMORY_UTILIZATION:-$(awk -v s="${SLOTS_PER_GPU}" 'BEGIN{printf "%.2f", int(85/s)/100}')}"
+FREE_GPUS=(); for ((s = 0; s < SLOTS_PER_GPU; s++)); do FREE_GPUS+=("${GPUS[@]}"); done   # round-robin slots over GPUs
 
 # --- shared assets, once -----------------------------------------------------------------------
 if [[ ! -s ${SHARED_DATA_ROOT}/math_eval_manifest.json ]]; then
@@ -96,7 +109,7 @@ reap() {
   return "${progressed}"
 }
 
-echo "EVAL_QUEUE start gpus=[${FREE_GPUS[*]}] registry=${REGISTRY} results=${RESULT_ROOT_OVERRIDE}"
+echo "EVAL_QUEUE start gpus=[${GPUS[*]}] slots_per_gpu=${SLOTS_PER_GPU} gpu_mem_util=${EVAL_GPU_MEMORY_UTILIZATION} registry=${REGISTRY} results=${RESULT_ROOT_OVERRIDE}"
 poll=0
 while true; do
   if ((poll % REFRESH_EVERY == 0)); then refresh_registry; fi

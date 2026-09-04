@@ -158,6 +158,7 @@ def build_math_command(
     tensor_parallel_size: int,
     gpu_memory_utilization: float,
     request_batch_size: int,
+    questions_per_batch: int = 1,
 ) -> list[str]:
     sampling = data_manifest["sampling"]
     command = [
@@ -201,6 +202,8 @@ def build_math_command(
         str(gpu_memory_utilization),
         "--request_batch_size",
         str(request_batch_size),
+        "--questions_per_batch",
+        str(questions_per_batch),
     ]
     return command
 

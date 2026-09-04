@@ -213,16 +213,34 @@ Manifest protocol `gemma4_rl_distill_math_eval_v2` (v1 = the earlier 500-q Easy-
 splits; results are kept apart under `s3://scale-ml/genai/rl-distill/gemma4-distill-study-evals-v1/`).
 Per model ≈ 33k math generations + 26k OOD items; e2b/e4b models take 1 GPU each.
 
+Generation batches 64 questions × their seeded samples per vLLM call (`MATH_QUESTIONS_PER_BATCH`,
+`MATH_REQUEST_BATCH_SIZE`; every request carries its own deterministic seed, so the sampled set does
+not depend on batching — the one-question-at-a-time default left a B200 ~35 % busy).
+
 ```bash
-# refresh the roster (pins newly finished distilled students)
-/tmp/.venv-gemma4/bin/python rl-distill-scripts/data/build_gemma4_distill_study_eval_registry.py
-# one model, full suite (math -> OOD -> finalize), repo-relative; EVAL_S3_ENABLE=false for local-only
-MODEL_TAG=rl_e2b_easy GPU_COUNT=1 VENV=/tmp/.venv-gemma4 \
-  bash rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_one_model.sh
-# whole roster on one 8-GPU node
-bash rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_packed_node.sh
-# aggregate: bash rl-distill-scripts/finalize_gemma4_rl_distill_eval_results.sh
+# Local GPU-pool queue (the way the study is evaluated): 4 models per GPU (EVAL_QUEUE_SLOTS_PER_GPU; the
+# math eval is CPU-bound on vLLM's top-128 logprob processing, ~2 cores and little GPU per model), full
+# suite per model (math -> OOD -> RUN_COMPLETE.json), next roster entry starts as soon as a slot frees. The roster
+# is refreshed from the Hub every 10 polls, so distilled students are picked up as they finish;
+# models with RUN_COMPLETE.json are skipped (safe to restart). After every completed model §8 below
+# is regenerated from the result files and committed/pushed.
+tmux new-session -d -s eval-queue \
+  "EVAL_QUEUE_GPUS=4,5,6,7 bash rl-distill-scripts/scale_train/run_gemma4_distill_study_eval_queue.sh \
+     2>&1 | tee -a /tmp/gemma4_distill_study_eval/eval_queue.log"
+# monitor
+grep -E "EVAL_QUEUE (launch|done|FAILED|skip)" /tmp/gemma4_distill_study_eval/eval_queue.log
+tail -3 /tmp/gemma4_distill_study_eval/queue_logs/<tag>.log        # per-model driver log
+ls /tmp/gemma4_distill_study_eval/results/<tag>/{math/metrics.json,ood/*/complete.json,RUN_COMPLETE.json}
+# manual pieces
+/tmp/.venv-gemma4/bin/python rl-distill-scripts/data/build_gemma4_distill_study_eval_registry.py   # refresh roster
+MODEL_TAG=rl_e2b_easy GPU_COUNT=1 PACKED_PHYSICAL_GPU_IDS=4 \
+  bash rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_one_model.sh                       # one model
+/tmp/.venv-gemma4/bin/python rl-distill-scripts/update_distill_study_results_doc.py                  # rebuild §8
 ```
+
+Results land under `/tmp/gemma4_distill_study_eval/results/<tag>/` (`math/metrics.json`,
+`math/traces/*.jsonl`, `ood/<bench>/`) and are mirrored to
+`s3://scale-ml/genai/rl-distill/gemma4-distill-study-evals-v1/<tag>/`.
 
 ## 8. Results (updated as each model finishes)
 
@@ -232,6 +250,12 @@ markers below; run it after any model completes (or let the packed run's watcher
 numbers (repo `\boxed{}` verifier = the RL reward) and OOD accuracies (lm-eval-harness) are
 separate families — do not compare across them. Bold = a model's own band (in-distribution).
 All percentages; `mean@k` = average accuracy over k samples, `pass@k` = any-of-k.
+
+**Pipeline check (2026-09-04):** a 1-GPU smoke of `rl_e2b_easy` on `id_easy` (300 q × 16, same verifier
+and prompt as the queue) gave mean@16 **40.8** / pass@16 77.0 / maj@16 47.0 — the RL run's own W&B
+validation best for that checkpoint was 41.0, so the offline suite reproduces the training-time number.
+Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue setting) gave 40.4 / 76.7 / 47.0
+with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
 _No completed evaluations yet. Smoke test (`rl_e2b_easy`, `id_easy` only) in progress._

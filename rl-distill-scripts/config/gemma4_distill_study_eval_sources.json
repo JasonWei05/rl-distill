@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "protocol": "gemma4_rl_distill_eval_sources_v1",
-  "created_at_utc": "2026-09-04T14:50:24.215628+00:00",
+  "created_at_utc": "2026-09-04T15:15:39.191542+00:00",
   "study": "gemma4-distill-study",
   "models": [
     {
@@ -191,6 +191,50 @@
         "type": "hf_subfolder",
         "repo_id": "JWei05/Distill-gemma4-26b-easy-to-e2b-base",
         "revision": "40557b8ed8e217241658672b0a5bd0aa25efe118",
+        "subfolder": "step_000500",
+        "metadata_repo": "google/gemma-4-E2B",
+        "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+      }
+    },
+    {
+      "tag": "distill_26b_medium_to_e2b",
+      "display_name": "Distilled E2B base <- 26b RL medium teacher (step_000500)",
+      "category": "distilled",
+      "architecture": "gemma-4-E2B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/Distill-gemma4-26b-medium-to-e2b-base",
+        "revision": "fcb0d8b6557b688f8634df7c3445311735b1c110",
+        "subfolder": "step_000500",
+        "metadata_repo": "google/gemma-4-E2B",
+        "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+      }
+    },
+    {
+      "tag": "distill_e2b_easy_to_e2b",
+      "display_name": "Distilled E2B base <- e2b RL easy teacher (step_000500)",
+      "category": "distilled",
+      "architecture": "gemma-4-E2B",
+      "trained_on": "easy",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/Distill-gemma4-e2b-easy-to-e2b-base",
+        "revision": "6be7751dca0bc34bf642d6a534ff188053c2f0f8",
         "subfolder": "step_000500",
         "metadata_repo": "google/gemma-4-E2B",
         "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"

@@ -528,13 +528,16 @@ def evaluate_questions(
     store_topk_logprobs: bool = False,
     store_per_token_diagnostics: bool = False,
     request_batch_size: int = 8,
+    questions_per_batch: int = 1,
     trace_callback: Callable[[Mapping[str, Any]], None] | None = None,
     retain_traces: bool = True,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Run generation through scoring while bounding retained response data.
 
-    Requests and vLLM outputs are bounded by ``request_batch_size``. Semantic
-    answer classes are assigned one question at a time. Production callers can
+    Generation is batched across ``questions_per_batch`` questions (every request carries its
+    own deterministic seed, so batching does not change what is sampled), with at most
+    ``request_batch_size`` requests per vLLM call. Scoring and semantic answer classes are
+    still assigned one question at a time. Production callers can
     stream each finalized full trace through ``trace_callback`` and set
     ``retain_traces=False``; only compact metric rows then remain in memory.
     """
@@ -545,6 +548,8 @@ def evaluate_questions(
         raise ValueError("predictive_topk_width must be positive")
     if request_batch_size <= 0:
         raise ValueError("request_batch_size must be positive")
+    if questions_per_batch <= 0:
+        raise ValueError("questions_per_batch must be positive")
     if not questions:
         raise ValueError("at least one evaluation question is required")
     requested_ks = sorted(set(int(k) for k in k_values) | {samples_per_question})
@@ -553,26 +558,32 @@ def evaluate_questions(
 
     retained_traces: list[dict[str, Any]] = []
     metric_traces: list[dict[str, Any]] = []
-    for question in questions:
-        prompt_token_ids = _render_prompt(tokenizer, question.question_text, chat_template)
-        if len(prompt_token_ids) > max_prompt_tokens:
-            raise ValueError(
-                f"question {question.question_id!r} renders to {len(prompt_token_ids)} tokens, "
-                f"above max_prompt_tokens={max_prompt_tokens}"
+    for group_start in range(0, len(questions), questions_per_batch):
+        question_group = questions[group_start : group_start + questions_per_batch]
+        group_requests: list[tuple[int, EvalRequest]] = []  # (index within group, request)
+        for group_index, question in enumerate(question_group):
+            prompt_token_ids = _render_prompt(tokenizer, question.question_text, chat_template)
+            if len(prompt_token_ids) > max_prompt_tokens:
+                raise ValueError(
+                    f"question {question.question_id!r} renders to {len(prompt_token_ids)} tokens, "
+                    f"above max_prompt_tokens={max_prompt_tokens}"
+                )
+            group_requests.extend(
+                (
+                    group_index,
+                    EvalRequest(
+                        question,
+                        sample_index,
+                        derive_sampling_seed(global_seed, dataset_name, question.question_id, sample_index),
+                        prompt_token_ids,
+                    ),
+                )
+                for sample_index in range(samples_per_question)
             )
-        question_requests = [
-            EvalRequest(
-                question,
-                sample_index,
-                derive_sampling_seed(global_seed, dataset_name, question.question_id, sample_index),
-                prompt_token_ids,
-            )
-            for sample_index in range(samples_per_question)
-        ]
-        question_traces: list[dict[str, Any]] = []
-        for batch_start in range(0, len(question_requests), request_batch_size):
-            request_batch = question_requests[batch_start : batch_start + request_batch_size]
-            prompt_requests = [{"prompt_token_ids": request.prompt_token_ids} for request in request_batch]
+        traces_by_question: list[list[dict[str, Any]]] = [[] for _ in question_group]
+        for batch_start in range(0, len(group_requests), request_batch_size):
+            request_batch = group_requests[batch_start : batch_start + request_batch_size]
+            prompt_requests = [{"prompt_token_ids": request.prompt_token_ids} for _, request in request_batch]
             sampling_params = [
                 _make_sampling_params(
                     sampling_params_class,
@@ -583,16 +594,16 @@ def evaluate_questions(
                     max_tokens=max_tokens,
                     predictive_topk_width=predictive_topk_width,
                 )
-                for request in request_batch
+                for _, request in request_batch
             ]
             outputs = llm.generate(prompt_requests, sampling_params, use_tqdm=True)
             if len(outputs) != len(request_batch):
                 raise RuntimeError(
                     f"vLLM returned {len(outputs)} outputs for {len(request_batch)} seeded requests "
-                    f"for question {question.question_id!r}, batch starting at {batch_start}"
+                    f"(question group starting at {group_start}, batch starting at {batch_start})"
                 )
 
-            for request, output in zip(request_batch, outputs, strict=True):
+            for (group_index, request), output in zip(request_batch, outputs, strict=True):
                 if len(output.outputs) != 1:
                     raise RuntimeError("vLLM must return exactly one completion per seeded request")
                 if getattr(output, "prompt_token_ids", request.prompt_token_ids) != request.prompt_token_ids:
@@ -608,7 +619,7 @@ def evaluate_questions(
                     store_topk_logprobs=store_topk_logprobs,
                     store_per_token_diagnostics=store_per_token_diagnostics,
                 )
-                question_traces.append(
+                traces_by_question[group_index].append(
                     {
                         "dataset": dataset_name,
                         "uid": request.question.question_id,
@@ -630,23 +641,24 @@ def evaluate_questions(
                     }
                 )
 
-        assign_semantic_answer_classes(question_traces, grader)
-        for trace in question_traces:
-            metric_traces.append(
-                {
-                    "uid": trace["uid"],
-                    "sample_index": trace["sample_index"],
-                    "acc": trace["acc"],
-                    "answer_class": trace["answer_class"],
-                    "sequence_entropy": trace["sequence_entropy"],
-                    "token_entropy_sum": trace["token_entropy_sum"],
-                    "token_entropy_count": trace["token_entropy_count"],
-                }
-            )
-            if trace_callback is not None:
-                trace_callback(trace)
-            if retain_traces:
-                retained_traces.append(trace)
+        for question_traces in traces_by_question:
+            assign_semantic_answer_classes(question_traces, grader)
+            for trace in question_traces:
+                metric_traces.append(
+                    {
+                        "uid": trace["uid"],
+                        "sample_index": trace["sample_index"],
+                        "acc": trace["acc"],
+                        "answer_class": trace["answer_class"],
+                        "sequence_entropy": trace["sequence_entropy"],
+                        "token_entropy_sum": trace["token_entropy_sum"],
+                        "token_entropy_count": trace["token_entropy_count"],
+                    }
+                )
+                if trace_callback is not None:
+                    trace_callback(trace)
+                if retain_traces:
+                    retained_traces.append(trace)
 
     aggregation = aggregate_math_traces(
         metric_traces,
@@ -715,6 +727,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="store per-token entropy/mass/logprob arrays instead of only bounded summary statistics",
     )
     parser.add_argument(
+        "--questions_per_batch",
+        type=int,
+        default=1,
+        help="questions whose seeded requests are generated together (1 = one question per vLLM call)",
+    )
+    parser.add_argument(
         "--request_batch_size",
         type=int,
         default=8,
@@ -746,6 +764,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise ValueError("predictive_topk_width must be positive")
     if args.request_batch_size <= 0:
         raise ValueError("request_batch_size must be positive")
+    if args.questions_per_batch <= 0:
+        raise ValueError("questions_per_batch must be positive")
     model_is_local = Path(args.model).exists()
     if not model_is_local and not (args.model_revision and IMMUTABLE_REVISION_PATTERN.fullmatch(args.model_revision)):
         raise ValueError("a remote model requires an immutable 40/64-hex --model_revision")
@@ -897,6 +917,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 store_topk_logprobs=args.store_predictive_topk_logprobs,
                 store_per_token_diagnostics=args.store_per_token_diagnostics,
                 request_batch_size=args.request_batch_size,
+                questions_per_batch=args.questions_per_batch,
                 trace_callback=write_trace,
                 retain_traces=False,
             )
