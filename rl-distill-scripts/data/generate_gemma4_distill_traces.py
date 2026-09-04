@@ -406,7 +406,7 @@ def build_trace_record(
         "shard_id": shard_id,
         "row_within_shard": row_within_shard,
         "generation_timestamp": generation_timestamp,
-        "generator_commit": semantic["generator"]["commit"],
+        "generator_commit": run_config["generator_repository"]["commit"],
         "generator_source_sha256": semantic["generator"]["source_sha256"],
         "environment_versions_json": json.dumps(
             semantic["environment_versions"], sort_keys=True, separators=(",", ":")
@@ -591,11 +591,11 @@ def _build_run_config(
         },
         "sampling": sampling,
         "engine": engine,
-        "generator": {
-            "commit": generator_commit,
-            "repository_dirty": repository_dirty,
-            "source_sha256": source_hash,
-        },
+        # Only the generator *source* is part of the experiment identity. The git commit and
+        # dirty flag are recorded below as metadata but deliberately kept out of the hash:
+        # hashing them made shards from two nodes (or from before/after any commit)
+        # mutually un-resumable even when the generator code was byte-identical.
+        "generator": {"source_sha256": source_hash},
         "environment_versions": dict(versions),
     }
     return {
@@ -603,6 +603,7 @@ def _build_run_config(
         "schema_version": SCHEMA_VERSION,
         "generation_config_sha256": hash_json(semantic),
         "semantic_config": semantic,
+        "generator_repository": {"commit": generator_commit, "repository_dirty": repository_dirty},
         "input_parquet": str(Path(args.input_parquet).resolve()),
         "created_at": utc_now(),
     }

@@ -19,15 +19,18 @@ TRACE_SPEC="${TRACE_SPEC:?TRACE_SPEC is required}"
 # run_key = full-checkpoint subdir; band = dataset band; best_step = checkpoint step.
 TEACHER_HF_REPO=""  # set for teachers whose best export lives on the Hub instead of S3
 case "${TRACE_SPEC}" in
-  e4b-easy)   RUN_KEY=e4b-easy;       BAND=easy;   BEST_STEP=100; DIRECTION=e4b_easy_to_e2b   ;;
-  e4b-medium) RUN_KEY=e4b-medium;     BAND=medium; BEST_STEP=90;  DIRECTION=e4b_medium_to_e2b ;;
-  e4b-hard)   RUN_KEY=e4b-hard;       BAND=hard;   BEST_STEP=120; DIRECTION=e4b_hard_to_e2b   ;;
-  12b-easy)   RUN_KEY=12b-easy;       BAND=easy;   BEST_STEP=70;  DIRECTION=12b_easy_to_e2b   ;;
-  12b-medium) RUN_KEY=12b-medium;     BAND=medium; BEST_STEP=120; DIRECTION=12b_medium_to_e2b ;;
-  12b-hard)   RUN_KEY=12b-hard;       BAND=hard;   BEST_STEP=140; DIRECTION=12b_hard_to_e2b   ;;
-  26b-easy)   RUN_KEY=26b-a4b-easy;   BAND=easy;   BEST_STEP=80;  DIRECTION=26b_easy_to_e2b   ;;
-  # HF-sourced teachers: runs continued off-cluster / rerun locally, exported to the Hub in
-  # step_NNNNNN/ subdirs (processor_config.json included). Best steps = W&B mean@16 peaks.
+  # Every teacher is fetched from its Hub export (step_NNNNNN/ subdir), so a node only needs HF
+  # access. The e4b/12b/26b-easy exports are the S3 full checkpoints' actor/huggingface dirs
+  # re-uploaded by scale_train/upload_fullckpt_to_hf.py; set TEACHER_SOURCE=s3 to pull those
+  # from S3 instead. Best steps = W&B val mean@16 peaks.
+  e4b-easy)   RUN_KEY=e4b-easy;       BAND=easy;   BEST_STEP=100; DIRECTION=e4b_easy_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-easy-seed42-26b-bands-es5 ;;
+  e4b-medium) RUN_KEY=e4b-medium;     BAND=medium; BEST_STEP=90;  DIRECTION=e4b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5 ;;
+  e4b-hard)   RUN_KEY=e4b-hard;       BAND=hard;   BEST_STEP=120; DIRECTION=e4b_hard_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-hard-seed42-26b-bands-es5 ;;
+  12b-easy)   RUN_KEY=12b-easy;       BAND=easy;   BEST_STEP=70;  DIRECTION=12b_easy_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-easy-seed42-26b-bands-es5 ;;
+  12b-medium) RUN_KEY=12b-medium;     BAND=medium; BEST_STEP=120; DIRECTION=12b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5 ;;
+  12b-hard)   RUN_KEY=12b-hard;       BAND=hard;   BEST_STEP=140; DIRECTION=12b_hard_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-hard-seed42-26b-bands-es5 ;;
+  26b-easy)   RUN_KEY=26b-a4b-easy;   BAND=easy;   BEST_STEP=80;  DIRECTION=26b_easy_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-easy-seed42-26b-bands-es5 ;;
+  # Runs continued off-cluster / rerun locally (Hub exports only).
   e2b-easy)   RUN_KEY=e2b-easy;       BAND=easy;   BEST_STEP=130; DIRECTION=e2b_easy_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-easy-seed42-local2gpu ;;
   e2b-medium) RUN_KEY=e2b-medium;     BAND=medium; BEST_STEP=190; DIRECTION=e2b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-medium-seed42-local2gpu ;;
   e2b-hard)   RUN_KEY=e2b-hard;       BAND=hard;   BEST_STEP=190; DIRECTION=e2b_hard_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-hard-seed42-local2gpu ;;
@@ -39,6 +42,11 @@ case "${TRACE_SPEC}" in
     ;;
 esac
 
+# TEACHER_SOURCE=s3 pulls the e4b/12b/26b-easy teachers from the S3 full checkpoints instead
+# of their Hub re-uploads (same weights, same content hash; only for boxes with S3 access).
+if [[ ${TEACHER_SOURCE:-hf} == s3 ]]; then
+  case "${RUN_KEY}" in e4b-*|12b-*|26b-a4b-easy) TEACHER_HF_REPO="" ;; esac
+fi
 FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-20260819-full-checkpoints}"
 TEACHER_S3_URI="${FULL_CHECKPOINT_S3_BASE}/${RUN_KEY}/global_step_${BEST_STEP}/actor/huggingface"
 DIFFICULTY_DATASET_REPO="${DIFFICULTY_DATASET_REPO:-JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k}"
@@ -171,7 +179,12 @@ ROW_GROUP_ROWS="${ROW_GROUP_ROWS:-2}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-64}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-32768}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.88}"
-TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
+# Workers = GPUs / TP. 26B-A4B (~52 GB weights) defaults to TP2 so one engine spans its
+# 2-GPU slice with ample KV cache; smaller teachers default to TP1 (DP across the slice).
+case "${RUN_KEY}" in
+  26b-a4b-*) TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-2}" ;;
+  *)         TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}" ;;
+esac
 MAX_WORKER_ATTEMPTS="${MAX_WORKER_ATTEMPTS:-5}"
 # Separate local root per trace version: the generator refuses to write into a directory
 # holding a different generation configuration, so v2 must not share v1's local dirs

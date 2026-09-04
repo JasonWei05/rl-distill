@@ -18,20 +18,32 @@ LOG_ROOT="${QUEUE_LOG_ROOT:-/tmp/gemma4_bestckpt_trace_queue/logs}"
 mkdir -p "${LOG_ROOT}"
 
 # Queue order: all 2-GPU runs first, then all 1-GPU runs. "<spec>:<gpus>".
-QUEUE=(
-  "12b-easy:2"
-  "12b-medium:2"
-  "12b-hard:2"
-  "26b-easy:2"
-  "26b-medium:2"
-  "26b-hard:2"
-  "e4b-easy:1"
-  "e4b-medium:1"
-  "e4b-hard:1"
-  "e2b-easy:1"
-  "e2b-medium:1"
-  "e2b-hard:1"
-)
+# TRACE_QUEUE_SPECS (comma-separated "<spec>:<gpus>") overrides the list, so one node can
+# run a subset. Two-node split used for the distillation study:
+#   node 1: TRACE_QUEUE_SPECS=26b-easy:2,26b-medium:2,26b-hard:2,e4b-easy:2,e4b-medium:2,e4b-hard:2
+#           (26b: 2 GPUs as TP2; e4b: 2 GPUs as DP2)
+#   node 2: TRACE_QUEUE_SPECS=12b-easy:2,12b-medium:2,12b-hard:2,e2b-easy:1,e2b-medium:1,e2b-hard:1
+#           (12b: 2 GPUs as DP2; e2b: 1 GPU)
+# Nodes write to the same S3 prefix and cooperate: completed shards are restored on startup
+# and skipped, so a node can also pick up work another node (or this box) already did.
+if [[ -n ${TRACE_QUEUE_SPECS:-} ]]; then
+  IFS=',' read -r -a QUEUE <<< "${TRACE_QUEUE_SPECS}"
+else
+  QUEUE=(
+    "12b-easy:2"
+    "12b-medium:2"
+    "12b-hard:2"
+    "26b-easy:2"
+    "26b-medium:2"
+    "26b-hard:2"
+    "e4b-easy:1"
+    "e4b-medium:1"
+    "e4b-hard:1"
+    "e2b-easy:1"
+    "e2b-medium:1"
+    "e2b-hard:1"
+  )
+fi
 
 if [[ -f .env ]]; then set -a; source .env; set +a; fi
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-west-2}"

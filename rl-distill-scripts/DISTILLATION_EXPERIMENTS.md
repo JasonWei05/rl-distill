@@ -103,8 +103,10 @@ Each teacher's traces are generated once and reused across its student(s).
 - **Hyperparameters:** global batch **64**, **1000 steps** — set epochs to **100** as a
   non-binding cap so the step count is the only limit (≈2.7 epochs over 24k examples);
   LR **2e-6**, **100** warmup steps, **linear decay to 2e-7**.
-  ⚠️ `gemma4_topk_distill_fsdp2.sh`'s audited overlay contract currently *asserts* global
-  batch 128; that check must be relaxed to 64 before these runs.
+  Note: `gemma4_topk_distill_fsdp2.sh`'s strict 8-GPU / batch-128 contract applies only to the
+  old `gemma4-hf-bf16-sdpa-topk-overlay-v1` index schema. These runs use derived training
+  views (`gemma4-distill-training-view-v1`, built by `build_gemma4_distill_training_view.py`
+  from each teacher's trace bundle), for which batch 64 on 1-2 GPUs flows through unchanged.
 - **Compute:** 8-GPU FSDP2 per the audited overlay contract (`MODEL_DTYPE=fp32`, BF16 FSDP
   forward params, FP32 reductions, `Gemma4TextDecoderLayer` wrap, 4096 padded-token
   chunk, max length 12288). Runs on `.venv` (FSDP2 stack).
@@ -118,3 +120,53 @@ Each teacher's traces are generated once and reused across its student(s).
 4. Where to **run the 21 distillations** — this 8-GPU box vs ScaleTrain (overlay needs 8 GPUs).
 5. Whether the still-training runs (e2b medium/hard, 26b-a4b medium/hard) should be **frozen at
    the current best** or allowed to finish before their traces are generated.
+
+## 6. Two-node execution plan (plain local scripts — no ScaleTrain)
+
+Everything below is plain bash run directly on a node (the scripts live under
+`rl-distill-scripts/scale_train/` for historical reasons; nothing depends on ScaleTrain, and
+`launch_gemma4_bestckpt_trace_matrix.py` is not used). Each node generates its teachers'
+traces, then distills from them. Both phases are async GPU-pool queues; the distill queue
+launches a run as soon as *its* teacher's trace bundle is COMPLETE, so it can be started right
+after the trace queue on the same node.
+
+Inputs are all on the Hub: teachers (the 12 best RL checkpoints, §1), datasets
+(`JWei05/DeepScaleR-…`), students (`google/gemma-4-E4B` / `-E2B`), and the base
+`processor_config.json` the 12b exports lack. **S3 is optional**: with scale-ml S3 write
+access, shards mirror to `…-topk128-v2/` and nodes cooperate (completed shards are restored
+and skipped); without it, set `TRACE_S3_MIRROR_ENABLE=false` and `DISTILL_S3_ENABLE=false`
+and everything stays on local disk (traces under `/tmp/gemma4_bestckpt_traces_v2/`, views
+under `/tmp/gemma4_distill_views/`). Prereqs per node: `.env` with `HF_TOKEN` (+ `WANDB_API_KEY`,
+AWS creds if mirroring), the gemma4 venv (`bash rl-distill-scripts/setup_env_gemma4.sh`,
+default `/tmp/.venv-gemma4`), 8 GPUs.
+
+| | Node 1 | Node 2 |
+|---|---|---|
+| **Traces** | 26b easy/medium/hard (2 GPUs, **TP2**) · e4b easy/medium/hard (2 GPUs, DP2) | 12b easy/medium/hard (2 GPUs, DP2) · e2b easy/medium/hard (1 GPU) |
+| **Distill** | 26b→e4b, e4b→e4b (2 GPUs each) · 26b→e2b, e4b→e2b (1 GPU each) — 12 runs | 12b→e4b (2 GPUs) · 12b→e2b, e2b→e2b (1 GPU each) — 9 runs |
+
+```bash
+# ---- node 1 ----
+TRACE_QUEUE_SPECS=26b-easy:2,26b-medium:2,26b-hard:2,e4b-easy:2,e4b-medium:2,e4b-hard:2 \
+  VENV=/tmp/.venv-gemma4 GPU_MEMORY_UTILIZATION=0.72 \
+  bash rl-distill-scripts/scale_train/run_gemma4_bestckpt_trace_queue.sh
+DISTILL_QUEUE_RUNS=26b-easy:e4b:2,26b-medium:e4b:2,26b-hard:e4b:2,e4b-easy:e4b:2,e4b-medium:e4b:2,e4b-hard:e4b:2,26b-easy:e2b:1,26b-medium:e2b:1,26b-hard:e2b:1,e4b-easy:e2b:1,e4b-medium:e2b:1,e4b-hard:e2b:1 \
+  bash rl-distill-scripts/scale_train/run_gemma4_distill_queue.sh
+
+# ---- node 2 ----
+TRACE_QUEUE_SPECS=12b-easy:2,12b-medium:2,12b-hard:2,e2b-easy:1,e2b-medium:1,e2b-hard:1 \
+  VENV=/tmp/.venv-gemma4 GPU_MEMORY_UTILIZATION=0.72 \
+  bash rl-distill-scripts/scale_train/run_gemma4_bestckpt_trace_queue.sh
+DISTILL_QUEUE_RUNS=12b-easy:e4b:2,12b-medium:e4b:2,12b-hard:e4b:2,12b-easy:e2b:1,12b-medium:e2b:1,12b-hard:e2b:1,e2b-easy:e2b:1,e2b-medium:e2b:1,e2b-hard:e2b:1 \
+  bash rl-distill-scripts/scale_train/run_gemma4_distill_queue.sh
+```
+
+Single runs: `TEACHER_SPEC=12b-easy STUDENT=e4b DISTILL_GPU_IDS=0,1 bash
+rl-distill-scripts/scale_train/run_gemma4_distill_one.sh` (recipe defaults: bs 64, 1000 steps,
+epochs cap 100, lr 2e-6, warmup 100, linear → 2e-7; pin `STUDENT_REVISION` for reproducible
+student identities). Smoke-test one teacher on a node with `TRACE_MAX_SHARDS=1` /
+one `run_gemma4_distill_one.sh` before the full queues.
+
+Trace/distill identity: the generator hashes only its own source + config (not the git
+commit), so nodes may be at different commits as long as `generate_gemma4_distill_traces.py`
+is byte-identical; a change to that file requires a new trace version (bump the `-v2` prefixes).
