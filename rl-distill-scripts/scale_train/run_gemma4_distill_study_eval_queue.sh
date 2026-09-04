@@ -105,7 +105,8 @@ for p in Path("/proc").iterdir():
         tag = next((e.split(b"=", 1)[1].decode() for e in env if e.startswith(b"MODEL_TAG=")), None)
         if tag and b"run_gemma4_rl_distill_eval_one_model.sh" in (p / "cmdline").read_bytes(): tags.add(tag)
     except OSError: pass
-print("\n".join(sorted(tags)))
+if tags:
+    print("\n".join(sorted(tags)))
 PYX
 }
 
@@ -146,17 +147,22 @@ poll=0
 while true; do
   if ((poll % REFRESH_EVERY == 0)); then refresh_registry; fi
   mapfile -t TAGS < <(roster)
-  mapfile -t EXTERNAL < <(external_running_tags)
-  pending=0
+  mapfile -t EXTERNAL < <(external_running_tags | grep -v "^$")   # no empty element when nothing is running
+  pending=0; newly_complete=0
   for tag in "${TAGS[@]}"; do
     [[ -n ${LAUNCHED[$tag]:-} ]] && continue
-    if is_complete "${tag}"; then LAUNCHED[$tag]=1; TAG_STATUS[$tag]=0; echo "EVAL_QUEUE skip model=${tag} (already complete)"; continue; fi
+    if is_complete "${tag}"; then
+      LAUNCHED[$tag]=1; TAG_STATUS[$tag]=0; echo "EVAL_QUEUE skip model=${tag} (already complete)"
+      [[ -n ${WAITED_EXTERNAL[$tag]:-} ]] && newly_complete=1   # finished outside this queue -> still fold into the doc
+      continue
+    fi
     if [[ " ${EXTERNAL[*]} " == *" ${tag} "* ]]; then
       [[ -n ${WAITED_EXTERNAL[$tag]:-} ]] || { echo "EVAL_QUEUE waiting model=${tag} (running outside this queue; will launch when it exits)"; WAITED_EXTERNAL[$tag]=1; }
       pending=$((pending + 1)); continue
     fi
     if ((${#FREE_GPUS[@]} > ${#EXTERNAL[@]})); then launch "${tag}"; else pending=$((pending + 1)); fi   # external runners hold slots we cannot see
   done
+  ((newly_complete)) && update_doc "external"
   # Finished when nothing runs and nothing is pending; distilled models still training on the
   # nodes will appear in later registry refreshes, so keep polling while EVAL_QUEUE_WAIT_FOR_NEW=true.
   if ((${#PID_TAG[@]} == 0 && pending == 0)) && [[ ${EVAL_QUEUE_WAIT_FOR_NEW:-true} != true ]]; then break; fi
