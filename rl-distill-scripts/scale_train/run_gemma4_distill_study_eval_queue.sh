@@ -60,6 +60,7 @@ COMMIT_DOC="${EVAL_QUEUE_COMMIT_DOC:-true}"
 if [[ -n ${EVAL_QUEUE_GPUS:-} ]]; then IFS=',' read -r -a GPUS <<< "${EVAL_QUEUE_GPUS}"; else mapfile -t GPUS < <(nvidia-smi --query-gpu=index --format=csv,noheader | tr -d ' '); fi
 SLOTS_PER_GPU="${EVAL_QUEUE_SLOTS_PER_GPU:-2}"
 export EVAL_KV_CACHE_GIB="${EVAL_KV_CACHE_GIB:-16}"
+export EVAL_PHASES="${EVAL_PHASES:-math,ood}"   # "math" here + "ood" on another machine splits the suite
 export EVAL_PREDICTIVE_TOPK_WIDTH="${EVAL_PREDICTIVE_TOPK_WIDTH:-0}"   # 0 = no logprobs (set 128 to restore the entropy diagnostics)
 LAUNCH_STAGGER="${EVAL_QUEUE_LAUNCH_STAGGER:-20}"
 export EVAL_GPU_MEMORY_UTILIZATION="${EVAL_GPU_MEMORY_UTILIZATION:-$(awk -v s="${SLOTS_PER_GPU}" 'BEGIN{printf "%.2f", int(90/s)/100}')}"
@@ -122,7 +123,7 @@ reap() {
   return "${progressed}"
 }
 
-echo "EVAL_QUEUE start gpus=[${GPUS[*]}] slots_per_gpu=${SLOTS_PER_GPU} kv_cache_gib=${EVAL_KV_CACHE_GIB} topk_logprobs=${EVAL_PREDICTIVE_TOPK_WIDTH} gpu_mem_util=${EVAL_GPU_MEMORY_UTILIZATION} registry=${REGISTRY} results=${RESULTS_BASE}"
+echo "EVAL_QUEUE start gpus=[${GPUS[*]}] slots_per_gpu=${SLOTS_PER_GPU} kv_cache_gib=${EVAL_KV_CACHE_GIB} phases=${EVAL_PHASES} topk_logprobs=${EVAL_PREDICTIVE_TOPK_WIDTH} gpu_mem_util=${EVAL_GPU_MEMORY_UTILIZATION} registry=${REGISTRY} results=${RESULTS_BASE}"
 poll=0
 while true; do
   if ((poll % REFRESH_EVERY == 0)); then refresh_registry; fi

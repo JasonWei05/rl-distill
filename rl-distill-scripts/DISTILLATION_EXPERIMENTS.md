@@ -255,6 +255,35 @@ MODEL_TAG=rl_e2b_easy GPU_COUNT=1 PACKED_PHYSICAL_GPU_IDS=4 \
 /tmp/.venv-gemma4/bin/python rl-distill-scripts/update_distill_study_results_doc.py                  # rebuild §8
 ```
 
+### 7.1 Splitting the suite across machines (OOD elsewhere)
+
+`EVAL_PHASES` (runner and queue; default `math,ood`) selects the suites, so the math family can run
+here while the out-of-domain benchmarks run on another box. Per-model results are independent files,
+and `RUN_COMPLETE.json` records the phases a machine finished.
+
+**Other machine, once** (any CUDA 12.x/13 host; needs `HF_TOKEN` in `.env`):
+```bash
+git clone <this repo> rl-distill && cd rl-distill
+git clone https://github.com/EleutherAI/lm-evaluation-harness lm-evaluation-harness \
+  && git -C lm-evaluation-harness checkout f4d4b3de3ee6741a7151a9fe74945ee515262f4c   # pinned; the repo only holds a gitlink
+VENV=/tmp/.venv-gemma4 GEMMA4_CUDA_VARIANT=cu129 bash rl-distill-scripts/setup_env_gemma4.sh        # cu130 for CUDA-13 drivers
+uv pip install --python /tmp/.venv-gemma4/bin/python --no-deps -e ./lm-evaluation-harness          # lm_eval 0.4.13.dev0
+```
+**Other machine, run the OOD suite** (models are materialized from the pinned Hub commits in the registry):
+```bash
+# whole roster, 2 models per 80 GB GPU, results under /tmp/gemma4_distill_study_eval/results/<tag>/
+EVAL_PHASES=ood EVAL_S3_ENABLE=false EVAL_QUEUE_GPUS=0,1,2,3,4,5,6,7 \
+  bash rl-distill-scripts/scale_train/run_gemma4_distill_study_eval_queue.sh
+# or one model
+EVAL_PHASES=ood EVAL_S3_ENABLE=false MODEL_TAG=rl_e2b_easy GPU_COUNT=1 PACKED_PHYSICAL_GPU_IDS=0 \
+  bash rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_one_model.sh
+```
+(`EVAL_S3_ENABLE=true` instead mirrors to `s3://scale-ml/genai/rl-distill/gemma4-distill-study-evals-v1/<tag>/`
+if the host has the `ml-worker` profile.) **This machine, math only:** relaunch the queue with
+`EVAL_PHASES=math`. **Merging:** copy each `results/<tag>/<tag>/ood/` directory from the other machine
+into the same path under this box's results base (or `aws s3 sync <prefix>/ /tmp/gemma4_distill_study_eval/results/`),
+then `python rl-distill-scripts/update_distill_study_results_doc.py` fills the OOD columns of §8.
+
 Results land under `/tmp/gemma4_distill_study_eval/results/<tag>/` — one root per model:
 `<tag>/math/metrics.json`, `<tag>/math/traces/*.jsonl`, `<tag>/ood/<bench>/`, `RUN_COMPLETE.json` —
 mirrored to `s3://scale-ml/genai/rl-distill/gemma4-distill-study-evals-v1/<tag>/`.

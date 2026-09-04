@@ -29,6 +29,10 @@ RESULT_ROOT="${RESULT_ROOT_OVERRIDE:-${WORK_ROOT}/results}"
 REMOTE_ROOT="${RESULT_S3_ROOT%/}/${MODEL_TAG}/"
 MMMLU_ROOT="${SHARED_MMMLU_ROOT:-${DATA_ROOT}/mmmlu14k_tasks}"
 PREPARE_SHARED_ASSETS="${PREPARE_SHARED_ASSETS:-true}"
+# EVAL_PHASES selects the suites: "math,ood" (default), "math" or "ood" -- lets the OOD suite run on another machine.
+EVAL_PHASES="${EVAL_PHASES:-math,ood}"
+case ",${EVAL_PHASES}," in *,math,*|*,ood,*) ;; *) echo "FATAL: EVAL_PHASES must contain math and/or ood" >&2; exit 2 ;; esac
+run_phase() { [[ ",${EVAL_PHASES}," == *",$1,"* ]]; }
 
 case "${GPU_COUNT}" in
   1|2) ;;
@@ -65,15 +69,19 @@ upload_results() {
 trap upload_results EXIT
 
 if [[ "${PREPARE_SHARED_ASSETS}" == "true" ]]; then
-  "${PYTHON_BIN}" rl-distill-scripts/data/prepare_gemma4_rl_distill_eval_data.py \
-    --output-dir "${DATA_ROOT}" --overwrite
-  "${PYTHON_BIN}" rl-distill-scripts/data/prepare_gemma4_mmmlu14k.py \
-    --output-dir "${MMMLU_ROOT}" \
-    --harness-dir "${PROJECT_ROOT}/lm-evaluation-harness" \
-    --skip-harness-git-check --overwrite
+  if run_phase math; then
+    "${PYTHON_BIN}" rl-distill-scripts/data/prepare_gemma4_rl_distill_eval_data.py \
+      --output-dir "${DATA_ROOT}" --overwrite
+  fi
+  if run_phase ood; then
+    "${PYTHON_BIN}" rl-distill-scripts/data/prepare_gemma4_mmmlu14k.py \
+      --output-dir "${MMMLU_ROOT}" \
+      --harness-dir "${PROJECT_ROOT}/lm-evaluation-harness" \
+      --skip-harness-git-check --overwrite
+  fi
 elif [[ "${PREPARE_SHARED_ASSETS}" == "false" ]]; then
-  test -s "${DATA_ROOT}/math_eval_manifest.json"
-  test -s "${MMMLU_ROOT}/manifest.json"
+  if run_phase math; then test -s "${DATA_ROOT}/math_eval_manifest.json"; fi
+  if run_phase ood; then test -s "${MMMLU_ROOT}/manifest.json"; fi
 else
   echo "FATAL: PREPARE_SHARED_ASSETS must be true or false" >&2
   exit 2
@@ -86,6 +94,7 @@ fi
 
 RESOLVED_REGISTRY="${MODEL_ROOT}/resolved_model_registry.json"
 
+if run_phase math; then
 "${PYTHON_BIN}" rl-distill-scripts/run_gemma4_math_4gpu.py \
   --gpus "${GPU_ARGS[@]}" \
   --models "${MODEL_TAG}" \
@@ -96,9 +105,11 @@ RESOLVED_REGISTRY="${MODEL_ROOT}/resolved_model_registry.json"
   ${EVAL_KV_CACHE_GIB:+--kv-cache-memory-gib "${EVAL_KV_CACHE_GIB}"} \
   ${EVAL_PREDICTIVE_TOPK_WIDTH:+--predictive-topk-width "${EVAL_PREDICTIVE_TOPK_WIDTH}"} \
   --request-batch-size "${MATH_REQUEST_BATCH_SIZE:-8}" --questions-per-batch "${MATH_QUESTIONS_PER_BATCH:-1}" --execute
-
 upload_results
+fi
 
+
+if run_phase ood; then
 "${PYTHON_BIN}" rl-distill-scripts/run_gemma4_ood_4gpu.py \
   --gpus "${GPU_ARGS[@]}" \
   --models "${MODEL_TAG}" \
@@ -110,15 +121,16 @@ upload_results
   --gpu-memory-utilization "${EVAL_GPU_MEMORY_UTILIZATION:-0.9}" \
   ${EVAL_KV_CACHE_GIB:+--kv-cache-memory-gib "${EVAL_KV_CACHE_GIB}"} \
   --skip-harness-git-check --execute
+fi
 
-"${PYTHON_BIN}" - "${MODEL_TAG}" "${RESULT_ROOT}" <<'PY'
+"${PYTHON_BIN}" - "${MODEL_TAG}" "${RESULT_ROOT}" "${EVAL_PHASES}" <<'PY'
 import hashlib
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-tag, root = sys.argv[1], Path(sys.argv[2])
+tag, root, phases = sys.argv[1], Path(sys.argv[2]), sys.argv[3].split(",")
 files = []
 for path in sorted(root.rglob("*")):
     if not path.is_file() or path.name.endswith(".partial"):
@@ -129,6 +141,7 @@ for path in sorted(root.rglob("*")):
     "schema_version": 1,
     "protocol": "gemma4_rl_distill_base_evals_v2",
     "model_tag": tag,
+    "phases": phases,
     "completed_at_utc": datetime.now(timezone.utc).isoformat(),
     "files": files,
 }, indent=2, sort_keys=True) + "\n")
