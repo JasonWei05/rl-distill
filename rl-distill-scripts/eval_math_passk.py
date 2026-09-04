@@ -117,6 +117,7 @@ def load_dataset_protocol_manifest(path: str | Path) -> dict[str, dict[str, Any]
     supported_protocols = {
         "gemma4_three_model_math_eval_v1",
         "gemma4_rl_distill_math_eval_v1",
+        "gemma4_rl_distill_math_eval_v2",  # 300-question easy/medium/hard band validation sets
     }
     if manifest.get("schema_version") != 1 or manifest.get("protocol") not in supported_protocols:
         raise ValueError(f"unsupported dataset protocol manifest: {manifest_path}")

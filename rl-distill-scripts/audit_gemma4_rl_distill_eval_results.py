@@ -17,8 +17,9 @@ from gemma4_eval_registry import canonical_json_sha256, load_source_registry
 COMPLETE_PROTOCOL = "gemma4_rl_distill_base_evals_v2"
 PACKED_COMPLETE_PROTOCOL = "gemma4_rl_distill_packed_complete_v1"
 EXPECTED_MATH = {
-    "id_easy": (500, 16),
-    "id_medium": (500, 16),
+    "id_easy": (300, 16),
+    "id_medium": (300, 16),
+    "id_hard": (300, 16),
     "math500": (500, 16),
     "gsm8k": (1_319, 8),
 }

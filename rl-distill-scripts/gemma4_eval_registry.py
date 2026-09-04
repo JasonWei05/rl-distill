@@ -28,8 +28,9 @@ IMMUTABLE_REVISION = re.compile(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
 SOURCE_TYPES = frozenset({"hf_snapshot", "hf_subfolder", "s3_hf_export"})
 MODEL_CATEGORIES = frozenset({"base", "rl", "distilled"})
-DIFFICULTIES = frozenset({"easy", "medium"})
-CORE_MATH_DATASETS = frozenset({"id_easy", "id_medium", "math500", "gsm8k"})
+DIFFICULTIES = frozenset({"easy", "medium", "hard"})
+CORE_MATH_DATASETS = frozenset({"id_easy", "id_medium", "id_hard", "math500", "gsm8k"})
+ALL_ID_DATASETS = frozenset({"id_easy", "id_medium", "id_hard"})
 OOD_BENCHMARKS = ("mmlu_pro", "gpqa", "mmmlu14k")
 ModelT = TypeVar("ModelT")
 
@@ -143,7 +144,7 @@ def _validate_common_model(entry: Any, *, index: int) -> tuple[dict[str, Any], t
     value["architecture"] = _require_nonempty(value.get("architecture"), f"{tag}.architecture")
     trained_on = value.get("trained_on")
     if trained_on is not None and trained_on not in DIFFICULTIES:
-        raise ValueError(f"model {tag!r} trained_on must be easy, medium, or null")
+        raise ValueError(f"model {tag!r} trained_on must be easy, medium, hard, or null")
     if category == "base" and trained_on is not None:
         raise ValueError(f"base model {tag!r} must have trained_on=null")
     if category != "base" and trained_on is None:
@@ -157,9 +158,16 @@ def _validate_common_model(entry: Any, *, index: int) -> tuple[dict[str, Any], t
     required_common = {"math500", "gsm8k"}
     if not required_common.issubset(names):
         raise ValueError(f"model {tag!r} must include MATH500 and GSM8K")
-    id_names = set(names) & {"id_easy", "id_medium"}
-    expected_ids = {"id_easy", "id_medium"} if category == "base" else {f"id_{trained_on}"}
-    if id_names != expected_ids:
+    id_names = set(names) & ALL_ID_DATASETS
+    # Base models evaluate every band. RL/distilled models may evaluate just their own band (the
+    # legacy registry) or all bands (the distill study: own band = in-distribution, the others
+    # report cross-band transfer); either way the own band must be present.
+    if category == "base":
+        allowed = ({"id_easy", "id_medium"}, set(ALL_ID_DATASETS))
+    else:
+        allowed = ({f"id_{trained_on}"}, set(ALL_ID_DATASETS))
+    expected_ids = allowed[-1]
+    if id_names not in allowed:
         raise ValueError(f"model {tag!r} has ID datasets {sorted(id_names)}, expected {sorted(expected_ids)}")
     return value, names
 
@@ -243,7 +251,7 @@ def select_models(models: Sequence[ModelT], tags: Sequence[str] | None) -> list[
 
 
 def matrix_request_counts(models: Sequence[RegisteredModel | ResolvedModel]) -> dict[str, Any]:
-    per_dataset = {"id_easy": 8_000, "id_medium": 8_000, "math500": 8_000, "gsm8k": 10_552}
+    per_dataset = {"id_easy": 4_800, "id_medium": 4_800, "id_hard": 4_800, "math500": 8_000, "gsm8k": 10_552}  # bands: 300 q x 16
     math_by_model = {
         model.tag: sum(per_dataset[name] for name in model.math_datasets)
         for model in models

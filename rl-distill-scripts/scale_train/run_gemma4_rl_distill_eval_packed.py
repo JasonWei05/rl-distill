@@ -60,8 +60,7 @@ def load_tasks(source_registry: Path) -> tuple[dict[str, Any], list[EvalTask]]:
         tasks.append(EvalTask(model.tag, model.display_name, model.architecture, gpus))
     if len(tasks) != 15:
         raise ValueError(f"packed evaluation requires exactly 15 models, found {len(tasks)}")
-    if sum(task.gpus == 2 for task in tasks) != 3:
-        raise ValueError("packed evaluation expected exactly three two-GPU 12B models")
+    # 12B models take 2 GPUs, everything else 1; any mix is allowed (the distill study has none).
     return payload, tasks
 
 
@@ -147,7 +146,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--work-root", type=Path, default=Path("/tmp/gemma4-rl-distill-eval-packed"))
     parser.add_argument(
         "--result-s3-root",
-        default="s3://scale-ml/genai/rl-distill/gemma4-rl-distill-base-evals-v2",
+        default="s3://scale-ml/genai/rl-distill/gemma4-distill-study-evals-v1",
     )
     parser.add_argument("--gpu-ids", nargs="+", type=int, default=list(range(8)))
     parser.add_argument("--max-attempts", type=int, default=3)

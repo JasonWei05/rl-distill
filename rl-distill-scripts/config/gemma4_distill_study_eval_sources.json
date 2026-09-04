@@ -1,0 +1,310 @@
+{
+  "schema_version": 1,
+  "protocol": "gemma4_rl_distill_eval_sources_v1",
+  "created_at_utc": "2026-09-04T14:50:24.215628+00:00",
+  "study": "gemma4-distill-study",
+  "models": [
+    {
+      "tag": "base_e2b",
+      "display_name": "Gemma 4 E2B PT base",
+      "category": "base",
+      "architecture": "gemma-4-E2B",
+      "trained_on": null,
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_snapshot",
+        "repo_id": "google/gemma-4-E2B",
+        "revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+      }
+    },
+    {
+      "tag": "base_e4b",
+      "display_name": "Gemma 4 E4B PT base",
+      "category": "base",
+      "architecture": "gemma-4-E4B",
+      "trained_on": null,
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_snapshot",
+        "repo_id": "google/gemma-4-E4B",
+        "revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "rl_e2b_easy",
+      "display_name": "E2B RL easy best (step 130)",
+      "category": "rl",
+      "architecture": "gemma-4-E2B",
+      "trained_on": "easy",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-easy-seed42-local2gpu",
+        "revision": "c82460136fb16c36ff91dd2a489fba9332b52432",
+        "subfolder": "step_000130",
+        "metadata_repo": "google/gemma-4-E2B",
+        "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+      }
+    },
+    {
+      "tag": "rl_e2b_medium",
+      "display_name": "E2B RL medium best (step 240)",
+      "category": "rl",
+      "architecture": "gemma-4-E2B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-medium-seed42-local2gpu",
+        "revision": "497e7964f98bb6d825e4c7fcc95d75fa928a6d83",
+        "subfolder": "step_000240",
+        "metadata_repo": "google/gemma-4-E2B",
+        "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+      }
+    },
+    {
+      "tag": "rl_e2b_hard",
+      "display_name": "E2B RL hard best (step 190)",
+      "category": "rl",
+      "architecture": "gemma-4-E2B",
+      "trained_on": "hard",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-hard-seed42-local2gpu",
+        "revision": "59762d43bf94b6938d2e560e1fdbfdbf0d3f9e4c",
+        "subfolder": "step_000190",
+        "metadata_repo": "google/gemma-4-E2B",
+        "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+      }
+    },
+    {
+      "tag": "rl_e4b_easy",
+      "display_name": "E4B RL easy best (step 100)",
+      "category": "rl",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "easy",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-easy-seed42-26b-bands-es5",
+        "revision": "345beec132e3e38922b21fd7b648d002dc4d333d",
+        "subfolder": "step_000100",
+        "metadata_repo": "google/gemma-4-E4B",
+        "metadata_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "rl_e4b_medium",
+      "display_name": "E4B RL medium best (step 90)",
+      "category": "rl",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5",
+        "revision": "5f90d25e193d5071d74975793c20d4ac10fc733f",
+        "subfolder": "step_000090",
+        "metadata_repo": "google/gemma-4-E4B",
+        "metadata_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "rl_e4b_hard",
+      "display_name": "E4B RL hard best (step 120)",
+      "category": "rl",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "hard",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-hard-seed42-26b-bands-es5",
+        "revision": "627bd9d825ffdab1552fb3bbc1af410a8d2ac0a1",
+        "subfolder": "step_000120",
+        "metadata_repo": "google/gemma-4-E4B",
+        "metadata_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_26b_easy_to_e2b",
+      "display_name": "Distilled E2B base <- 26b RL easy teacher (step_000500)",
+      "category": "distilled",
+      "architecture": "gemma-4-E2B",
+      "trained_on": "easy",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/Distill-gemma4-26b-easy-to-e2b-base",
+        "revision": "40557b8ed8e217241658672b0a5bd0aa25efe118",
+        "subfolder": "step_000500",
+        "metadata_repo": "google/gemma-4-E2B",
+        "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+      }
+    },
+    {
+      "tag": "distill_e2b_hard_to_e2b",
+      "display_name": "Distilled E2B base <- e2b RL hard teacher (step_000500)",
+      "category": "distilled",
+      "architecture": "gemma-4-E2B",
+      "trained_on": "hard",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/Distill-gemma4-e2b-hard-to-e2b-base",
+        "revision": "61f922150708b237e34a3bed4f772e51b9407d43",
+        "subfolder": "step_000500",
+        "metadata_repo": "google/gemma-4-E2B",
+        "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+      }
+    },
+    {
+      "tag": "distill_e2b_medium_to_e2b",
+      "display_name": "Distilled E2B base <- e2b RL medium teacher (step_000500)",
+      "category": "distilled",
+      "architecture": "gemma-4-E2B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/Distill-gemma4-e2b-medium-to-e2b-base",
+        "revision": "25c3746a6c355ff75273791ae471d83ba04ff392",
+        "subfolder": "step_000500",
+        "metadata_repo": "google/gemma-4-E2B",
+        "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+      }
+    },
+    {
+      "tag": "distill_12b_easy_to_e2b",
+      "display_name": "Distilled E2B base <- 12b RL easy teacher (step_000500)",
+      "category": "distilled",
+      "architecture": "gemma-4-E2B",
+      "trained_on": "easy",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/gemma4-distill-v2-12b-easy-to-e2b-base",
+        "revision": "9d9bf5eec7c749121f95c2df37410f90e335011d",
+        "subfolder": "step_000500",
+        "metadata_repo": "google/gemma-4-E2B",
+        "metadata_revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+      }
+    },
+    {
+      "tag": "distill_12b_easy_to_e4b",
+      "display_name": "Distilled E4B base <- 12b RL easy teacher (step_000500)",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "easy",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/gemma4-distill-v2-12b-easy-to-e4b-base",
+        "revision": "54f6688578c9cbdfd11f51ac88cc2535de183498",
+        "subfolder": "step_000500",
+        "metadata_repo": "google/gemma-4-E4B",
+        "metadata_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_12b_hard_to_e4b",
+      "display_name": "Distilled E4B base <- 12b RL hard teacher (step_000500)",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "hard",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/gemma4-distill-v2-12b-hard-to-e4b-base",
+        "revision": "df4a2cf05cbfe5f271220c74300c62b3f6fd7d81",
+        "subfolder": "step_000500",
+        "metadata_repo": "google/gemma-4-E4B",
+        "metadata_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    }
+  ]
+}

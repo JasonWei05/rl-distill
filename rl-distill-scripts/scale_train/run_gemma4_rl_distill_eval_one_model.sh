@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /workspace/rl-distill
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "${PROJECT_ROOT}"
 VENV="${VENV:-/tmp/.venv-gemma4}"
 PYTHON_BIN="${VENV}/bin/python"
 export PATH="${VENV}/bin:${PATH}"
 
-command -v aws >/dev/null
+if [[ "${EVAL_S3_ENABLE:-true}" == "true" ]]; then command -v aws >/dev/null; fi
 test -x "${PYTHON_BIN}"
 
 MODEL_TAG="${MODEL_TAG:?MODEL_TAG is required}"
 GPU_COUNT="${GPU_COUNT:?GPU_COUNT is required}"
-RESULT_S3_ROOT="${RESULT_S3_ROOT:-s3://scale-ml/genai/rl-distill/gemma4-rl-distill-base-evals-v2}"
-SOURCE_REGISTRY="rl-distill-scripts/config/gemma4_rl_distill_eval_sources.json"
+RESULT_S3_ROOT="${RESULT_S3_ROOT:-s3://scale-ml/genai/rl-distill/gemma4-distill-study-evals-v1}"
+# EVAL_S3_ENABLE=false runs fully locally (no result sync) on nodes without S3 access.
+EVAL_S3_ENABLE="${EVAL_S3_ENABLE:-true}"
+SOURCE_REGISTRY="${SOURCE_REGISTRY:-rl-distill-scripts/config/gemma4_distill_study_eval_sources.json}"
+# Answer verifier = exactly the RL reward: verl math_verify, strict last-\boxed{} grading, 30 s verify
+# timeout, 5 s SymPy fallback (the RL launcher runs these defaults; pin them so a node env cannot drift).
+export VERL_MATH_VERIFY_STRICT_BOXED="${VERL_MATH_VERIFY_STRICT_BOXED:-1}"
+export VERL_MATH_VERIFY_TIMEOUT="${VERL_MATH_VERIFY_TIMEOUT:-30}"
+export VERL_MATH_SYMPY_TIMEOUT="${VERL_MATH_SYMPY_TIMEOUT:-5.0}"
 WORK_ROOT="${MODEL_WORK_ROOT:-/tmp/gemma4-rl-distill-eval/${MODEL_TAG}}"
 DATA_ROOT="${SHARED_DATA_ROOT:-${WORK_ROOT}/data}"
 MODEL_ROOT="${MODEL_ROOT_OVERRIDE:-${WORK_ROOT}/models}"
@@ -48,10 +56,10 @@ else
 fi
 
 mkdir -p "${DATA_ROOT}" "${MODEL_ROOT}" "${RESULT_ROOT}"
-aws s3 sync "${REMOTE_ROOT}" "${RESULT_ROOT}" --only-show-errors || true
+if [[ "${EVAL_S3_ENABLE}" == "true" ]]; then aws s3 sync "${REMOTE_ROOT}" "${RESULT_ROOT}" --only-show-errors || true; fi
 
 upload_results() {
-  aws s3 sync "${RESULT_ROOT}" "${REMOTE_ROOT}" --only-show-errors || true
+  if [[ "${EVAL_S3_ENABLE}" == "true" ]]; then aws s3 sync "${RESULT_ROOT}" "${REMOTE_ROOT}" --only-show-errors || true; fi
 }
 trap upload_results EXIT
 
@@ -60,7 +68,7 @@ if [[ "${PREPARE_SHARED_ASSETS}" == "true" ]]; then
     --output-dir "${DATA_ROOT}" --overwrite
   "${PYTHON_BIN}" rl-distill-scripts/data/prepare_gemma4_mmmlu14k.py \
     --output-dir "${MMMLU_ROOT}" \
-    --harness-dir /workspace/rl-distill/lm-evaluation-harness \
+    --harness-dir "${PROJECT_ROOT}/lm-evaluation-harness" \
     --skip-harness-git-check --overwrite
 elif [[ "${PREPARE_SHARED_ASSETS}" == "false" ]]; then
   test -s "${DATA_ROOT}/math_eval_manifest.json"

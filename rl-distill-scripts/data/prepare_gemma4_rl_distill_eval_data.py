@@ -22,42 +22,43 @@ from prepare_gemma4_three_model_eval_data import (
     question_text,
     sha256_file,
 )
-from prepare_deepscaler_easy_medium_rl_data import (
-    BASE_VAL_FILES,
-    EASY_REPO,
-    EASY_REVISION,
-    MEDIUM_REPO,
-    MEDIUM_REVISION,
-)
 
 DEFAULT_OUTPUT_DIR = Path("/lambda/nfs/Jason-scale/rl-distill-evals/gemma4-rl-distill-base-v1/data")
-SAMPLES_PER_QUESTION = {"id_easy": 16, "id_medium": 16, "math500": 16, "gsm8k": 8}
+# In-distribution evaluation = the three DeepScaleR difficulty bands the RL runs trained on: the
+# pinned 300-question validation split of each band (data_source "math", same schema as the RL
+# data), 16 samples per question. Replaces the earlier 500-question Easy-10k/Medium-20k splits.
+BAND_REPO_ID = "JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k"
+BAND_REVISION = "a0ba3c3dc07c7bc27e901670ceb1a0b0ceeaa8db"
+BAND_VALIDATION_ROWS = 300
+BAND_VALIDATION_SHA256 = {
+    "easy": "faad7f8a1ba7f9d523cd3cc95d2d51e034567c3877c65fd895fd3f48f1e6e057",
+    "medium": "8ac6a8f0dcee17867fb32a23b3a78a1cf667bba4e49efa192063b4fe79ffb2d6",
+    "hard": "7dd10c2a983f9386ae9509571bca3e22447b884bf3ab0aecaba5ad678f045d90",
+}
+SAMPLES_PER_QUESTION = {"id_easy": 16, "id_medium": 16, "id_hard": 16, "math500": 16, "gsm8k": 8}
 ID_SOURCES = {
-    "id_easy": {
-        "repo_id": EASY_REPO,
-        "revision": EASY_REVISION,
-        "filename": BASE_VAL_FILES["easy"],
-        "difficulty": "easy",
-    },
-    "id_medium": {
-        "repo_id": MEDIUM_REPO,
-        "revision": MEDIUM_REVISION,
-        "filename": BASE_VAL_FILES["medium"],
-        "difficulty": "medium",
-    },
+    f"id_{band}": {
+        "repo_id": BAND_REPO_ID,
+        "revision": BAND_REVISION,
+        "filename": f"{band}/validation.parquet",
+        "difficulty": band,
+        "expected_rows": BAND_VALIDATION_ROWS,
+        "expected_sha256": BAND_VALIDATION_SHA256[band],
+    }
+    for band in ("easy", "medium", "hard")
 }
 
 
-def _normalize_id_rows(name: str, frame: pd.DataFrame) -> list[dict[str, Any]]:
-    if len(frame) != 500:
-        raise ValueError(f"{name} expected 500 held-out questions, found {len(frame)}")
+def _normalize_id_rows(name: str, frame: pd.DataFrame, expected_rows: int) -> list[dict[str, Any]]:
+    if len(frame) != expected_rows:
+        raise ValueError(f"{name} expected {expected_rows} held-out questions, found {len(frame)}")
     rows = []
     for index, raw in enumerate(frame.to_dict(orient="records")):
         row = dict(raw)
         row["prompt"] = [{"role": "user", "content": question_text(row["prompt"])}]
         row["uid"] = str(row.get("uid") or f"{name}:{index}")
         rows.append(row)
-    _validate_rows(name, rows, 500)
+    _validate_rows(name, rows, expected_rows)
     return rows
 
 
@@ -81,7 +82,9 @@ def materialize(
                 filename=source["filename"],
             )
         )
-        rows = _normalize_id_rows(name, pd.read_parquet(downloaded))
+        if sha256_file(downloaded) != source["expected_sha256"]:
+            raise ValueError(f"{name}: {source['filename']} sha256 does not match the pinned band validation file")
+        rows = _normalize_id_rows(name, pd.read_parquet(downloaded), source["expected_rows"])
         output_path = output_dir / f"{name}.parquet"
         _write_parquet(rows, output_path, overwrite=overwrite)
         entry = _dataset_manifest_entry(
@@ -133,7 +136,7 @@ def materialize(
 
     manifest = {
         "schema_version": 1,
-        "protocol": "gemma4_rl_distill_math_eval_v1",
+        "protocol": "gemma4_rl_distill_math_eval_v2",
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "repetition_rule": {
             "policy": "fixed_by_dataset",

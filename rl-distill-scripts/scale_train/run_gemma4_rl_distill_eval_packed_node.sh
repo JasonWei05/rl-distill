@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /workspace/rl-distill
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PATH="${HOME}/.local/bin:/root/.local/bin:${PATH}"
 if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -30,7 +30,7 @@ export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-TRITON_ATTN}"
 export VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-0}"
 export VLLM_USE_DEEP_GEMM="${VLLM_USE_DEEP_GEMM:-0}"
 
-RESULT_S3_ROOT="${RESULT_S3_ROOT:-s3://scale-ml/genai/rl-distill/gemma4-rl-distill-base-evals-v2}"
+RESULT_S3_ROOT="${RESULT_S3_ROOT:-s3://scale-ml/genai/rl-distill/gemma4-distill-study-evals-v1}"
 PACKED_WORK_ROOT="${PACKED_WORK_ROOT:-/tmp/gemma4-rl-distill-eval-packed}"
 SHARED_DATA_ROOT="${PACKED_WORK_ROOT}/shared/data"
 SHARED_MMMLU_ROOT="${PACKED_WORK_ROOT}/shared/mmmlu14k_tasks"
