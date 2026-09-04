@@ -65,7 +65,7 @@ export EVAL_PHASES="${EVAL_PHASES:-math,ood}"   # "math" here + "ood" on another
 export EVAL_PREDICTIVE_TOPK_WIDTH="${EVAL_PREDICTIVE_TOPK_WIDTH:-0}"   # 0 = no logprobs (set 128 to restore the entropy diagnostics)
 LAUNCH_STAGGER="${EVAL_QUEUE_LAUNCH_STAGGER:-20}"
 export EVAL_GPU_MEMORY_UTILIZATION="${EVAL_GPU_MEMORY_UTILIZATION:-$(awk -v s="${SLOTS_PER_GPU}" 'BEGIN{printf "%.2f", int(90/s)/100}')}"
-FREE_GPUS=(); for ((s = 0; s < SLOTS_PER_GPU; s++)); do FREE_GPUS+=("${GPUS[@]}"); done   # round-robin slots over GPUs
+EXT_GPUS=()
 
 # --- shared assets, once -----------------------------------------------------------------------
 if [[ ! -s ${SHARED_DATA_ROOT}/math_eval_manifest.json ]]; then
@@ -92,22 +92,31 @@ refresh_registry() {
   "${PY}" rl-distill-scripts/data/build_gemma4_distill_study_eval_registry.py --output "${REGISTRY}" >"${LOG_ROOT}/registry_refresh.log" 2>&1 || echo "EVAL_QUEUE warning: registry refresh failed (keeping previous roster)" >&2
 }
 is_complete() { [[ -s ${RESULTS_BASE}/$1/RUN_COMPLETE.json ]]; }
-external_running_tags() {  # MODEL_TAGs of live runner processes we did not start (e.g. orphans of a previous queue) -> never double-launch
+external_running() {  # "<tag> <gpu>" per live runner process we did not start (e.g. survivors of a previous supervisor)
   "${PY}" - "${!PID_TAG[@]}" <<'PYX'
 import os, sys
 from pathlib import Path
-mine = set(sys.argv[1:]); me = os.getuid(); tags = set()
+mine = set(sys.argv[1:]); me = os.getuid(); rows = set()
 for p in Path("/proc").iterdir():
     if not p.name.isdigit() or p.name in mine: continue
     try:
         if p.stat().st_uid != me: continue
-        env = (p / "environ").read_bytes().split(b"\0")
-        tag = next((e.split(b"=", 1)[1].decode() for e in env if e.startswith(b"MODEL_TAG=")), None)
-        if tag and b"run_gemma4_rl_distill_eval_one_model.sh" in (p / "cmdline").read_bytes(): tags.add(tag)
+        env = dict(e.split(b"=", 1) for e in (p / "environ").read_bytes().split(b"\0") if b"=" in e)
+        tag, gpu = env.get(b"MODEL_TAG"), env.get(b"PACKED_PHYSICAL_GPU_IDS", b"?")
+        if tag and b"run_gemma4_rl_distill_eval_one_model.sh" in (p / "cmdline").read_bytes(): rows.add(f"{tag.decode()} {gpu.decode()}")
     except OSError: pass
-if tags:
-    print("\n".join(sorted(tags)))
+for row in sorted(rows): print(row)
 PYX
+}
+compute_free_slots() {  # all slots minus one per running child (PID_GPU) minus one per external runner's GPU
+  local -a slots=() held=(); local s g i
+  for ((s = 0; s < SLOTS_PER_GPU; s++)); do slots+=("${GPUS[@]}"); done
+  held=("${PID_GPU[@]}" "${EXT_GPUS[@]}")
+  FREE_GPUS=()
+  for g in "${slots[@]}"; do
+    for i in "${!held[@]}"; do [[ ${held[$i]} == "$g" ]] && { unset 'held[$i]'; g=""; break; }; done
+    [[ -n $g ]] && FREE_GPUS+=("$g")
+  done
 }
 
 update_doc() {
@@ -120,6 +129,7 @@ update_doc() {
 }
 
 declare -A PID_TAG=() PID_GPU=() TAG_STATUS=() LAUNCHED=() WAITED_EXTERNAL=()
+compute_free_slots
 launch() {
   local tag="$1" gpu="${FREE_GPUS[0]}"; FREE_GPUS=("${FREE_GPUS[@]:1}")
   echo "EVAL_QUEUE launch model=${tag} gpu=${gpu} $(date -u +%FT%TZ)"
@@ -134,7 +144,7 @@ reap() {
   for pid in "${!PID_TAG[@]}"; do
     kill -0 "${pid}" 2>/dev/null && continue
     wait "${pid}"; status=$?; tag="${PID_TAG[$pid]}"
-    FREE_GPUS+=("${PID_GPU[$pid]}"); unset 'PID_TAG[$pid]' 'PID_GPU[$pid]'; TAG_STATUS[$tag]=${status}
+    unset 'PID_TAG[$pid]' 'PID_GPU[$pid]'; TAG_STATUS[$tag]=${status}   # slots are recomputed every poll
     if ((status == 0)) && is_complete "${tag}"; then echo "EVAL_QUEUE done model=${tag} $(date -u +%FT%TZ)"; update_doc "${tag}"
     else echo "EVAL_QUEUE FAILED model=${tag} status=${status} (log ${LOG_ROOT}/${tag}.log) $(date -u +%FT%TZ)" >&2; fi
     progressed=0
@@ -142,12 +152,14 @@ reap() {
   return "${progressed}"
 }
 
-echo "EVAL_QUEUE start gpus=[${GPUS[*]}] slots_per_gpu=${SLOTS_PER_GPU} kv_cache_gib=${EVAL_KV_CACHE_GIB} phases=${EVAL_PHASES} topk_logprobs=${EVAL_PREDICTIVE_TOPK_WIDTH} gpu_mem_util=${EVAL_GPU_MEMORY_UTILIZATION} registry=${REGISTRY} results=${RESULTS_BASE}"
+echo "EVAL_QUEUE start gpus=[${GPUS[*]}] free_slots=${#FREE_GPUS[@]} slots_per_gpu=${SLOTS_PER_GPU} kv_cache_gib=${EVAL_KV_CACHE_GIB} phases=${EVAL_PHASES} topk_logprobs=${EVAL_PREDICTIVE_TOPK_WIDTH} gpu_mem_util=${EVAL_GPU_MEMORY_UTILIZATION} registry=${REGISTRY} results=${RESULTS_BASE}"
 poll=0
 while true; do
   if ((poll % REFRESH_EVERY == 0)); then refresh_registry; fi
   mapfile -t TAGS < <(roster)
-  mapfile -t EXTERNAL < <(external_running_tags | grep -v "^$")   # no empty element when nothing is running
+  mapfile -t EXT_LINES < <(external_running | grep -v "^$")
+  EXTERNAL=(); EXT_GPUS=(); for line in "${EXT_LINES[@]}"; do EXTERNAL+=("${line%% *}"); EXT_GPUS+=("${line##* }"); done
+  compute_free_slots
   pending=0; newly_complete=0
   for tag in "${TAGS[@]}"; do
     [[ -n ${LAUNCHED[$tag]:-} ]] && continue
@@ -160,7 +172,7 @@ while true; do
       [[ -n ${WAITED_EXTERNAL[$tag]:-} ]] || { echo "EVAL_QUEUE waiting model=${tag} (running outside this queue; will launch when it exits)"; WAITED_EXTERNAL[$tag]=1; }
       pending=$((pending + 1)); continue
     fi
-    if ((${#FREE_GPUS[@]} > ${#EXTERNAL[@]})); then launch "${tag}"; else pending=$((pending + 1)); fi   # external runners hold slots we cannot see
+    if ((${#FREE_GPUS[@]} > 0)); then launch "${tag}"; else pending=$((pending + 1)); fi
   done
   ((newly_complete)) && update_doc "external"
   # Finished when nothing runs and nothing is pending; distilled models still training on the
