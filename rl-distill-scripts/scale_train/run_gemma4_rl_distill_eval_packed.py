@@ -136,7 +136,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--source-registry",
         type=Path,
-        default=SCRIPTS_DIR / "config/gemma4_rl_distill_eval_sources.json",
+        default=SCRIPTS_DIR / "config/gemma4_distill_study_eval_sources.json",
     )
     parser.add_argument(
         "--model-runner",
