@@ -369,3 +369,18 @@ _Updated 2026-09-04 19:50Z — math complete for 22/22 models, OOD complete for 
 | `distill_12b_medium_to_e4b` | — | — | — |
 | `distill_26b_medium_to_e4b` | — | — | — |
 <!-- results:end -->
+
+### 8.1 pass@k curves — E4B student
+
+![pass@k, E4B student](figures/passk_e4b.png)
+
+`figures/passk_e4b.png` (regenerate with `python rl-distill-scripts/plot_distill_study_passk.py --student e4b
+--teachers 12b 26b`): unbiased pass@k (Chen et al.) from the per-sample traces, k = 1..16 (GSM8K 1..8).
+Rows = the band the RL / distilled models were trained on; columns = that band, MATH500, GSM8K; curves =
+untrained E4B base, E4B RL, and the E4B students distilled from the 12b and 26b RL teachers (E4B→E4B
+self-distillation omitted). Read (2026-09-04, all 22 exported models): on the **easy** band the four trained
+curves are indistinguishable (RL leads at k=1 by 2–3 points, 12b/26b students catch up by k=4). On **medium** and
+**hard** the big-teacher students dominate RL at every k and the gap widens with k (hard band pass@16: 26b→E4B
+72, 12b→E4B 61, RL 48, base 38; MATH500 from the hard-band models: 73 / 65 / 48 / 51 — hard-band RL does not
+beat the base at k=16 on MATH500, the distilled students do by 15–22 points). GSM8K follows the same order
+except for the easy band, where RL is best at small k.
