@@ -26,10 +26,10 @@ class TraceJob:
     run_file: str = "run_gemma4_bestckpt_trace_collection.sh"
 
 
-# Only completely-finished runs. Excludes 12b-hard (training), 26b-medium (queued),
-# 26b-hard (migrated off-cluster). best step is baked into the run-file per spec.
+# Only completely-finished runs. Excludes 26b-medium (queued) and 26b-hard
+# (migrated off-cluster). best step is baked into the run-file per spec.
 #
-# "queue" packs all six collections into ONE 8-GPU job with an async GPU-pool
+# "queue" packs all seven collections into ONE 8-GPU job with an async GPU-pool
 # scheduler (2-GPU runs first, then 1-GPU, refilling as each finishes). The per-spec
 # jobs remain available for launching a single collection standalone.
 TRACE_JOBS = (
@@ -39,6 +39,7 @@ TRACE_JOBS = (
     TraceJob("e4b-hard", "g4tr-e4b-hard", "e4b-hard", 1),
     TraceJob("12b-easy", "g4tr-12b-easy", "12b-easy", 2),
     TraceJob("12b-medium", "g4tr-12b-med", "12b-medium", 2),
+    TraceJob("12b-hard", "g4tr-12b-hard", "12b-hard", 2),
     TraceJob("26b-easy", "g4tr-26b-easy", "26b-easy", 2),
 )
 
@@ -97,14 +98,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--priority", choices=("normal", "high"), default="high")
     parser.add_argument("--build-env", choices=("local", "remote"), default="remote")
     parser.add_argument("--image", default=None, help="Reuse an existing remote image for every selected job (skips build).")
-    parser.add_argument("--select", action="append", default=[], help="Job key(s); default is all six.")
+    parser.add_argument("--select", action="append", default=[], help="Job key(s); default is all seven.")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     available = {job.key for job in TRACE_JOBS}
-    # Default (no --select) is the six per-spec jobs; the packed "queue" is opt-in
+    # Default (no --select) is the seven per-spec jobs; the packed "queue" is opt-in
     # (and is mutually exclusive with the per-spec jobs — do not run both).
     selected = set(args.select) if args.select else (available - {"queue"})
     unknown = selected.difference(available)

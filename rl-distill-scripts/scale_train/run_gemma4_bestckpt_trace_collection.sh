@@ -23,6 +23,7 @@ case "${TRACE_SPEC}" in
   e4b-hard)   RUN_KEY=e4b-hard;       BAND=hard;   BEST_STEP=120; DIRECTION=e4b_hard_to_e2b   ;;
   12b-easy)   RUN_KEY=12b-easy;       BAND=easy;   BEST_STEP=70;  DIRECTION=12b_easy_to_e2b   ;;
   12b-medium) RUN_KEY=12b-medium;     BAND=medium; BEST_STEP=120; DIRECTION=12b_medium_to_e2b ;;
+  12b-hard)   RUN_KEY=12b-hard;       BAND=hard;   BEST_STEP=140; DIRECTION=12b_hard_to_e2b   ;;
   26b-easy)   RUN_KEY=26b-a4b-easy;   BAND=easy;   BEST_STEP=80;  DIRECTION=26b_easy_to_e2b   ;;
   *)
     echo "FATAL: unsupported TRACE_SPEC=${TRACE_SPEC}" >&2
@@ -37,6 +38,13 @@ DIFFICULTY_DATASET_REVISION="${DIFFICULTY_DATASET_REVISION:-a0ba3c3dc07c7bc27e90
 
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-west-2}"
 export AWS_REGION="${AWS_REGION:-us-west-2}"
+# Off ScaleTrain (i.e. on a dev box) the bare EC2 instance role (ec2-ml-worker)
+# can read but NOT s3:PutObject to the trace bucket; the ml-worker profile assumes
+# a role that can. Adopt it only when it exists and nothing is already set, so
+# ScaleTrain pods (which have their own creds and no such profile) are unaffected.
+if [[ -z "${AWS_PROFILE:-}" ]] && aws configure list-profiles 2>/dev/null | grep -qx ml-worker; then
+  export AWS_PROFILE=ml-worker
+fi
 
 if [[ -f .env ]]; then set -a; source .env; set +a; fi
 
@@ -52,6 +60,9 @@ if [[ ! -x ${VENV}/bin/python ]]; then
 fi
 source "${VENV}/bin/activate"
 export PATH="${VENV}/bin:${PATH}"
+# Keep vLLM/FlashInfer JIT + autotune caches on local disk: on a loaded shared box
+# the default (~/.cache/vllm on EFS) stalls in NFS RPC waits during kernel warmup.
+export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/tmp/vllm-cache-${USER}}"
 if [[ -x /usr/local/cuda/bin/nvcc ]]; then
   export CUDA_HOME="${CUDA_HOME:-$(readlink -f /usr/local/cuda)}"
 elif [[ -x /usr/local/cuda-12.9/bin/nvcc ]]; then

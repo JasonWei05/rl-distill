@@ -74,6 +74,7 @@ DIRECTIONS = (
     "e4b_hard_to_e2b",
     "12b_easy_to_e2b",
     "12b_medium_to_e2b",
+    "12b_hard_to_e2b",
     "26b_easy_to_e2b",
 )
 SPLITS = ("train", "validation")
@@ -599,6 +600,23 @@ def _build_run_config(
     }
 
 
+def _causal_lm_hf_overrides(teacher_model: str) -> dict[str, Any]:
+    """Force vLLM onto the text-only causal-LM architecture for Gemma 4 checkpoints.
+
+    Gemma 4 RL checkpoints are the *unified* (text+vision+audio) architecture, but
+    we only generate text and the actor checkpoints carry no ``preprocessor_config.json``.
+    Loading them as-is makes vLLM demand a multimodal feature extractor and fail; the
+    causal-LM architecture loads the same weights and skips the processor.
+    """
+    config_path = Path(teacher_model) / "config.json"
+    if not config_path.exists():
+        return {}
+    architectures = json.loads(config_path.read_text()).get("architectures") or []
+    if any("ForConditionalGeneration" in arch or "Unified" in arch for arch in architectures):
+        return {"architectures": ["Gemma4ForCausalLM"]}
+    return {}
+
+
 def _make_llm(args: argparse.Namespace) -> tuple[Any, Any, Any, str]:
     from vllm import LLM, SamplingParams
     from vllm import __version__ as vllm_version
@@ -629,6 +647,9 @@ def _make_llm(args: argparse.Namespace) -> tuple[Any, Any, Any, str]:
         llm_kwargs["distributed_executor_backend"] = args.distributed_executor_backend
     if args.mm_encoder_attn_backend:
         llm_kwargs["mm_encoder_attn_backend"] = args.mm_encoder_attn_backend
+    causal_override = _causal_lm_hf_overrides(args.teacher_model)
+    if causal_override:
+        llm_kwargs["hf_overrides"] = causal_override
     return LLM(**llm_kwargs), SamplingParams, llm_kwargs, vllm_version
 
 
