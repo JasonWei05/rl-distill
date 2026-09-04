@@ -161,6 +161,7 @@ def build_math_command(
     questions_per_batch: int = 1,
     kv_cache_memory_gib: float | None = None,
     predictive_topk_width: int | None = None,  # None = the manifest value
+    resume_traces: bool = False,
 ) -> list[str]:
     sampling = data_manifest["sampling"]
     command = [
@@ -209,6 +210,8 @@ def build_math_command(
     ]
     if kv_cache_memory_gib is not None:
         command.extend(["--kv_cache_memory_gib", str(kv_cache_memory_gib)])
+    if resume_traces:
+        command.append("--resume_traces")
     return command
 
 

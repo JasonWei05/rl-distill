@@ -60,6 +60,7 @@ COMMIT_DOC="${EVAL_QUEUE_COMMIT_DOC:-true}"
 if [[ -n ${EVAL_QUEUE_GPUS:-} ]]; then IFS=',' read -r -a GPUS <<< "${EVAL_QUEUE_GPUS}"; else mapfile -t GPUS < <(nvidia-smi --query-gpu=index --format=csv,noheader | tr -d ' '); fi
 SLOTS_PER_GPU="${EVAL_QUEUE_SLOTS_PER_GPU:-2}"
 export EVAL_KV_CACHE_GIB="${EVAL_KV_CACHE_GIB:-16}"
+export MATH_RESUME_TRACES="${MATH_RESUME_TRACES:-1}"   # finished dataset traces are re-aggregated, not regenerated
 export EVAL_PHASES="${EVAL_PHASES:-math,ood}"   # "math" here + "ood" on another machine splits the suite
 export EVAL_PREDICTIVE_TOPK_WIDTH="${EVAL_PREDICTIVE_TOPK_WIDTH:-0}"   # 0 = no logprobs (set 128 to restore the entropy diagnostics)
 LAUNCH_STAGGER="${EVAL_QUEUE_LAUNCH_STAGGER:-20}"
@@ -121,8 +122,9 @@ declare -A PID_TAG=() PID_GPU=() TAG_STATUS=() LAUNCHED=() WAITED_EXTERNAL=()
 launch() {
   local tag="$1" gpu="${FREE_GPUS[0]}"; FREE_GPUS=("${FREE_GPUS[@]:1}")
   echo "EVAL_QUEUE launch model=${tag} gpu=${gpu} $(date -u +%FT%TZ)"
+  # setsid: the runner gets its own session, so stopping this queue (or its tmux) can never SIGHUP running evals.
   env -u CUDA_VISIBLE_DEVICES MODEL_TAG="${tag}" GPU_COUNT=1 PACKED_PHYSICAL_GPU_IDS="${gpu}" PREPARE_SHARED_ASSETS=false \
-    MODEL_WORK_ROOT="${STUDY_ROOT}/work/${tag}" RESULT_ROOT_OVERRIDE="${RESULTS_BASE}/${tag}" bash "${RUNNER}" >"${LOG_ROOT}/${tag}.log" 2>&1 &
+    MODEL_WORK_ROOT="${STUDY_ROOT}/work/${tag}" RESULT_ROOT_OVERRIDE="${RESULTS_BASE}/${tag}" setsid bash "${RUNNER}" >"${LOG_ROOT}/${tag}.log" 2>&1 &
   PID_TAG[$!]="${tag}"; PID_GPU[$!]="${gpu}"; LAUNCHED[$tag]=1
   sleep "${LAUNCH_STAGGER}"
 }

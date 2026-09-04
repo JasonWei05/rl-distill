@@ -386,6 +386,39 @@ def _logprob_field(entry: Any, field_name: str) -> Any:
     return getattr(entry, field_name, None)
 
 
+def _resume_dataset_traces(
+    trace_path: Path,
+    *,
+    questions: Sequence[EvalQuestion],
+    dataset_name: str,
+    samples_per_question: int,
+    global_seed: int,
+) -> list[dict[str, Any]]:
+    """Load the compact metric rows of a finished dataset trace file written by an earlier run.
+
+    The file must hold exactly one trace per (question, sample) of this dataset, and every trace's
+    seed must equal the protocol's derived seed -- so traces from another protocol, seed or dataset
+    are rejected rather than silently aggregated.
+    """
+    expected = {(question.question_id, index) for question in questions for index in range(samples_per_question)}
+    fields = ("uid", "sample_index", "acc", "answer_class", "sequence_entropy", "token_entropy_sum", "token_entropy_count")
+    metric_traces: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    with trace_path.open(encoding="utf-8") as handle:
+        for line in handle:
+            trace = json.loads(line)
+            key = (str(trace["uid"]), int(trace["sample_index"]))
+            if key not in expected or key in seen:
+                raise ValueError(f"{trace_path}: unexpected or duplicate trace {key}")
+            if int(trace["sampling_seed"]) != derive_sampling_seed(global_seed, dataset_name, key[0], key[1]):
+                raise ValueError(f"{trace_path}: sampling seed mismatch for {key}; traces belong to a different protocol")
+            seen.add(key)
+            metric_traces.append({field: trace[field] for field in fields})
+    if seen != expected:
+        raise ValueError(f"{trace_path}: {len(seen)} traces but {len(expected)} expected; not a complete dataset")
+    return metric_traces
+
+
 def _no_predictive_statistics() -> dict[str, Any]:
     """Placeholder statistics when logprobs are not requested (``predictive_topk_width == 0``).
 
@@ -764,6 +797,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="questions whose seeded requests are generated together (1 = one question per vLLM call)",
     )
     parser.add_argument(
+        "--resume_traces",
+        action="store_true",
+        help="re-aggregate a dataset from its finished trace file instead of regenerating (resume after interruption)",
+    )
+    parser.add_argument(
         "--request_batch_size",
         type=int,
         default=8,
@@ -932,40 +970,61 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
         trace_path = Path(args.trace_dir) / f"{args.tag}__{name}.jsonl"
         partial_trace_path = trace_path.with_suffix(trace_path.suffix + ".partial")
-        partial_trace_path.unlink(missing_ok=True)
-        with partial_trace_path.open("w", encoding="utf-8") as trace_handle:
-
-            def write_trace(trace: Mapping[str, Any]) -> None:
-                trace_handle.write(json.dumps(trace, ensure_ascii=False) + "\n")
-
-            aggregation, _ = evaluate_questions(
-                llm=llm,
-                tokenizer=tokenizer,
-                sampling_params_class=SamplingParams,
-                grader=grader,
+        if args.resume_traces and trace_path.exists():
+            # A finished dataset from an interrupted run: re-aggregate its traces instead of regenerating.
+            metric_traces = _resume_dataset_traces(
+                trace_path,
                 questions=questions,
                 dataset_name=name,
-                chat_template=chat_template,
                 samples_per_question=samples_per_question,
                 global_seed=args.seed,
-                k_values=[k for k in args.ks if k <= samples_per_question],
+            )
+            aggregation = aggregate_math_traces(
+                metric_traces,
+                k_values=sorted({k for k in args.ks if k <= samples_per_question} | {samples_per_question}),
+                expected_samples_per_question=samples_per_question,
                 subset_strategy=args.subset_strategy,
                 monte_carlo_resamples=args.monte_carlo_resamples,
-                metric_seed=args.metric_seed,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                top_k=args.top_k,
-                max_tokens=args.max_tokens,
-                max_prompt_tokens=args.max_prompt_tokens,
-                predictive_topk_width=args.predictive_topk_width,
-                store_topk_logprobs=args.store_predictive_topk_logprobs,
-                store_per_token_diagnostics=args.store_per_token_diagnostics,
-                request_batch_size=args.request_batch_size,
-                questions_per_batch=args.questions_per_batch,
-                trace_callback=write_trace,
-                retain_traces=False,
+                seed=args.metric_seed,
+                prediction_field="answer_class",
+                predictive_entropy_kind=PREDICTIVE_ENTROPY_KIND,
             )
-        partial_trace_path.replace(trace_path)
+            print(f"[{args.tag}] {name}: resumed {len(metric_traces)} finished traces from {trace_path} (no regeneration)", flush=True)
+        else:
+            partial_trace_path.unlink(missing_ok=True)
+            with partial_trace_path.open("w", encoding="utf-8") as trace_handle:
+
+                def write_trace(trace: Mapping[str, Any]) -> None:
+                    trace_handle.write(json.dumps(trace, ensure_ascii=False) + "\n")
+
+                aggregation, _ = evaluate_questions(
+                    llm=llm,
+                    tokenizer=tokenizer,
+                    sampling_params_class=SamplingParams,
+                    grader=grader,
+                    questions=questions,
+                    dataset_name=name,
+                    chat_template=chat_template,
+                    samples_per_question=samples_per_question,
+                    global_seed=args.seed,
+                    k_values=[k for k in args.ks if k <= samples_per_question],
+                    subset_strategy=args.subset_strategy,
+                    monte_carlo_resamples=args.monte_carlo_resamples,
+                    metric_seed=args.metric_seed,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    top_k=args.top_k,
+                    max_tokens=args.max_tokens,
+                    max_prompt_tokens=args.max_prompt_tokens,
+                    predictive_topk_width=args.predictive_topk_width,
+                    store_topk_logprobs=args.store_predictive_topk_logprobs,
+                    store_per_token_diagnostics=args.store_per_token_diagnostics,
+                    request_batch_size=args.request_batch_size,
+                    questions_per_batch=args.questions_per_batch,
+                    trace_callback=write_trace,
+                    retain_traces=False,
+                )
+            partial_trace_path.replace(trace_path)
         full_metrics = aggregation["by_k"][str(samples_per_question)]
         results[name] = {
             "k": samples_per_question,

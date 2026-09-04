@@ -385,6 +385,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--questions-per-batch", type=int, default=1)
     parser.add_argument("--kv-cache-memory-gib", type=float, default=None)
     parser.add_argument("--predictive-topk-width", type=int, default=None, help="override the manifest value; 0 = no logprobs")
+    parser.add_argument("--resume-traces", action="store_true", help="re-aggregate datasets whose finished trace file exists instead of regenerating")
     parser.add_argument("--no-resume", action="store_true")
     parser.add_argument("--execute", action="store_true")
     return parser.parse_args(argv)
@@ -465,6 +466,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 questions_per_batch=args.questions_per_batch,
                 kv_cache_memory_gib=args.kv_cache_memory_gib,
                 predictive_topk_width=args.predictive_topk_width,
+                resume_traces=args.resume_traces,
             )
             command.extend(["--subset_strategy", "monte_carlo", "--monte_carlo_resamples", "4096"])
             _replace_arg(command, "--out", str(metrics_path))
