@@ -231,6 +231,7 @@ tmux new-session -d -s eval-queue \
      2>&1 | tee -a /tmp/gemma4_distill_study_eval/eval_queue.log"
 # monitor
 grep -E "EVAL_QUEUE (launch|done|FAILED|skip)" /tmp/gemma4_distill_study_eval/eval_queue.log
+/tmp/.venv-gemma4/bin/python rl-distill-scripts/eval_queue_progress.py      # per-model progress + ETA table
 tail -3 /tmp/gemma4_distill_study_eval/queue_logs/<tag>.log        # per-model driver log
 ls /tmp/gemma4_distill_study_eval/results/<tag>/{<tag>/math/metrics.json,<tag>/ood/*/complete.json,RUN_COMPLETE.json}
 # manual pieces
