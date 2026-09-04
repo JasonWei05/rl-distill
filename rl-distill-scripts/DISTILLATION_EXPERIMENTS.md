@@ -313,7 +313,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-04 20:07Z — math complete for 22/26 models, OOD complete for 0/26. Partial rows are shown as they finish._
+_Updated 2026-09-04 20:24Z — math complete for 22/26 models, OOD complete for 0/26. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
