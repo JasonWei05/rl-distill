@@ -20,10 +20,13 @@ mkdir -p "${LOG_ROOT}"
 # Queue order: all 2-GPU runs first, then all 1-GPU runs. "<spec>:<gpus>".
 # TRACE_QUEUE_SPECS (comma-separated "<spec>:<gpus>") overrides the list, so one node can
 # run a subset. Two-node split used for the distillation study:
-#   node 1: TRACE_QUEUE_SPECS=26b-easy:2,26b-medium:2,26b-hard:2,e4b-easy:2,e4b-medium:2,e4b-hard:2
-#           (26b: 2 GPUs as TP2; e4b: 2 GPUs as DP2)
-#   node 2: TRACE_QUEUE_SPECS=12b-easy:2,12b-medium:2,12b-hard:2,e2b-easy:1,e2b-medium:1,e2b-hard:1
-#           (12b: 2 GPUs as DP2; e2b: 1 GPU)
+#   node 1: TRACE_QUEUE_SPECS=26b-easy:2,26b-medium:2,26b-hard:2,e2b-easy:1,e2b-medium:1,e2b-hard:1
+#           (26b: 2 GPUs as TP2; e2b: 1 GPU) — the slowest teacher paired with the fastest
+#   node 2: TRACE_QUEUE_SPECS=12b-easy:2,12b-medium:2,12b-hard:2,e4b-easy:2,e4b-medium:2,e4b-hard:2
+#           (12b and e4b: 2 GPUs as DP2)
+# This pairing balances total GPU-hours across the two nodes (gen + the distill runs that
+# consume each node's own teachers) and gives each node a quick teacher so distillation can
+# start while the slow teacher is still generating.
 # Nodes write to the same S3 prefix and cooperate: completed shards are restored on startup
 # and skipped, so a node can also pick up work another node (or this box) already did.
 if [[ -n ${TRACE_QUEUE_SPECS:-} ]]; then

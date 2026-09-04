@@ -6,9 +6,10 @@
 # question, at training sampling (temp 1.0 / top-p 1.0 / top-k -1), rendered with
 # the RL few-shot template, capturing token ids + top-128 teacher logprobs.
 #
-# Teacher weights come from S3 (the full checkpoint's consolidated actor/huggingface
-# HF model), not the Hub. Source data comes from the same 26B-band datasets the RL
-# runs used. Reuses generate_gemma4_distill_traces.py and the RL data-prep unchanged.
+# Teacher weights come from each checkpoint's Hub export (step_NNNNNN/ subdir, pinned to an
+# immutable commit; TEACHER_SOURCE=s3 uses the S3 full checkpoints instead). Source data comes
+# from the same 26B-band datasets the RL runs used. Reuses generate_gemma4_distill_traces.py
+# and the RL data-prep unchanged.
 
 set -euo pipefail
 
@@ -18,24 +19,25 @@ cd "${PROJECT_ROOT}"
 TRACE_SPEC="${TRACE_SPEC:?TRACE_SPEC is required}"
 # run_key = full-checkpoint subdir; band = dataset band; best_step = checkpoint step.
 TEACHER_HF_REPO=""  # set for teachers whose best export lives on the Hub instead of S3
+TEACHER_HF_REVISION=""  # immutable commit sha of that export (rolling repos prune old steps from main)
 case "${TRACE_SPEC}" in
   # Every teacher is fetched from its Hub export (step_NNNNNN/ subdir), so a node only needs HF
   # access. The e4b/12b/26b-easy exports are the S3 full checkpoints' actor/huggingface dirs
   # re-uploaded by scale_train/upload_fullckpt_to_hf.py; set TEACHER_SOURCE=s3 to pull those
   # from S3 instead. Best steps = W&B val mean@16 peaks.
-  e4b-easy)   RUN_KEY=e4b-easy;       BAND=easy;   BEST_STEP=100; DIRECTION=e4b_easy_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-easy-seed42-26b-bands-es5 ;;
-  e4b-medium) RUN_KEY=e4b-medium;     BAND=medium; BEST_STEP=90;  DIRECTION=e4b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5 ;;
-  e4b-hard)   RUN_KEY=e4b-hard;       BAND=hard;   BEST_STEP=120; DIRECTION=e4b_hard_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-hard-seed42-26b-bands-es5 ;;
-  12b-easy)   RUN_KEY=12b-easy;       BAND=easy;   BEST_STEP=70;  DIRECTION=12b_easy_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-easy-seed42-26b-bands-es5 ;;
-  12b-medium) RUN_KEY=12b-medium;     BAND=medium; BEST_STEP=120; DIRECTION=12b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5 ;;
-  12b-hard)   RUN_KEY=12b-hard;       BAND=hard;   BEST_STEP=140; DIRECTION=12b_hard_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-hard-seed42-26b-bands-es5 ;;
-  26b-easy)   RUN_KEY=26b-a4b-easy;   BAND=easy;   BEST_STEP=80;  DIRECTION=26b_easy_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-easy-seed42-26b-bands-es5 ;;
+  e4b-easy)   RUN_KEY=e4b-easy;       BAND=easy;   BEST_STEP=100; DIRECTION=e4b_easy_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-easy-seed42-26b-bands-es5; TEACHER_HF_REVISION=345beec132e3e38922b21fd7b648d002dc4d333d ;;
+  e4b-medium) RUN_KEY=e4b-medium;     BAND=medium; BEST_STEP=90;  DIRECTION=e4b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5; TEACHER_HF_REVISION=5f90d25e193d5071d74975793c20d4ac10fc733f ;;
+  e4b-hard)   RUN_KEY=e4b-hard;       BAND=hard;   BEST_STEP=120; DIRECTION=e4b_hard_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-hard-seed42-26b-bands-es5; TEACHER_HF_REVISION=627bd9d825ffdab1552fb3bbc1af410a8d2ac0a1 ;;
+  12b-easy)   RUN_KEY=12b-easy;       BAND=easy;   BEST_STEP=70;  DIRECTION=12b_easy_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-easy-seed42-26b-bands-es5; TEACHER_HF_REVISION=372aa8417b09121984d8b66915e032038de20f91 ;;
+  12b-medium) RUN_KEY=12b-medium;     BAND=medium; BEST_STEP=120; DIRECTION=12b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5; TEACHER_HF_REVISION=485326ce84d0256ada73aaf2b69349b6d562068b ;;
+  12b-hard)   RUN_KEY=12b-hard;       BAND=hard;   BEST_STEP=140; DIRECTION=12b_hard_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-hard-seed42-26b-bands-es5; TEACHER_HF_REVISION=162d85023909fe4649061d2933e633f55a86d644 ;;
+  26b-easy)   RUN_KEY=26b-a4b-easy;   BAND=easy;   BEST_STEP=80;  DIRECTION=26b_easy_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-easy-seed42-26b-bands-es5; TEACHER_HF_REVISION=f72b7fc8af90e5f345a30f4fb0e4544258120879 ;;
   # Runs continued off-cluster / rerun locally (Hub exports only).
-  e2b-easy)   RUN_KEY=e2b-easy;       BAND=easy;   BEST_STEP=130; DIRECTION=e2b_easy_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-easy-seed42-local2gpu ;;
-  e2b-medium) RUN_KEY=e2b-medium;     BAND=medium; BEST_STEP=190; DIRECTION=e2b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-medium-seed42-local2gpu ;;
-  e2b-hard)   RUN_KEY=e2b-hard;       BAND=hard;   BEST_STEP=190; DIRECTION=e2b_hard_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-hard-seed42-local2gpu ;;
-  26b-medium) RUN_KEY=26b-a4b-medium; BAND=medium; BEST_STEP=120; DIRECTION=26b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5 ;;
-  26b-hard)   RUN_KEY=26b-a4b-hard;   BAND=hard;   BEST_STEP=160; DIRECTION=26b_hard_to_e2b;   TEACHER_HF_REPO=JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-hard-seed42 ;;
+  e2b-easy)   RUN_KEY=e2b-easy;       BAND=easy;   BEST_STEP=130; DIRECTION=e2b_easy_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-easy-seed42-local2gpu; TEACHER_HF_REVISION=c82460136fb16c36ff91dd2a489fba9332b52432 ;;
+  e2b-medium) RUN_KEY=e2b-medium;     BAND=medium; BEST_STEP=240; DIRECTION=e2b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-medium-seed42-local2gpu; TEACHER_HF_REVISION=497e7964f98bb6d825e4c7fcc95d75fa928a6d83 ;;
+  e2b-hard)   RUN_KEY=e2b-hard;       BAND=hard;   BEST_STEP=190; DIRECTION=e2b_hard_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-hard-seed42-local2gpu; TEACHER_HF_REVISION=59762d43bf94b6938d2e560e1fdbfdbf0d3f9e4c ;;
+  26b-medium) RUN_KEY=26b-a4b-medium; BAND=medium; BEST_STEP=140; DIRECTION=26b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5; TEACHER_HF_REVISION=4da4c943785fa0549b647a5f9736047047b44702 ;;
+  26b-hard)   RUN_KEY=26b-a4b-hard;   BAND=hard;   BEST_STEP=180; DIRECTION=26b_hard_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-hard-seed42; TEACHER_HF_REVISION=7659c94add2a724743707e23e3fafff353d2627c ;;
   *)
     echo "FATAL: unsupported TRACE_SPEC=${TRACE_SPEC}" >&2
     exit 2
@@ -95,26 +97,26 @@ export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/triton_cache_${TRACE_SPEC}}"
 export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-TRITON_ATTN}"
 export VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-0}"
 
-# --- Teacher: the completed checkpoint's consolidated HF model, from S3 ---
+# --- Teacher: the completed checkpoint's consolidated HF model (Hub export, or S3) ---
 MODEL_DIR="${MODEL_DIR:-/tmp/gemma4_trace_models/${TRACE_SPEC}}"
 mkdir -p "${MODEL_DIR}"
 if [[ -n ${TEACHER_HF_REPO} ]]; then
   TEACHER_HF_SUBDIR="$(printf 'step_%06d' "${BEST_STEP}")"
   TEACHER_SOURCE_URI="hf://${TEACHER_HF_REPO}/${TEACHER_HF_SUBDIR}"
   TEACHER_SOURCE_SUBFOLDER="${TEACHER_HF_SUBDIR}"
-  echo "TEACHER_DOWNLOAD spec=${TRACE_SPEC} hf=${TEACHER_SOURCE_URI}"
+  echo "TEACHER_DOWNLOAD spec=${TRACE_SPEC} hf=${TEACHER_SOURCE_URI} revision=${TEACHER_HF_REVISION:-main}"
   # Pull only the best-step subdir, onto local disk (not the EFS HF cache), then flatten it
   # into MODEL_DIR so the rest of the pipeline is source-agnostic.
-  "${VENV}/bin/python" - "${TEACHER_HF_REPO}" "${TEACHER_HF_SUBDIR}" "${MODEL_DIR}" <<'PY'
+  "${VENV}/bin/python" - "${TEACHER_HF_REPO}" "${TEACHER_HF_SUBDIR}" "${MODEL_DIR}" "${TEACHER_HF_REVISION:-main}" <<'PY'
 import shutil
 import sys
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
 
-repo, subdir, model_dir = sys.argv[1], sys.argv[2], Path(sys.argv[3])
+repo, subdir, model_dir, revision = sys.argv[1], sys.argv[2], Path(sys.argv[3]), sys.argv[4]
 staged = Path(
-    snapshot_download(repo, allow_patterns=[f"{subdir}/*"], local_dir=str(model_dir.with_name(model_dir.name + "_hf")))
+    snapshot_download(repo, revision=revision, allow_patterns=[f"{subdir}/*"], local_dir=str(model_dir.with_name(model_dir.name + "_hf")))
 )
 for path in (staged / subdir).iterdir():
     shutil.copy2(path, model_dir / path.name)

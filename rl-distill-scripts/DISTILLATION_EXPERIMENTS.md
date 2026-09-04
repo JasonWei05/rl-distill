@@ -15,28 +15,32 @@ the same top-128 trace format already collected by
 Metric `val-core/math/acc/mean@16` (W&B entity `rl-distill`, project `DAPO`, logged every 10
 steps). ▸ = run still training remotely, score may still improve.
 
-| Model | Band | Best step | mean@16 | Best checkpoint location |
+| Model | Band | Best step | mean@16 | HF checkpoint (repo @ pinned commit → `step_NNNNNN/`) |
 |---|---|---|---|---|
-| e2b | easy | 130 | 0.4102 | HF `JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-easy-seed42-local2gpu` `/step_000130` |
-| e2b | medium | 190 | 0.2117 ▸ | HF `JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-medium-seed42-local2gpu` `/step_000190` |
-| e2b | hard | 190 | 0.1363 ▸ | HF `JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-hard-seed42-local2gpu` `/step_000190` |
-| e4b | easy | 100 | 0.7056 | S3 `…/e4b-easy/global_step_100` — **now on HF** `…-26b-bands-es5/step_00NNNN` |
-| e4b | medium | 90 | 0.2998 | S3 `…/e4b-medium/global_step_90` — **now on HF** `…-26b-bands-es5/step_00NNNN` |
-| e4b | hard | 120 | 0.1590 | S3 `…/e4b-hard/global_step_120` — **now on HF** `…-26b-bands-es5/step_00NNNN` |
-| 12b | easy | 70 | 0.8408 | S3 `…/12b-easy/global_step_70` (HF `…-12b-…-easy-…-26b-bands-es5` exists) |
-| 12b | medium | 120 | 0.5208 | S3 `…/12b-medium/global_step_120` — **now on HF** `…-26b-bands-es5/step_00NNNN` |
-| 12b | hard | 140 | 0.2767 | S3 `…/12b-hard/global_step_140` — **now on HF** `…-26b-bands-es5/step_00NNNN` |
-| 26b-a4b | easy | 80 | 0.9408 | S3 `…/26b-a4b-easy/global_step_80` — **now on HF** `…-26b-bands-es5/step_00NNNN` |
-| 26b-a4b | medium | 120 | 0.6702 ▸ | HF `JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5` `/step_000120` |
-| 26b-a4b | hard | 160 | 0.4306 ▸ | HF `JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-hard-seed42` `/step_000160` |
+| e2b | easy | 130 | 0.4102 | `JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-easy-seed42-local2gpu` @ `c82460136fb1` → `step_000130/` |
+| e2b | medium | 240 | 0.2250 ▸ | `JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-medium-seed42-local2gpu` @ `497e7964f98b` → `step_000240/` |
+| e2b | hard | 190 | 0.1363 | `JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-hard-seed42-local2gpu` @ `59762d43bf94` → `step_000190/` |
+| e4b | easy | 100 | 0.7056 | `JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-easy-seed42-26b-bands-es5` @ `345beec132e3` → `step_000100/` |
+| e4b | medium | 90 | 0.2998 | `JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5` @ `5f90d25e193d` → `step_000090/` |
+| e4b | hard | 120 | 0.1590 | `JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-hard-seed42-26b-bands-es5` @ `627bd9d825ff` → `step_000120/` |
+| 12b | easy | 70 | 0.8408 | `JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-easy-seed42-26b-bands-es5` @ `372aa8417b09` → `step_000070/` |
+| 12b | medium | 120 | 0.5208 | `JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5` @ `485326ce84d0` → `step_000120/` |
+| 12b | hard | 140 | 0.2767 | `JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-hard-seed42-26b-bands-es5` @ `162d85023909` → `step_000140/` |
+| 26b-a4b | easy | 80 | 0.9408 | `JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-easy-seed42-26b-bands-es5` @ `f72b7fc8af90` → `step_000080/` |
+| 26b-a4b | medium | 140 | 0.6725 ▸ | `JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5` @ `4da4c943785f` → `step_000140/` |
+| 26b-a4b | hard | 180 | 0.4329 ▸ | `JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-hard-seed42` @ `7659c94add2a` → `step_000180/` |
 
-S3 root: `s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-20260819-full-checkpoints/`.
-Each S3 `global_step_N/actor/huggingface/` is a loadable consolidated HF model (verified).
+All 12 teachers are on the Hub (public, JWei05) and **pinned to an immutable commit** in
+`run_gemma4_bestckpt_trace_collection.sh` (`TEACHER_HF_REPO` / `TEACHER_HF_REVISION`). The
+`local2gpu` and 26b medium/hard repos are written by still-running RL jobs and keep only a
+rolling window of recent steps on `main`, so always fetch by the pinned commit, not `main`.
+e4b/12b/26b-easy are model-only re-uploads of the S3 full checkpoints' `actor/huggingface/`
+(`scale_train/upload_fullckpt_to_hf.py`; the S3 originals remain under
+`s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-20260819-full-checkpoints/`). The 12b
+exports lack `processor_config.json`; the collector provisions it from `google/gemma-4-12B`.
 
-**Checkpoint availability: all 12 best models are now on HF (JWei05).** The 7 S3-only ones were
-uploaded 2026-09-04 (model-only `actor/huggingface/`, into `step_NNNNNN/` subdirs of
-`…-<band>-seed42-26b-bands-es5` repos). The e2b `local2gpu` and 26b medium/hard repos were
-already there.
+▸ = run still training (2026-09-04): e2b-medium, 26b-a4b medium/hard keep improving; the pinned
+steps are the W&B peaks at pin time. Re-pin (W&B best → HF step → commit) when you freeze them.
 
 ## 2. Teacher trace generation (all 12 teachers)
 
@@ -59,23 +63,11 @@ top-k −1), RL few-shot template, capturing `teacher_topk_token_ids` + `teacher
 > an export lacks it; record `teacher_load_architectures` in the hashed run config so v1 shards
 > are invalidated on resume. See memory `gemma4-vllm-unified-load-required`.
 
-Status of the local trace queue (`run_gemma4_bestckpt_trace_queue.sh`, tmux `trace-queue`):
-
-| Teacher | In current queue? | Teacher source | Notes |
-|---|---|---|---|
-| 12b easy/medium/hard | 🔁 regenerating → v2 | S3 (s70/s120/s140) | exports lack `processor_config.json` → provisioned from `google/gemma-4-12B` |
-| 26b-a4b easy | ✅ queued | S3 (s80) | correct |
-| e4b easy | ✅ queued | S3 (s100) | step corrected to the W&B peak (was s130) |
-| e4b medium | ✅ queued | S3 (s90) | step corrected to the W&B peak (was s100) |
-| e4b hard | ✅ queued | S3 (s120) | correct |
-| e2b easy/medium/hard | ❌ **not in queue** | HF `…-local2gpu` (s130/s190/s190) | add specs; source from HF |
-| 26b-a4b medium | ❌ **not in queue** | HF `…-26b-bands-es5` (s120) | add spec; source from HF |
-| 26b-a4b hard | ❌ **not in queue** | HF `…-hard-seed42` (s160) | add spec; source from HF |
-
-**TODO for traces:** (a) ~~fix e4b-easy→s100, e4b-medium→s90~~ ✅ done; (b) add the 5
-HF-sourced teacher specs (e2b×3, 26b-medium, 26b-hard) — extend the collection script to
-download the teacher from an HF repo `step_NNNNNN` subdir instead of the S3 path (those exports
-already include `processor_config.json`); (c) regenerate everything into v2 on all 8 GPUs.
+Trace collection status (2026-09-04): all 12 teachers are in the queue and every teacher is
+fetched from its pinned Hub export (§1). Running now on this box (`tmux trace-queue-v2`, 8 GPUs)
+as a head start that the nodes reuse via S3; the two-node split is in §6. Verified on the
+regenerated v2 shards: 0% multimodal-token leakage, 0% length-cap runaways, width-128 top-k,
+correct-rates tracking val (12b-easy 0.75, 26b-easy 0.97 on first shards).
 
 ## 3. Distillation grid (21 runs)
 
@@ -140,24 +132,31 @@ under `/tmp/gemma4_distill_views/`). Prereqs per node: `.env` with `HF_TOKEN` (+
 AWS creds if mirroring), the gemma4 venv (`bash rl-distill-scripts/setup_env_gemma4.sh`,
 default `/tmp/.venv-gemma4`), 8 GPUs.
 
-| | Node 1 | Node 2 |
+Split rationale: pair each node's slow teacher with a fast one so distillation starts early,
+and balance total GPU-hours (generation + the distill runs that consume that node's teachers).
+Rough GPU-hour budget (8 samples/q; distill ≈ 2 GPU·h per e2b-student run, 4 per e4b-student
+run): 26b ≈ 17 gen + 18 distill, 12b ≈ 10 + 18, e4b ≈ 5 + 18, e2b ≈ 3 + 6 → node 1 ≈ 44,
+node 2 ≈ 52 (vs ≈ 58 / 38 for a 26b+e4b / 12b+e2b split). Each node distills only from teachers
+it generated, so there is no cross-node dependency.
+
+| | Node 1 (teachers 26b + e2b) | Node 2 (teachers 12b + e4b) |
 |---|---|---|
-| **Traces** | 26b easy/medium/hard (2 GPUs, **TP2**) · e4b easy/medium/hard (2 GPUs, DP2) | 12b easy/medium/hard (2 GPUs, DP2) · e2b easy/medium/hard (1 GPU) |
-| **Distill** | 26b→e4b, e4b→e4b (2 GPUs each) · 26b→e2b, e4b→e2b (1 GPU each) — 12 runs | 12b→e4b (2 GPUs) · 12b→e2b, e2b→e2b (1 GPU each) — 9 runs |
+| **Traces** | 26b easy/medium/hard (2 GPUs, **TP2**) · e2b easy/medium/hard (1 GPU) | 12b easy/medium/hard (2 GPUs, DP2) · e4b easy/medium/hard (2 GPUs, DP2) |
+| **Distill** | 26b→e4b (2 GPUs) · 26b→e2b, e2b→e2b (1 GPU) — **9 runs** | 12b→e4b, e4b→e4b (2 GPUs) · 12b→e2b, e4b→e2b (1 GPU) — **12 runs** |
 
 ```bash
 # ---- node 1 ----
-TRACE_QUEUE_SPECS=26b-easy:2,26b-medium:2,26b-hard:2,e4b-easy:2,e4b-medium:2,e4b-hard:2 \
+TRACE_QUEUE_SPECS=26b-easy:2,26b-medium:2,26b-hard:2,e2b-easy:1,e2b-medium:1,e2b-hard:1 \
   VENV=/tmp/.venv-gemma4 GPU_MEMORY_UTILIZATION=0.72 \
   bash rl-distill-scripts/scale_train/run_gemma4_bestckpt_trace_queue.sh
-DISTILL_QUEUE_RUNS=26b-easy:e4b:2,26b-medium:e4b:2,26b-hard:e4b:2,e4b-easy:e4b:2,e4b-medium:e4b:2,e4b-hard:e4b:2,26b-easy:e2b:1,26b-medium:e2b:1,26b-hard:e2b:1,e4b-easy:e2b:1,e4b-medium:e2b:1,e4b-hard:e2b:1 \
+DISTILL_QUEUE_RUNS=26b-easy:e4b:2,26b-medium:e4b:2,26b-hard:e4b:2,26b-easy:e2b:1,26b-medium:e2b:1,26b-hard:e2b:1,e2b-easy:e2b:1,e2b-medium:e2b:1,e2b-hard:e2b:1 \
   bash rl-distill-scripts/scale_train/run_gemma4_distill_queue.sh
 
 # ---- node 2 ----
-TRACE_QUEUE_SPECS=12b-easy:2,12b-medium:2,12b-hard:2,e2b-easy:1,e2b-medium:1,e2b-hard:1 \
+TRACE_QUEUE_SPECS=12b-easy:2,12b-medium:2,12b-hard:2,e4b-easy:2,e4b-medium:2,e4b-hard:2 \
   VENV=/tmp/.venv-gemma4 GPU_MEMORY_UTILIZATION=0.72 \
   bash rl-distill-scripts/scale_train/run_gemma4_bestckpt_trace_queue.sh
-DISTILL_QUEUE_RUNS=12b-easy:e4b:2,12b-medium:e4b:2,12b-hard:e4b:2,12b-easy:e2b:1,12b-medium:e2b:1,12b-hard:e2b:1,e2b-easy:e2b:1,e2b-medium:e2b:1,e2b-hard:e2b:1 \
+DISTILL_QUEUE_RUNS=12b-easy:e4b:2,12b-medium:e4b:2,12b-hard:e4b:2,e4b-easy:e4b:2,e4b-medium:e4b:2,e4b-hard:e4b:2,12b-easy:e2b:1,12b-medium:e2b:1,12b-hard:e2b:1,e4b-easy:e2b:1,e4b-medium:e2b:1,e4b-hard:e2b:1 \
   bash rl-distill-scripts/scale_train/run_gemma4_distill_queue.sh
 ```
 

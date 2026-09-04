@@ -6,10 +6,13 @@
 # teacher is done fill free GPUs immediately, the rest wait.
 #
 # Two-node split for the distillation study (DISTILL_QUEUE_RUNS overrides the default list):
-#   node 1: DISTILL_QUEUE_RUNS=26b-easy:e4b:2,26b-medium:e4b:2,26b-hard:e4b:2,e4b-easy:e4b:2,e4b-medium:e4b:2,e4b-hard:e4b:2,26b-easy:e2b:1,26b-medium:e2b:1,26b-hard:e2b:1,e4b-easy:e2b:1,e4b-medium:e2b:1,e4b-hard:e2b:1
-#   node 2: DISTILL_QUEUE_RUNS=12b-easy:e4b:2,12b-medium:e4b:2,12b-hard:e4b:2,12b-easy:e2b:1,12b-medium:e2b:1,12b-hard:e2b:1,e2b-easy:e2b:1,e2b-medium:e2b:1,e2b-hard:e2b:1
+#   node 1 (teachers 26b + e2b, 9 runs):
+#     DISTILL_QUEUE_RUNS=26b-easy:e4b:2,26b-medium:e4b:2,26b-hard:e4b:2,26b-easy:e2b:1,26b-medium:e2b:1,26b-hard:e2b:1,e2b-easy:e2b:1,e2b-medium:e2b:1,e2b-hard:e2b:1
+#   node 2 (teachers 12b + e4b, 12 runs):
+#     DISTILL_QUEUE_RUNS=12b-easy:e4b:2,12b-medium:e4b:2,12b-hard:e4b:2,e4b-easy:e4b:2,e4b-medium:e4b:2,e4b-hard:e4b:2,12b-easy:e2b:1,12b-medium:e2b:1,12b-hard:e2b:1,e4b-easy:e2b:1,e4b-medium:e2b:1,e4b-hard:e2b:1
 # (e4b-base students take 2 GPUs, e2b-base students 1 GPU; 2-GPU runs are listed first so they
-# are preferred while the pool is full.)
+# are preferred while the pool is full. Each node distills only from teachers it generated, so
+# no cross-node dependency; node 2 carries more distill runs to offset node 1's slow 26b traces.)
 
 set -uo pipefail
 
