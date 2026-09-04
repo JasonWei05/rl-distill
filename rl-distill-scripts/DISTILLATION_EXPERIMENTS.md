@@ -307,7 +307,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-04 17:21Z — math complete for 2/19 models, OOD complete for 0/19. Partial rows are shown as they finish._
+_Updated 2026-09-04 17:23Z — math complete for 3/19 models, OOD complete for 0/19. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -316,7 +316,7 @@ _Updated 2026-09-04 17:21Z — math complete for 2/19 models, OOD complete for 0
 | `base_e2b` | base | — | — | — | — | — | — |
 | `base_e4b` | base | — | — | — | — | — | — |
 | `rl_e2b_easy` | rl | easy | — | — | — | — | — |
-| `rl_e2b_hard` | rl | hard | — | — | — | — | — |
+| `rl_e2b_hard` | rl | hard | 21.1 / 46.3 | 16.3 / 40.0 | **13.2 / 28.3** | 10.3 / 25.4 | 8.9 / 25.2 |
 | `rl_e2b_medium` | rl | medium | 34.6 / 54.3 | **22.1 / 43.0** | 16.0 / 38.7 | 15.9 / 33.2 | 19.6 / 45.9 |
 | `rl_e4b_easy` | rl | easy | — | — | — | — | — |
 | `rl_e4b_hard` | rl | hard | 39.9 / 79.3 | 20.0 / 56.7 | **15.4 / 47.7** | 16.7 / 48.0 | 43.0 / 77.4 |
