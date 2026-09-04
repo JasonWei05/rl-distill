@@ -116,14 +116,20 @@ Each teacher's traces are generated once and reused across its student(s).
   the upload succeeds (`HF_PUSH_DELETE_LOCAL=true`). Storage is HF-only: no S3 (`TRACE_S3_MIRROR_ENABLE=false`,
   `DISTILL_S3_ENABLE=false`).
 
-## 5. Open decisions / TODO
+## 5. Decisions log
 
-1. Confirm the **21-run grid** in §3 (teacher set per student).
-2. ~~Upload the S3-only best checkpoints to HF~~ ✅ done 2026-09-04 (all 12 now on HF).
-3. **Trace corrections + additions** (§2 TODO): fix e4b steps; add 5 HF-sourced teacher specs.
-4. Where to **run the 21 distillations** — this 8-GPU box vs ScaleTrain (overlay needs 8 GPUs).
-5. Whether the still-training runs (e2b medium/hard, 26b-a4b medium/hard) should be **frozen at
-   the current best** or allowed to finish before their traces are generated.
+1. **Grid** — the 21 runs in §3 (e4b base ← {26b, 12b, e4b}; e2b base ← {26b, 12b, e4b, e2b}; × 3 bands). ✅
+2. **Checkpoints on HF** — all 12 best RL checkpoints uploaded and pinned to immutable commits (§1). ✅
+3. **Trace specs** — e4b steps corrected to the W&B peaks; all 12 teachers HF-sourced with pinned
+   revisions; 8 samples per training question. ✅
+4. **Where things run** — generation + distillation on the two remote nodes (§6), plain local
+   scripts, HF-only (no S3, no ScaleTrain). Distilled students: e4b base on 4 GPUs, e2b base on
+   2 GPUs (fp32 master + Adam do not fit smaller). Final distilled export = **step 500**. ✅
+5. **Still-training teachers** — e2b-medium and 26b-a4b medium/hard are pinned at their W&B peaks
+   at pin time (§1 ▸); re-pin (W&B best → Hub step → commit) if they are frozen later. ✅
+6. **Evaluation** — only the e2b/e4b RL teachers, every distilled student, and the two bases are
+   evaluated (§7); the 12b/26b teachers are not. In-distribution = the model's own 300-q band
+   (all three bands are run; the other two are cross-band transfer). ✅
 
 ## 6. Two-node execution plan (plain local scripts — no ScaleTrain)
 
@@ -217,3 +223,16 @@ MODEL_TAG=rl_e2b_easy GPU_COUNT=1 VENV=/tmp/.venv-gemma4 \
 bash rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_packed_node.sh
 # aggregate: bash rl-distill-scripts/finalize_gemma4_rl_distill_eval_results.sh
 ```
+
+## 8. Results (updated as each model finishes)
+
+Numbers are copied here by `rl-distill-scripts/update_distill_study_results_doc.py`, which scans
+the per-model result files under the study results root and rewrites everything between the two
+markers below; run it after any model completes (or let the packed run's watcher do it). Math
+numbers (repo `\boxed{}` verifier = the RL reward) and OOD accuracies (lm-eval-harness) are
+separate families — do not compare across them. Bold = a model's own band (in-distribution).
+All percentages; `mean@k` = average accuracy over k samples, `pass@k` = any-of-k.
+
+<!-- results:start -->
+_No completed evaluations yet. Smoke test (`rl_e2b_easy`, `id_easy` only) in progress._
+<!-- results:end -->
