@@ -8,10 +8,12 @@
 #   2. build the derived training view (build_gemma4_distill_training_view.py)
 #   3. snapshot the student base model; compute the teacher/student identity SHAs the
 #      audited launcher pins
-#   4. exec gemma4_topk_distill_fsdp2.sh with the study's recipe: global batch 64, 1000 steps
-#      (epochs capped at 100 so steps bind), lr 2e-6, 100 warmup, linear decay to 2e-7
+#   4. exec gemma4_topk_distill_fsdp2.sh with the study's recipe: global batch 64, 500 steps
+#      (epochs capped at 100 so steps bind), lr 2.5e-6, 100 warmup, linear decay to 2.5e-7,
+#      singleton micro-batches under the audited 4096 padded-token ceiling
 #
-# Students: e4b -> google/gemma-4-E4B (2 GPUs), e2b -> google/gemma-4-E2B (1 GPU). A teacher's
+# Students: e4b -> google/gemma-4-E4B (4 GPUs), e2b -> google/gemma-4-E2B (2 GPUs): fp32 master +
+# Adam state does not fit e2b on one GPU or e4b on two alongside the activations. A teacher's
 # trace set is reused for both students; the recorded direction label is passed through and
 # the student is verified by identity SHA (see preflight_gemma4_distill_training_view.py).
 
@@ -160,13 +162,18 @@ export EXPECTED_VALIDATION_SAMPLES_PER_QUESTION=1
 export NPROC_PER_NODE="${#GPU_IDS[@]}"
 export CUDA_VISIBLE_DEVICES="${DISTILL_GPU_IDS}"
 export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-64}"
+# Micro-batching as in the audited production distillation: one sequence per micro-batch, padded-token
+# ceiling 4096 (long samples go alone), KL over 4096-token vocab chunks. Global batch 64 -> 32 micro-steps
+# per GPU on the 2-GPU e2b runs, 16 on the 4-GPU e4b runs.
 export MICRO_BATCH_SIZE_PER_GPU="${MICRO_BATCH_SIZE_PER_GPU:-1}"
-export TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-1000}"
+export MAX_PADDED_TOKENS_PER_MICROBATCH="${MAX_PADDED_TOKENS_PER_MICROBATCH:-4096}"
+export FULL_VOCAB_KL_CHUNK_SIZE="${FULL_VOCAB_KL_CHUNK_SIZE:-4096}"
+export TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-500}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-100}"
-export LR="${LR:-2e-6}"
+export LR="${LR:-2.5e-6}"
 export LR_WARMUP_STEPS="${LR_WARMUP_STEPS:-100}"
 export LR_SCHEDULER_TYPE="${LR_SCHEDULER_TYPE:-linear}"
-export MIN_LR_RATIO="${MIN_LR_RATIO:-0.1}"   # 2e-6 * 0.1 = 2e-7 final LR
+export MIN_LR_RATIO="${MIN_LR_RATIO:-0.1}"   # 2.5e-6 * 0.1 = 2.5e-7 final LR
 export PROJECT_NAME="${PROJECT_NAME:-gemma4-bestckpt-distill-v2}"
 export EXP_NAME="${EXP_NAME:-${TEACHER_SPEC}-to-${STUDENT}-base-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}}"
 # Logging: console + wandb (project PROJECT_NAME); validation KL on the held-out rows every TEST_FREQ steps.

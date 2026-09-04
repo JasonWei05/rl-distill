@@ -96,21 +96,23 @@ Each teacher's traces are generated once and reused across its student(s).
   a seed-42 deterministic subset, scored by the same top-128 KL every `TEST_FREQ=10` steps
   (`build_gemma4_distill_training_view.py --validation-source validation`, the `run_gemma4_distill_one.sh`
   default; `--validation-source train` restores carving validation questions out of the train roster).
-- **Hyperparameters:** global batch **64**, **1000 steps** — set epochs to **100** as a
-  non-binding cap so the step count is the only limit (≈2.7 epochs over 24k examples);
-  LR **2e-6**, **100** warmup steps, **linear decay to 2e-7**.
+- **Hyperparameters:** global batch **64**, **500 steps** — set epochs to **100** as a
+  non-binding cap so the step count is the only limit (≈1.3 epochs over 24k examples);
+  LR **2.5e-6**, **100** warmup steps, **linear decay to 2.5e-7**. Micro-batching as in the audited
+  production distillation: 1 sequence per micro-batch, 4096 padded-token ceiling, 4096-token KL chunks.
   Note: `gemma4_topk_distill_fsdp2.sh`'s strict 8-GPU / batch-128 contract applies only to the
   old `gemma4-hf-bf16-sdpa-topk-overlay-v1` index schema. These runs use derived training
   views (`gemma4-distill-training-view-v1`, built by `build_gemma4_distill_training_view.py`
   from each teacher's trace bundle), for which batch 64 on 1-2 GPUs flows through unchanged.
-- **Compute:** 8-GPU FSDP2 per the audited overlay contract (`MODEL_DTYPE=fp32`, BF16 FSDP
+- **Compute:** FSDP2 per the audited overlay contract (`MODEL_DTYPE=fp32`, BF16 FSDP
   forward params, FP32 reductions, `Gemma4TextDecoderLayer` wrap, 4096 padded-token
-  chunk, max length 12288). Runs on `.venv` (FSDP2 stack).
+  chunk, max length 12288). **e2b students on 2 GPUs, e4b students on 4 GPUs** (fp32 master + Adam
+  state do not fit e2b on one GPU or e4b on two alongside activations). Runs on `.venv-gemma4`.
 - **Precedent:** `e2b-base-to-e4b-topk128-lr2e6-linear-b128-2ep` used this exact schedule shape.
 - **Logging / artifacts:** W&B project `gemma4-bestckpt-distill-v2` (console + wandb), validation every 10
   steps. No periodic local checkpoints (`SAVE_FREQ=0`): the trainer saves once at the final step, that save
   holds only the HF export (`checkpoint.save_contents=["hf_model"]`, no FSDP/Adam shards), it is pushed to
-  `JWei05/Distill-gemma4-<teacher_spec>-to-<student>-base/step_001000/` and the local copy is deleted after
+  `JWei05/Distill-gemma4-<teacher_spec>-to-<student>-base/step_000500/` and the local copy is deleted after
   the upload succeeds (`HF_PUSH_DELETE_LOCAL=true`). Storage is HF-only: no S3 (`TRACE_S3_MIRROR_ENABLE=false`,
   `DISTILL_S3_ENABLE=false`).
 
@@ -152,27 +154,27 @@ it generated, so there is no cross-node dependency.
 | | Node 1 (teachers 26b + e2b) | Node 2 (teachers 12b + e4b) |
 |---|---|---|
 | **Traces** | 26b easy/medium/hard (2 GPUs, **TP2**) · e2b easy/medium/hard (1 GPU) | 12b easy/medium/hard (2 GPUs, DP2) · e4b easy/medium/hard (2 GPUs, DP2) |
-| **Distill** | 26b→e4b (2 GPUs) · 26b→e2b, e2b→e2b (1 GPU) — **9 runs** | 12b→e4b, e4b→e4b (2 GPUs) · 12b→e2b, e4b→e2b (1 GPU) — **12 runs** |
+| **Distill** | 26b→e4b (4 GPUs) · 26b→e2b, e2b→e2b (2 GPUs) — **9 runs** | 12b→e4b, e4b→e4b (4 GPUs) · 12b→e2b, e4b→e2b (2 GPUs) — **12 runs** |
 
 ```bash
 # ---- node 1 ----
 TRACE_QUEUE_SPECS=26b-easy:2,26b-medium:2,26b-hard:2,e2b-easy:1,e2b-medium:1,e2b-hard:1 \
   VENV=/tmp/.venv-gemma4 GPU_MEMORY_UTILIZATION=0.72 \
   bash rl-distill-scripts/scale_train/run_gemma4_bestckpt_trace_queue.sh
-DISTILL_QUEUE_RUNS=26b-easy:e4b:2,26b-medium:e4b:2,26b-hard:e4b:2,26b-easy:e2b:1,26b-medium:e2b:1,26b-hard:e2b:1,e2b-easy:e2b:1,e2b-medium:e2b:1,e2b-hard:e2b:1 \
+DISTILL_QUEUE_RUNS=26b-easy:e4b:4,26b-medium:e4b:4,26b-hard:e4b:4,26b-easy:e2b:2,26b-medium:e2b:2,26b-hard:e2b:2,e2b-easy:e2b:2,e2b-medium:e2b:2,e2b-hard:e2b:2 \
   bash rl-distill-scripts/scale_train/run_gemma4_distill_queue.sh
 
 # ---- node 2 ----
 TRACE_QUEUE_SPECS=12b-easy:2,12b-medium:2,12b-hard:2,e4b-easy:2,e4b-medium:2,e4b-hard:2 \
   VENV=/tmp/.venv-gemma4 GPU_MEMORY_UTILIZATION=0.72 \
   bash rl-distill-scripts/scale_train/run_gemma4_bestckpt_trace_queue.sh
-DISTILL_QUEUE_RUNS=12b-easy:e4b:2,12b-medium:e4b:2,12b-hard:e4b:2,e4b-easy:e4b:2,e4b-medium:e4b:2,e4b-hard:e4b:2,12b-easy:e2b:1,12b-medium:e2b:1,12b-hard:e2b:1,e4b-easy:e2b:1,e4b-medium:e2b:1,e4b-hard:e2b:1 \
+DISTILL_QUEUE_RUNS=12b-easy:e4b:4,12b-medium:e4b:4,12b-hard:e4b:4,e4b-easy:e4b:4,e4b-medium:e4b:4,e4b-hard:e4b:4,12b-easy:e2b:2,12b-medium:e2b:2,12b-hard:e2b:2,e4b-easy:e2b:2,e4b-medium:e2b:2,e4b-hard:e2b:2 \
   bash rl-distill-scripts/scale_train/run_gemma4_distill_queue.sh
 ```
 
-Single runs: `TEACHER_SPEC=12b-easy STUDENT=e4b DISTILL_GPU_IDS=0,1 bash
-rl-distill-scripts/scale_train/run_gemma4_distill_one.sh` (recipe defaults: bs 64, 1000 steps,
-epochs cap 100, lr 2e-6, warmup 100, linear → 2e-7; pin `STUDENT_REVISION` for reproducible
+Single runs: `TEACHER_SPEC=12b-easy STUDENT=e4b DISTILL_GPU_IDS=0,1,2,3 bash
+rl-distill-scripts/scale_train/run_gemma4_distill_one.sh` (recipe defaults: bs 64, 500 steps,
+epochs cap 100, lr 2.5e-6, warmup 100, linear → 2.5e-7; pin `STUDENT_REVISION` for reproducible
 student identities). Smoke-test one teacher on a node with `TRACE_MAX_SHARDS=1` /
 one `run_gemma4_distill_one.sh` before the full queues.
 
