@@ -21,7 +21,7 @@ set -euo pipefail
 #   MODEL_PATH                         - immutable local E2B/E4B student snapshot
 #   DATASET_INDEX                      - validated vLLM index or finalized unsharded-HF overlay index
 #   SOURCE_DATASET_INDEX               - exact vLLM source index (required only for an overlay)
-#   DISTILL_DIRECTION                  - e4b_rl100_to_e2b or e2b_base_to_e4b
+#   DISTILL_DIRECTION                  - expected immutable trace direction
 #   EXPECTED_TEACHER_IDENTITY_SHA256   - hash_json() of the pinned teacher identity
 #   EXPECTED_STUDENT_IDENTITY_SHA256   - content-bound student identity from preflight
 #   PREFLIGHT_RECEIPT_CACHE             - optional overlay receipt path; defaults beside its index
@@ -158,6 +158,17 @@ print(schema)
                 PREFLIGHT_RECEIPT_CACHE="$(dirname -- "${DATASET_INDEX}")/training_preflight_receipt.json"
             fi
             : "${TRAINING_ENGINE_AUDIT_RECEIPT:?Set TRAINING_ENGINE_AUDIT_RECEIPT to a passing real FSDP2 train/backward audit}"
+            ;;
+        gemma4-distill-training-view-v1)
+            if [ -n "${SOURCE_DATASET_INDEX:-}" ]; then
+                echo "SOURCE_DATASET_INDEX is not used by a derived training view" >&2
+                exit 2
+            fi
+            if [ -n "${PREFLIGHT_RECEIPT_CACHE}" ] || [ -n "${TRAINING_ENGINE_AUDIT_RECEIPT}" ]; then
+                echo "Overlay preflight/audit receipts are not valid for a derived training view" >&2
+                exit 2
+            fi
+            PREFLIGHT_SCRIPT="${PROJECT_ROOT}/rl-distill-scripts/data/preflight_gemma4_distill_training_view.py"
             ;;
         *)
             echo "Unsupported DATASET_INDEX schema_version: ${DATASET_SCHEMA_VERSION}" >&2
@@ -531,6 +542,18 @@ export PROJECT_NAME=${PROJECT_NAME:-gemma4-distill-vs-rl}
 export EXP_NAME=${EXP_NAME:-"gemma4-topk128-distill-$(date +%Y%m%d-%H%M%S)"}
 export CKPTS_DIR=${CKPTS_DIR:-"/tmp/verl/ckpts/${PROJECT_NAME}/${EXP_NAME}"}
 export TRAIN_LOGGER=${TRAIN_LOGGER:-'["console","wandb"]'}
+export REMOTE_CHECKPOINT_ENABLE=${REMOTE_CHECKPOINT_ENABLE:-false}
+export REMOTE_CHECKPOINT_S3_URI=${REMOTE_CHECKPOINT_S3_URI:-}
+case "${REMOTE_CHECKPOINT_ENABLE,,}" in
+    true)
+        if [[ ! "${REMOTE_CHECKPOINT_S3_URI}" =~ ^s3://[^/]+/.+ ]]; then
+            echo "REMOTE_CHECKPOINT_S3_URI must be a non-empty s3:// bucket/prefix when remote checkpointing is enabled" >&2
+            exit 2
+        fi
+        ;;
+    false) ;;
+    *) echo "REMOTE_CHECKPOINT_ENABLE must be true or false" >&2; exit 2 ;;
+esac
 
 export NNODES=${NNODES:-1}
 export NPROC_PER_NODE
@@ -596,6 +619,8 @@ COMMON_OVERRIDES=(
     trainer.hf_push.repo_id="${HF_PUSH_REPO:-unused}"
     trainer.hf_push.private="${HF_PUSH_PRIVATE}"
     trainer.hf_push.delete_local_after=false
+    trainer.remote_checkpoint.enable="${REMOTE_CHECKPOINT_ENABLE}"
+    trainer.remote_checkpoint.s3_uri="${REMOTE_CHECKPOINT_S3_URI}"
     'checkpoint.save_contents=["model","optimizer","extra","hf_model"]'
     'checkpoint.load_contents=["model","optimizer","extra"]'
 )

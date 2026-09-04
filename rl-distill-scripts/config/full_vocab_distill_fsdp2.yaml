@@ -96,6 +96,9 @@ trainer:
     private: ${oc.decode:${oc.env:HF_PUSH_PRIVATE,true}}
     delete_local_after: ${oc.decode:${oc.env:HF_PUSH_DELETE_LOCAL,false}}
     max_to_keep: ${oc.decode:${oc.env:HF_PUSH_MAX_TO_KEEP,8}}
+  remote_checkpoint:
+    enable: ${oc.decode:${oc.env:REMOTE_CHECKPOINT_ENABLE,false}}
+    s3_uri: ${oc.env:REMOTE_CHECKPOINT_S3_URI,""}
 
 model:
   path: ${oc.env:MODEL_PATH,/tmp/hf_models/gemma-3-27b-pt}

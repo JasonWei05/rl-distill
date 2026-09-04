@@ -33,6 +33,47 @@ from verl.workers.engine_workers import TrainingWorker, TrainingWorkerConfig
 class FullVocabDistillTrainer(SFTTrainer):
     _hf_pusher = None
 
+    def __init__(self, config):
+        self._restore_remote_checkpoint(config)
+        super().__init__(config=config)
+
+    @staticmethod
+    def _remote_checkpoint_config(config):
+        cfg = config.trainer.get("remote_checkpoint", None)
+        if cfg is None or not bool(cfg.get("enable", False)):
+            return None
+        s3_uri = cfg.get("s3_uri", None)
+        if not isinstance(s3_uri, str) or not s3_uri.startswith("s3://"):
+            raise ValueError("trainer.remote_checkpoint.s3_uri must be an s3:// URI when enabled")
+        return cfg
+
+    def _restore_remote_checkpoint(self, config):
+        import torch.distributed as dist
+
+        cfg = self._remote_checkpoint_config(config)
+        if cfg is None:
+            return
+        from full_checkpoint_s3 import restore_latest_checkpoint
+
+        result = [None]
+        if dist.get_rank() == 0:
+            try:
+                restored_step = restore_latest_checkpoint(
+                    Path(config.trainer.default_local_dir),
+                    str(cfg.s3_uri),
+                )
+                result[0] = {"ok": True, "step": restored_step}
+            except Exception as error:
+                result[0] = {"ok": False, "error": f"{type(error).__name__}: {error}"}
+        dist.broadcast_object_list(result, src=0)
+        if not result[0]["ok"]:
+            raise RuntimeError(f"remote checkpoint restore failed: {result[0]['error']}")
+        if dist.get_rank() == 0:
+            print(
+                f"[FullCheckpointS3] startup restore complete; step={result[0]['step']}",
+                flush=True,
+            )
+
     def _build_engine(self):
         from full_vocab_kl_loss import FullVocabKLLoss
 
@@ -147,6 +188,36 @@ class FullVocabDistillTrainer(SFTTrainer):
     def _build_ckpt_handler(self):
         super()._build_ckpt_handler()
         self._init_hf_pusher()
+        self._init_remote_checkpoint_persistence()
+
+    def _init_remote_checkpoint_persistence(self):
+        import torch.distributed as dist
+
+        cfg = self._remote_checkpoint_config(self.config)
+        if cfg is None:
+            return
+        from full_checkpoint_s3 import upload_checkpoint
+
+        original_save = self.ckpt_handler.save_checkpoint
+        checkpoint_root = Path(self.config.trainer.default_local_dir)
+        s3_uri = str(cfg.s3_uri)
+
+        def save_and_upload(step):
+            original_save(step=step)
+            result = [None]
+            if dist.get_rank() == 0:
+                try:
+                    upload_checkpoint(checkpoint_root, int(step), s3_uri)
+                    result[0] = {"ok": True}
+                except Exception as error:
+                    result[0] = {"ok": False, "error": f"{type(error).__name__}: {error}"}
+            dist.broadcast_object_list(result, src=0)
+            if not result[0]["ok"]:
+                raise RuntimeError(f"remote checkpoint upload failed at step {step}: {result[0]['error']}")
+
+        self.ckpt_handler.save_checkpoint = save_and_upload
+        if dist.get_rank() == 0:
+            print(f"[FullCheckpointS3] enabled: {s3_uri}", flush=True)
 
     def _init_hf_pusher(self):
         import torch.distributed as dist
@@ -205,43 +276,55 @@ class FullVocabDistillTrainer(SFTTrainer):
         """Record completion only after the final checkpoint and uploads succeed."""
         import torch.distributed as dist
 
-        if dist.is_available() and dist.is_initialized() and dist.get_rank() != 0:
-            return
+        result = [None]
+        if dist.get_rank() == 0:
+            try:
+                checkpoint_root = Path(self.config.trainer.default_local_dir)
+                final_step = int(self.total_training_steps)
+                tracker = checkpoint_root / "latest_checkpointed_iteration.txt"
+                try:
+                    checkpoint_step = int(tracker.read_text(encoding="utf-8").strip())
+                except (FileNotFoundError, ValueError) as error:
+                    raise RuntimeError(f"cannot prove final checkpoint completion from {tracker}") from error
+                if checkpoint_step != final_step:
+                    raise RuntimeError(
+                        f"training returned before its final checkpoint: tracker={checkpoint_step}, expected={final_step}"
+                    )
+                checkpoint_dir = checkpoint_root / f"global_step_{final_step}"
+                if not checkpoint_dir.is_dir():
+                    raise RuntimeError(f"final checkpoint directory is missing: {checkpoint_dir}")
 
-        checkpoint_root = Path(self.config.trainer.default_local_dir)
-        final_step = int(self.total_training_steps)
-        tracker = checkpoint_root / "latest_checkpointed_iteration.txt"
-        try:
-            checkpoint_step = int(tracker.read_text(encoding="utf-8").strip())
-        except (FileNotFoundError, ValueError) as error:
-            raise RuntimeError(f"cannot prove final checkpoint completion from {tracker}") from error
-        if checkpoint_step != final_step:
-            raise RuntimeError(
-                f"training returned before its final checkpoint: tracker={checkpoint_step}, expected={final_step}"
-            )
-        checkpoint_dir = checkpoint_root / f"global_step_{final_step}"
-        if not checkpoint_dir.is_dir():
-            raise RuntimeError(f"final checkpoint directory is missing: {checkpoint_dir}")
+                hf_cfg = self.config.trainer.get("hf_push", None)
+                hf_push_enabled = bool(hf_cfg is not None and hf_cfg.get("enable", False))
+                if hf_push_enabled and self._hf_pusher is None:
+                    raise RuntimeError("HF push was required but no rank-0 HFPusher was initialized")
 
-        hf_cfg = self.config.trainer.get("hf_push", None)
-        hf_push_enabled = bool(hf_cfg is not None and hf_cfg.get("enable", False))
-        if hf_push_enabled and self._hf_pusher is None:
-            raise RuntimeError("HF push was required but no rank-0 HFPusher was initialized")
+                remote_cfg = self._remote_checkpoint_config(self.config)
+                payload = {
+                    "checkpoint_step": final_step,
+                    "completed_at": datetime.now(UTC).isoformat(),
+                    "hf_push_enabled": hf_push_enabled,
+                    "hf_repo": hf_cfg.get("repo_id") if hf_push_enabled else None,
+                    "remote_checkpoint_s3_uri": str(remote_cfg.s3_uri) if remote_cfg is not None else None,
+                    "wandb_run_id": os.environ.get("WANDB_RUN_ID"),
+                    "cudnn_sdpa": os.environ.get("VERL_GEMMA4_CUDNN_SDPA"),
+                    "eval_cudnn_sdpa": os.environ.get("VERL_GEMMA4_EVAL_CUDNN_SDPA"),
+                }
+                receipt = checkpoint_root / "run_complete.json"
+                temporary = receipt.with_name(f".{receipt.name}.tmp.{os.getpid()}")
+                temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                os.replace(temporary, receipt)
+                print(f"[FullVocabDistill] wrote verified completion receipt: {receipt}", flush=True)
+                if remote_cfg is not None:
+                    from full_checkpoint_s3 import upload_completion_receipt
 
-        payload = {
-            "checkpoint_step": final_step,
-            "completed_at": datetime.now(UTC).isoformat(),
-            "hf_push_enabled": hf_push_enabled,
-            "hf_repo": hf_cfg.get("repo_id") if hf_push_enabled else None,
-            "wandb_run_id": os.environ.get("WANDB_RUN_ID"),
-            "cudnn_sdpa": os.environ.get("VERL_GEMMA4_CUDNN_SDPA"),
-            "eval_cudnn_sdpa": os.environ.get("VERL_GEMMA4_EVAL_CUDNN_SDPA"),
-        }
-        receipt = checkpoint_root / "run_complete.json"
-        temporary = receipt.with_name(f".{receipt.name}.tmp.{os.getpid()}")
-        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        os.replace(temporary, receipt)
-        print(f"[FullVocabDistill] wrote verified completion receipt: {receipt}", flush=True)
+                    upload_completion_receipt(checkpoint_root, str(remote_cfg.s3_uri))
+                result[0] = {"ok": True}
+            except Exception as error:
+                result[0] = {"ok": False, "error": f"{type(error).__name__}: {error}"}
+        dist.broadcast_object_list(result, src=0)
+        if not result[0]["ok"]:
+            raise RuntimeError(f"run completion receipt failed: {result[0]['error']}")
 
     def fit(self):
         try:
@@ -251,8 +334,6 @@ class FullVocabDistillTrainer(SFTTrainer):
                 print("[HFPusher] waiting for pending uploads before exit...", flush=True)
                 wait_for_hf_pusher(self._hf_pusher, timeout=3600)
         self._write_completion_receipt()
-        if torch.distributed.is_available() and torch.distributed.is_initialized():
-            torch.distributed.barrier()
 
 
 @hydra.main(config_path="config", config_name="full_vocab_distill_fsdp2", version_base=None)
