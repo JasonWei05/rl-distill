@@ -13,6 +13,13 @@
 
 set -euo pipefail
 
+# Everything below runs inside main() so bash parses the WHOLE file before executing any of it.
+# Bash otherwise reads a script incrementally by byte offset, so editing this file while an
+# instance is running (hours-long collections) corrupts that instance: an edit that grew earlier
+# lines made a running collection resume mid-line ("log_path: unbound variable") and fail after
+# a completed train split.
+main() {
+
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${PROJECT_ROOT}"
 
@@ -401,3 +408,6 @@ else
 fi
 
 echo "TRACE_COLLECTION_COMPLETE spec=${TRACE_SPEC} s3=${TRACE_OUTPUT_S3_URI}"
+}
+
+main "$@"
