@@ -91,7 +91,11 @@ Each teacher's traces are generated once and reused across its student(s).
   `full_vocab_distill_dataset.py` already consumes `teacher_topk_token_ids` /
   `teacher_topk_logprobs` at `teacher_topk_width=128`, `input_ids`, `response_mask` — i.e.
   **directly compatible with the traces from §2**.
-- **Data:** the teacher's train traces (3000 q × 8 = 24,000 examples) for that band.
+- **Data:** the teacher's train traces (all 3000 q × 8 = 24,000 examples) for that band. Validation:
+  128 of the teacher's own **validation-split** generations (300 val questions × 1 sample in the bundle),
+  a seed-42 deterministic subset, scored by the same top-128 KL every `TEST_FREQ=10` steps
+  (`build_gemma4_distill_training_view.py --validation-source validation`, the `run_gemma4_distill_one.sh`
+  default; `--validation-source train` restores carving validation questions out of the train roster).
 - **Hyperparameters:** global batch **64**, **1000 steps** — set epochs to **100** as a
   non-binding cap so the step count is the only limit (≈2.7 epochs over 24k examples);
   LR **2e-6**, **100** warmup steps, **linear decay to 2e-7**.
@@ -103,6 +107,12 @@ Each teacher's traces are generated once and reused across its student(s).
   forward params, FP32 reductions, `Gemma4TextDecoderLayer` wrap, 4096 padded-token
   chunk, max length 12288). Runs on `.venv` (FSDP2 stack).
 - **Precedent:** `e2b-base-to-e4b-topk128-lr2e6-linear-b128-2ep` used this exact schedule shape.
+- **Logging / artifacts:** W&B project `gemma4-bestckpt-distill-v2` (console + wandb), validation every 10
+  steps. No periodic local checkpoints (`SAVE_FREQ=0`): the trainer saves once at the final step, that save
+  holds only the HF export (`checkpoint.save_contents=["hf_model"]`, no FSDP/Adam shards), it is pushed to
+  `JWei05/Distill-gemma4-<teacher_spec>-to-<student>-base/step_001000/` and the local copy is deleted after
+  the upload succeeds (`HF_PUSH_DELETE_LOCAL=true`). Storage is HF-only: no S3 (`TRACE_S3_MIRROR_ENABLE=false`,
+  `DISTILL_S3_ENABLE=false`).
 
 ## 5. Open decisions / TODO
 

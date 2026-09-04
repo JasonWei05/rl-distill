@@ -11,10 +11,9 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import preflight_gemma4_topk_distill as source_preflight
 import pyarrow as pa
 import pyarrow.parquet as pq
-
-import preflight_gemma4_topk_distill as source_preflight
 from build_gemma4_distill_training_view import (
     SELECTION_SCHEMA_VERSION,
     VIEW_SCHEMA_VERSION,
@@ -130,6 +129,49 @@ def _verify_generation(index: Mapping[str, Any], expected_direction: str) -> dic
     return semantic
 
 
+def _verify_validation_run_config(root: Path, index: Mapping[str, Any], train_semantic: Mapping[str, Any]) -> str:
+    """Check the copied validation-split run config and return its generation identity SHA256.
+
+    A view whose validation rows come from the bundle's validation split carries a second generation
+    identity (the split and sample count differ), so it must be pinned in the index and share every
+    teacher/tokenizer/template/sampling field with the train generation.
+    """
+    source = index.get("source_trace")
+    if not isinstance(source, Mapping):
+        raise TrainingViewPreflightError("source_trace is missing")
+    expected_sha256 = source.get("validation_generation_config_sha256")
+    if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
+        raise TrainingViewPreflightError("source_trace.validation_generation_config_sha256 is missing")
+    config_path = _resolve(root, index.get("source_validation_run_config_path"), "source validation run config path")
+    if sha256_file(config_path) != source.get("validation_run_config_sha256"):
+        raise TrainingViewPreflightError("copied source validation run configuration SHA256 mismatch")
+    config = _load_json(config_path, "copied source validation run configuration")
+    semantic = config.get("semantic_config")
+    if (
+        not isinstance(semantic, Mapping)
+        or config.get("generation_config_sha256") != expected_sha256
+        or hash_json(semantic) != expected_sha256
+    ):
+        raise TrainingViewPreflightError("copied source validation run configuration has the wrong generation identity")
+    if semantic.get("split") != "validation":
+        raise TrainingViewPreflightError(
+            "copied source validation run configuration does not describe the validation split"
+        )
+    for key in (
+        "schema_version",
+        "topk_width",
+        "direction",
+        "global_seed",
+        "teacher",
+        "tokenizer",
+        "chat_template",
+        "sampling",
+    ):
+        if semantic.get(key) != train_semantic.get(key):
+            raise TrainingViewPreflightError(f"validation split generation differs from the train generation in {key}")
+    return expected_sha256
+
+
 def _verify_view_receipts(root: Path, index: Mapping[str, Any], index_sha256: str) -> None:
     source = index.get("source_trace")
     if not isinstance(source, Mapping):
@@ -174,6 +216,7 @@ def _verify_split(
     expected_generation_config_sha256: str,
     expected_direction: str,
     expected_global_seed: int,
+    expected_source_split: str = "train",
 ) -> tuple[list[str], int]:
     if split.get("complete") is not True:
         raise TrainingViewPreflightError(f"{split_name} split is not complete")
@@ -251,7 +294,7 @@ def _verify_split(
         ):
             if generation_config_sha256 != expected_generation_config_sha256:
                 raise TrainingViewPreflightError(f"{split_name} contains a mixed generation identity")
-            if direction != expected_direction or source_split != "train":
+            if direction != expected_direction or source_split != expected_source_split:
                 raise TrainingViewPreflightError(
                     f"{split_name} rewrote immutable direction/split provenance for UID {uid!r}"
                 )
@@ -266,7 +309,9 @@ def _verify_split(
                 )
             if int(global_seed) != expected_global_seed:
                 raise TrainingViewPreflightError(f"{split_name} changed global_seed for UID {uid!r}")
-            if int(sampling_seed) != derive_sampling_seed(expected_global_seed, "train", str(uid), sample_index):
+            if int(sampling_seed) != derive_sampling_seed(
+                expected_global_seed, expected_source_split, str(uid), sample_index
+            ):
                 raise TrainingViewPreflightError(f"{split_name} changed sampling_seed for UID {uid!r}")
             expected_trace_id = hash_json(
                 {
@@ -351,18 +396,35 @@ def run_preflight(
         raise TrainingViewPreflightError("selection manifest train/validation UIDs overlap")
     if len(train_uid_set) != expected_train_questions or len(validation_uid_set) != expected_validation_questions:
         raise TrainingViewPreflightError("selection question counts do not match the requested run")
-    if selection.get("train_question_count") != len(train_uid_set) or selection.get(
-        "validation_question_count"
-    ) != len(validation_uid_set):
+    if selection.get("train_question_count") != len(train_uid_set) or selection.get("validation_question_count") != len(
+        validation_uid_set
+    ):
         raise TrainingViewPreflightError("selection manifest count fields do not match its UID rosters")
+    validation_source_split = selection.get("validation_source_split", "train")
+    if validation_source_split not in ("train", "validation"):
+        raise TrainingViewPreflightError("selection manifest has an invalid validation_source_split")
+    if index["source_trace"].get("validation_split", "train") != validation_source_split:
+        raise TrainingViewPreflightError("view source_trace.validation_split disagrees with the selection manifest")
     source_question_count = selection.get("source_question_count")
     unused_question_count = selection.get("unused_question_count")
-    if (
-        not isinstance(source_question_count, int)
-        or not isinstance(unused_question_count, int)
-        or source_question_count != len(train_uid_set) + len(validation_uid_set) + unused_question_count
-    ):
+    if not isinstance(source_question_count, int) or not isinstance(unused_question_count, int):
         raise TrainingViewPreflightError("selection source/unused question counts are inconsistent")
+    if validation_source_split == "train":
+        if source_question_count != len(train_uid_set) + len(validation_uid_set) + unused_question_count:
+            raise TrainingViewPreflightError("selection source/unused question counts are inconsistent")
+        validation_generation_config_sha256 = None
+    else:
+        if source_question_count != len(train_uid_set) + unused_question_count:
+            raise TrainingViewPreflightError("selection source/unused question counts are inconsistent")
+        validation_source_count = selection.get("validation_source_question_count")
+        validation_unused = selection.get("validation_unused_question_count")
+        if (
+            not isinstance(validation_source_count, int)
+            or not isinstance(validation_unused, int)
+            or validation_source_count != len(validation_uid_set) + validation_unused
+        ):
+            raise TrainingViewPreflightError("selection validation-source/unused question counts are inconsistent")
+        validation_generation_config_sha256 = _verify_validation_run_config(root, index, semantic)
     if selection.get("train_samples_per_question") != expected_train_samples_per_question:
         raise TrainingViewPreflightError("selection train sample count does not match the requested run")
     if expected_validation_samples_per_question != 1 or selection.get("validation_samples_per_question") != 1:
@@ -391,9 +453,10 @@ def run_preflight(
         split=splits["validation"],
         expected_uids=validation_uid_set,
         expected_sample_indices={validation_sample_index},
-        expected_generation_config_sha256=generation_config_sha256,
+        expected_generation_config_sha256=validation_generation_config_sha256 or generation_config_sha256,
         expected_direction=expected_direction,
         expected_global_seed=global_seed,
+        expected_source_split=validation_source_split,
     )
     expected_rows = expected_train_questions * expected_train_samples_per_question + expected_validation_questions
     if index.get("total_rows") != expected_rows:

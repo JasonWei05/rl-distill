@@ -22,7 +22,6 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
-
 from gemma4_distill_trace_schema import (
     SCHEMA_VERSION,
     TOPK_WIDTH,
@@ -75,11 +74,25 @@ def _relative(path: Path, root: Path) -> str:
         raise TrainingViewError(f"path escapes output root {root}: {path}") from error
 
 
-def _source_parquet(source_root: Path) -> Path:
+VALIDATION_SOURCES = ("train", "validation")
+
+
+def _source_parquet(source_root: Path, split: str = "train") -> Path:
+    """Return the prepared roster parquet for ``split``.
+
+    Collection bundles keep the RL data-prep outputs under ``source/``: one ``*_train.parquet`` and
+    one ``*_val*.parquet``.  A lone parquet (older canaries) is accepted for either split.
+    """
     candidates = sorted((source_root / "source").glob("*.parquet"))
-    if len(candidates) != 1:
-        raise TrainingViewError(f"expected exactly one source roster parquet, found {candidates}")
-    return candidates[0]
+    if len(candidates) == 1:
+        return candidates[0]
+    if split == "train":
+        matches = [path for path in candidates if path.stem.endswith("_train")]
+    else:
+        matches = [path for path in candidates if "_val" in path.stem]
+    if len(matches) != 1:
+        raise TrainingViewError(f"expected exactly one {split} roster parquet under source/, found {matches}")
+    return matches[0]
 
 
 def _resolve_source_path(source_root: Path, relative: Any, description: str) -> Path:
@@ -102,6 +115,7 @@ def _validated_source_shards(
     *,
     expected_questions: int,
     expected_samples_per_question: int,
+    roster_split: str = "train",
 ) -> tuple[list[Path], list[str]]:
     """Verify the source shard roster and return traced UIDs in source-roster order.
 
@@ -114,12 +128,10 @@ def _validated_source_shards(
     product.
     """
 
-    roster_table = pq.read_table(_source_parquet(source_root), columns=["uid"])
+    roster_table = pq.read_table(_source_parquet(source_root, roster_split), columns=["uid"])
     roster_uids = roster_table.column("uid").to_pylist()
     if len(set(roster_uids)) != len(roster_uids):
-        raise TrainingViewError(
-            f"source roster repeats UIDs: rows={len(roster_uids)} unique={len(set(roster_uids))}"
-        )
+        raise TrainingViewError(f"source roster repeats UIDs: rows={len(roster_uids)} unique={len(set(roster_uids))}")
     if not all(isinstance(uid, str) and uid for uid in roster_uids):
         raise TrainingViewError("source roster contains an empty or non-string UID")
 
@@ -191,17 +203,48 @@ def build_selection(
     validation_questions: int,
     train_samples_per_question: int,
     validation_sample_index: int,
+    validation_source_uids: Sequence[str] | None = None,
 ) -> dict[str, Any]:
+    """Deterministically select train/validation questions.
+
+    ``validation_source_uids=None`` (validation source ``train``) carves the validation questions
+    out of the train roster.  Otherwise (validation source ``validation``) every requested train
+    question comes from the train roster and the validation questions are a deterministic subset
+    of the bundle's own validation split, so the two never compete for the same questions.
+    """
     if train_questions <= 0 or validation_questions <= 0:
         raise TrainingViewError("train and validation question counts must be positive")
-    if train_questions + validation_questions > len(source_uids):
-        raise TrainingViewError("requested train plus validation questions exceed the source roster")
     if train_samples_per_question <= 0 or validation_sample_index < 0:
         raise TrainingViewError("sample counts and indices are invalid")
     permutation = np.random.RandomState(seed).permutation(len(source_uids)).tolist()
-    train_indices = permutation[:train_questions]
-    validation_indices = permutation[train_questions : train_questions + validation_questions]
-    unused_indices = permutation[train_questions + validation_questions :]
+    if validation_source_uids is None:
+        if train_questions + validation_questions > len(source_uids):
+            raise TrainingViewError("requested train plus validation questions exceed the source roster")
+        train_indices = permutation[:train_questions]
+        validation_indices = permutation[train_questions : train_questions + validation_questions]
+        unused_indices = permutation[train_questions + validation_questions :]
+        validation_uids = [source_uids[index] for index in validation_indices]
+        validation_extra: dict[str, Any] = {"validation_source_split": "train"}
+    else:
+        if train_questions > len(source_uids):
+            raise TrainingViewError("requested train questions exceed the source roster")
+        if validation_questions > len(validation_source_uids):
+            raise TrainingViewError("requested validation questions exceed the validation roster")
+        train_indices = permutation[:train_questions]
+        unused_indices = permutation[train_questions:]
+        validation_permutation = np.random.RandomState(seed).permutation(len(validation_source_uids)).tolist()
+        validation_indices = validation_permutation[:validation_questions]
+        validation_unused = validation_permutation[validation_questions:]
+        validation_uids = [validation_source_uids[index] for index in validation_indices]
+        validation_extra = {
+            "validation_source_split": "validation",
+            "validation_source_question_count": len(validation_source_uids),
+            "validation_source_roster_sha256": hash_json(list(validation_source_uids)),
+            "validation_unused_question_count": len(validation_unused),
+            "validation_unused_source_uids_sha256": hash_json(
+                [validation_source_uids[index] for index in validation_unused]
+            ),
+        }
     manifest: dict[str, Any] = {
         "schema_version": SELECTION_SCHEMA_VERSION,
         "selection_algorithm": "numpy-randomstate-permutation-v1",
@@ -215,8 +258,9 @@ def build_selection(
         "validation_samples_per_question": 1,
         "validation_sample_index": validation_sample_index,
         "train_source_uids": [source_uids[index] for index in train_indices],
-        "validation_source_uids": [source_uids[index] for index in validation_indices],
+        "validation_source_uids": validation_uids,
         "unused_source_uids_sha256": hash_json([source_uids[index] for index in unused_indices]),
+        **validation_extra,
     }
     manifest["selection_sha256"] = hash_json(manifest)
     return manifest
@@ -336,7 +380,10 @@ def build_training_view(
     expected_source_samples_per_question: int,
     rows_per_shard: int,
     row_group_rows: int,
+    validation_source: str = "train",
 ) -> dict[str, Any]:
+    if validation_source not in VALIDATION_SOURCES:
+        raise TrainingViewError(f"validation_source must be one of {VALIDATION_SOURCES}, got {validation_source!r}")
     source_root = source_root.resolve()
     output_root = output_root.resolve()
     index_path = source_root / "dataset_index.json"
@@ -349,8 +396,13 @@ def build_training_view(
     if source_complete.get("dataset_index_sha256") != source_index_sha256:
         raise TrainingViewError("source completion receipt does not bind the dataset index")
     splits = source_index.get("splits")
-    if not isinstance(splits, Mapping) or set(splits) != {"train"}:
-        raise TrainingViewError("source dataset must contain exactly one complete train split")
+    required_splits = {"train", "validation"} if validation_source == "validation" else {"train"}
+    if (
+        not isinstance(splits, Mapping)
+        or not required_splits.issubset(splits)
+        or not set(splits).issubset({"train", "validation"})
+    ):
+        raise TrainingViewError(f"source dataset must contain the {sorted(required_splits)} split(s)")
     source_split = splits["train"]
     source_questions = int(source_split.get("question_count", -1))
     source_rows = int(source_split.get("row_count", -1))
@@ -379,6 +431,49 @@ def build_training_view(
         expected_questions=source_questions,
         expected_samples_per_question=expected_source_samples_per_question,
     )
+    validation_shards: list[Path] = source_shards
+    validation_roster: list[str] | None = None
+    validation_run_config: dict[str, Any] | None = None
+    validation_run_config_path: Path | None = None
+    if validation_source == "validation":
+        validation_split = splits["validation"]
+        validation_questions_available = int(validation_split.get("question_count", -1))
+        validation_rows = int(validation_split.get("row_count", -1))
+        if validation_questions_available <= 0 or validation_rows != validation_questions_available:
+            raise TrainingViewError(
+                "source validation split must hold exactly one trace per question: "
+                f"questions={validation_questions_available} rows={validation_rows}"
+            )
+        validation_run_config_path = source_root / str(validation_split["run_config_path"])
+        validation_run_config = _load_json(validation_run_config_path, "source validation run config")
+        validation_semantic = validation_run_config.get("semantic_config")
+        if not isinstance(validation_semantic, dict) or hash_json(validation_semantic) != validation_run_config.get(
+            "generation_config_sha256"
+        ):
+            raise TrainingViewError("source validation run configuration is malformed or has a bad semantic hash")
+        if validation_semantic.get("split") != "validation":
+            raise TrainingViewError("source validation run configuration does not describe the validation split")
+        for key in (
+            "schema_version",
+            "topk_width",
+            "direction",
+            "global_seed",
+            "teacher",
+            "tokenizer",
+            "chat_template",
+            "sampling",
+        ):
+            if validation_semantic.get(key) != semantic.get(key):
+                raise TrainingViewError(f"source validation split was generated under a different {key}")
+        validation_shards, validation_roster = _validated_source_shards(
+            source_root,
+            validation_split,
+            expected_questions=validation_questions_available,
+            expected_samples_per_question=1,
+            roster_split="validation",
+        )
+        if validation_sample_index != 0:
+            raise TrainingViewError("the validation split holds sample index 0 only")
     selection = build_selection(
         source_uids,
         seed=seed,
@@ -386,6 +481,7 @@ def build_training_view(
         validation_questions=validation_questions,
         train_samples_per_question=train_samples_per_question,
         validation_sample_index=validation_sample_index,
+        validation_source_uids=validation_roster,
     )
     train_uids = set(selection["train_source_uids"])
     validation_uids = set(selection["validation_source_uids"])
@@ -397,6 +493,10 @@ def build_training_view(
     atomic_write_json(selection_path, selection)
     copied_run_config_path = output_root / "source_run_config.json"
     atomic_write_json(copied_run_config_path, run_config)
+    copied_validation_run_config_path: Path | None = None
+    if validation_run_config is not None:
+        copied_validation_run_config_path = output_root / "source_validation_run_config.json"
+        atomic_write_json(copied_validation_run_config_path, validation_run_config)
     mirror = TraceS3Mirror(output_s3_uri) if output_s3_uri else None
     train_writer = _SplitWriter("train", output_root, rows_per_shard, row_group_rows, mirror)
     validation_writer = _SplitWriter("validation", output_root, rows_per_shard, row_group_rows, mirror)
@@ -404,19 +504,31 @@ def build_training_view(
     validation_uid_values = pa.array(sorted(validation_uids), type=pa.string())
     seen_train: dict[str, set[int]] = {}
     seen_validation: dict[str, set[int]] = {}
+
+    def _record(filtered: pa.Table, seen: dict[str, set[int]]) -> None:
+        columns = filtered.select(["source_uid", "sample_index"]).to_pydict()
+        for uid, sample_index in zip(columns["source_uid"], columns["sample_index"], strict=True):
+            samples = seen.setdefault(str(uid), set())
+            if int(sample_index) in samples:
+                raise TrainingViewError(f"duplicate selected trace for UID {uid} sample {sample_index}")
+            samples.add(int(sample_index))
+
+    same_shards = validation_source == "train"
     for source_path in source_shards:
         table = pq.read_table(source_path)
         train_table = _filter_rows(table, train_uid_values, set(range(train_samples_per_question)))
-        validation_table = _filter_rows(table, validation_uid_values, {validation_sample_index})
-        for filtered, seen in ((train_table, seen_train), (validation_table, seen_validation)):
-            columns = filtered.select(["source_uid", "sample_index"]).to_pydict()
-            for uid, sample_index in zip(columns["source_uid"], columns["sample_index"], strict=True):
-                samples = seen.setdefault(str(uid), set())
-                if int(sample_index) in samples:
-                    raise TrainingViewError(f"duplicate selected trace for UID {uid} sample {sample_index}")
-                samples.add(int(sample_index))
+        _record(train_table, seen_train)
         train_writer.append(train_table)
-        validation_writer.append(validation_table)
+        if same_shards:
+            validation_table = _filter_rows(table, validation_uid_values, {validation_sample_index})
+            _record(validation_table, seen_validation)
+            validation_writer.append(validation_table)
+    if not same_shards:
+        for source_path in validation_shards:
+            table = pq.read_table(source_path)
+            validation_table = _filter_rows(table, validation_uid_values, {validation_sample_index})
+            _record(validation_table, seen_validation)
+            validation_writer.append(validation_table)
 
     train_writer.finish()
     validation_writer.finish()
@@ -441,6 +553,15 @@ def build_training_view(
             "generation_config_sha256": run_config["generation_config_sha256"],
             "run_config_sha256": sha256_file(copied_run_config_path),
             "trace_spec": source_complete.get("trace_spec"),
+            "validation_split": validation_source,
+            **(
+                {
+                    "validation_generation_config_sha256": validation_run_config["generation_config_sha256"],
+                    "validation_run_config_sha256": sha256_file(copied_validation_run_config_path),
+                }
+                if validation_run_config is not None and copied_validation_run_config_path is not None
+                else {}
+            ),
         },
         "generation_semantic_config": semantic,
         "direction": semantic["direction"],
@@ -452,6 +573,11 @@ def build_training_view(
         "selection_manifest_path": selection_path.name,
         "selection_manifest_sha256": sha256_file(selection_path),
         "source_run_config_path": copied_run_config_path.name,
+        **(
+            {"source_validation_run_config_path": copied_validation_run_config_path.name}
+            if copied_validation_run_config_path is not None
+            else {}
+        ),
         "samples_per_question": {"train": train_samples_per_question, "validation": 1},
         "total_rows": train_writer.row_count + validation_writer.row_count,
         "total_response_tokens": train_writer.response_token_count + validation_writer.response_token_count,
@@ -498,6 +624,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--validation-questions", type=int, default=DEFAULT_VALIDATION_QUESTIONS)
     parser.add_argument("--train-samples-per-question", type=int, default=DEFAULT_TRAIN_SAMPLES)
     parser.add_argument("--validation-sample-index", type=int, default=DEFAULT_VALIDATION_SAMPLE_INDEX)
+    parser.add_argument(
+        "--validation-source",
+        choices=VALIDATION_SOURCES,
+        default="train",
+        help="train: carve validation questions out of the train roster (default); "
+        "validation: use the bundle's own validation split (1 trace per question) and train on every train question.",
+    )
     parser.add_argument("--expected-source-questions", type=int, default=10_000)
     parser.add_argument("--expected-source-samples-per-question", type=int, default=8)
     parser.add_argument("--rows-per-shard", type=int, default=64)
@@ -522,6 +655,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             expected_source_samples_per_question=args.expected_source_samples_per_question,
             rows_per_shard=args.rows_per_shard,
             row_group_rows=args.row_group_rows,
+            validation_source=args.validation_source,
         )
     except (OSError, TrainingViewError, ValueError, pa.ArrowException) as error:
         print(f"ERROR: {error}", file=sys.stderr)

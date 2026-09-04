@@ -618,10 +618,10 @@ COMMON_OVERRIDES=(
     trainer.hf_push.enable="${HF_PUSH_ENABLE}"
     trainer.hf_push.repo_id="${HF_PUSH_REPO:-unused}"
     trainer.hf_push.private="${HF_PUSH_PRIVATE}"
-    trainer.hf_push.delete_local_after=false
+    trainer.hf_push.delete_local_after="${HF_PUSH_DELETE_LOCAL:-false}"
     trainer.remote_checkpoint.enable="${REMOTE_CHECKPOINT_ENABLE}"
     trainer.remote_checkpoint.s3_uri="${REMOTE_CHECKPOINT_S3_URI}"
-    'checkpoint.save_contents=["model","optimizer","extra","hf_model"]'
+    "checkpoint.save_contents=${CHECKPOINT_SAVE_CONTENTS:-[\"model\",\"optimizer\",\"extra\",\"hf_model\"]}"
     'checkpoint.load_contents=["model","optimizer","extra"]'
 )
 

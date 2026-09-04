@@ -40,11 +40,14 @@ SOURCE_ROOT="${SOURCE_ROOT:-/tmp/gemma4_distill_sources/${TEACHER_SPEC}}"
 VIEW_ROOT="${VIEW_ROOT:-/tmp/gemma4_distill_views/${TEACHER_SPEC}}"
 STUDENTS_ROOT="${STUDENTS_ROOT:-/tmp/gemma4_distill_students}"
 
-# Band trace bundles: 3000 train questions x 8 samples (+300 val x1, used for eval, not here).
-# The view carves its own held-out validation questions out of the train set.
+# Band trace bundles: 3000 train questions x 8 samples + 300 validation questions x 1 sample.
+# Default view: train on ALL 3000 x 8 = 24,000 rows; validate every TEST_FREQ steps on 128 of the
+# teacher's own validation-split generations (VALIDATION_SOURCE=validation). VALIDATION_SOURCE=train
+# restores the old behavior of carving validation questions out of the train roster.
 SOURCE_QUESTIONS="${SOURCE_QUESTIONS:-3000}"
-TRAIN_QUESTIONS="${TRAIN_QUESTIONS:-2900}"
-VALIDATION_QUESTIONS="${VALIDATION_QUESTIONS:-100}"
+VALIDATION_SOURCE="${VALIDATION_SOURCE:-validation}"
+TRAIN_QUESTIONS="${TRAIN_QUESTIONS:-3000}"
+VALIDATION_QUESTIONS="${VALIDATION_QUESTIONS:-128}"
 TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}"
 VALIDATION_SAMPLE_INDEX="${VALIDATION_SAMPLE_INDEX:-0}"
 VIEW_SEED="${VIEW_SEED:-42}"
@@ -105,6 +108,7 @@ else
     --validation-questions "${VALIDATION_QUESTIONS}" \
     --train-samples-per-question "${TRAIN_SAMPLES_PER_QUESTION}" \
     --validation-sample-index "${VALIDATION_SAMPLE_INDEX}" \
+    --validation-source "${VALIDATION_SOURCE}" \
     --expected-source-questions "${SOURCE_QUESTIONS}" \
     --expected-source-samples-per-question "${TRAIN_SAMPLES_PER_QUESTION}"
 fi
@@ -165,6 +169,18 @@ export LR_SCHEDULER_TYPE="${LR_SCHEDULER_TYPE:-linear}"
 export MIN_LR_RATIO="${MIN_LR_RATIO:-0.1}"   # 2e-6 * 0.1 = 2e-7 final LR
 export PROJECT_NAME="${PROJECT_NAME:-gemma4-bestckpt-distill-v2}"
 export EXP_NAME="${EXP_NAME:-${TEACHER_SPEC}-to-${STUDENT}-base-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}}"
+# Logging: console + wandb (project PROJECT_NAME); validation KL on the held-out rows every TEST_FREQ steps.
+export TRAIN_LOGGER="${TRAIN_LOGGER:-[\"console\",\"wandb\"]}"
+export TEST_FREQ="${TEST_FREQ:-10}"
+# Checkpoints: no periodic local saves (SAVE_FREQ=0 -> the trainer saves only at the final step), the
+# final save contains just the HF export (no FSDP/Adam shards), it is pushed to the Hub as
+# <HF_PUSH_REPO>/step_<N>/ and the local copy is deleted after a successful upload.
+export SAVE_FREQ="${SAVE_FREQ:-0}"
+export CHECKPOINT_SAVE_CONTENTS="${CHECKPOINT_SAVE_CONTENTS:-[\"hf_model\"]}"
+export HF_PUSH_ENABLE="${HF_PUSH_ENABLE:-true}"
+export HF_PUSH_REPO="${HF_PUSH_REPO:-JWei05/Distill-gemma4-${TEACHER_SPEC}-to-${STUDENT}-base}"
+export HF_PUSH_PRIVATE="${HF_PUSH_PRIVATE:-false}"
+export HF_PUSH_DELETE_LOCAL="${HF_PUSH_DELETE_LOCAL:-true}"
 export PYTHON_BIN="${PY}"
 echo "DISTILL_ONE launch exp=${EXP_NAME} bs=${TRAIN_BATCH_SIZE} steps=${TOTAL_TRAINING_STEPS} epochs_cap=${TOTAL_EPOCHS} lr=${LR} warmup=${LR_WARMUP_STEPS} ${LR_SCHEDULER_TYPE}->min_ratio ${MIN_LR_RATIO}"
 exec bash rl-distill-scripts/gemma4_topk_distill_fsdp2.sh
