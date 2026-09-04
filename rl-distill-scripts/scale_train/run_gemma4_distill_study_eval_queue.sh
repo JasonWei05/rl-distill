@@ -165,7 +165,7 @@ while true; do
     [[ -n ${LAUNCHED[$tag]:-} ]] && continue
     if is_complete "${tag}"; then
       LAUNCHED[$tag]=1; TAG_STATUS[$tag]=0; echo "EVAL_QUEUE skip model=${tag} (already complete)"
-      [[ -n ${WAITED_EXTERNAL[$tag]:-} ]] && newly_complete=1   # finished outside this queue -> still fold into the doc
+      [[ -n ${WAITED_EXTERNAL[$tag]:-} || $poll -eq 0 ]] && newly_complete=1   # finished outside this queue (or before it started) -> fold into the doc
       continue
     fi
     if [[ " ${EXTERNAL[*]} " == *" ${tag} "* ]]; then

@@ -307,5 +307,53 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_No completed evaluations yet. Smoke test (`rl_e2b_easy`, `id_easy` only) in progress._
+_Updated 2026-09-04 17:21Z — math complete for 2/19 models, OOD complete for 0/19. Partial rows are shown as they finish._
+
+**Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
+
+| Model | Category | Trained on | id_easy (16) | id_medium (16) | id_hard (16) | MATH500 (16) | GSM8K (8) |
+|---|---|---|---|---|---|---|---|
+| `base_e2b` | base | — | — | — | — | — | — |
+| `base_e4b` | base | — | — | — | — | — | — |
+| `rl_e2b_easy` | rl | easy | — | — | — | — | — |
+| `rl_e2b_hard` | rl | hard | — | — | — | — | — |
+| `rl_e2b_medium` | rl | medium | 34.6 / 54.3 | **22.1 / 43.0** | 16.0 / 38.7 | 15.9 / 33.2 | 19.6 / 45.9 |
+| `rl_e4b_easy` | rl | easy | — | — | — | — | — |
+| `rl_e4b_hard` | rl | hard | 39.9 / 79.3 | 20.0 / 56.7 | **15.4 / 47.7** | 16.7 / 48.0 | 43.0 / 77.4 |
+| `rl_e4b_medium` | rl | medium | — | — | — | — | — |
+| `distill_12b_easy_to_e2b` | distilled | easy | — | — | — | — | — |
+| `distill_26b_easy_to_e2b` | distilled | easy | — | — | — | — | — |
+| `distill_e2b_easy_to_e2b` | distilled | easy | — | — | — | — | — |
+| `distill_26b_hard_to_e2b` | distilled | hard | — | — | — | — | — |
+| `distill_e2b_hard_to_e2b` | distilled | hard | — | — | — | — | — |
+| `distill_26b_medium_to_e2b` | distilled | medium | — | — | — | — | — |
+| `distill_e2b_medium_to_e2b` | distilled | medium | — | — | — | — | — |
+| `distill_12b_easy_to_e4b` | distilled | easy | — | — | — | — | — |
+| `distill_12b_hard_to_e4b` | distilled | hard | — | — | — | — | — |
+| `distill_26b_hard_to_e4b` | distilled | hard | — | — | — | — | — |
+| `distill_12b_medium_to_e4b` | distilled | medium | — | — | — | — | — |
+
+**Out-of-domain** — accuracy (%), lm-eval-harness 5-shot CoT (different scorer; not comparable to the math family).
+
+| Model | MMLU-Pro | GPQA-Diamond | MMLU-14k |
+|---|---|---|---|
+| `base_e2b` | — | — | — |
+| `base_e4b` | — | — | — |
+| `rl_e2b_easy` | — | — | — |
+| `rl_e2b_hard` | — | — | — |
+| `rl_e2b_medium` | — | — | — |
+| `rl_e4b_easy` | — | — | — |
+| `rl_e4b_hard` | — | — | — |
+| `rl_e4b_medium` | — | — | — |
+| `distill_12b_easy_to_e2b` | — | — | — |
+| `distill_26b_easy_to_e2b` | — | — | — |
+| `distill_e2b_easy_to_e2b` | — | — | — |
+| `distill_26b_hard_to_e2b` | — | — | — |
+| `distill_e2b_hard_to_e2b` | — | — | — |
+| `distill_26b_medium_to_e2b` | — | — | — |
+| `distill_e2b_medium_to_e2b` | — | — | — |
+| `distill_12b_easy_to_e4b` | — | — | — |
+| `distill_12b_hard_to_e4b` | — | — | — |
+| `distill_26b_hard_to_e4b` | — | — | — |
+| `distill_12b_medium_to_e4b` | — | — | — |
 <!-- results:end -->
