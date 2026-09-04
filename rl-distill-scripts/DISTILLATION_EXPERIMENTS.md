@@ -307,7 +307,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-04 17:31Z — math complete for 5/19 models, OOD complete for 0/19. Partial rows are shown as they finish._
+_Updated 2026-09-04 17:39Z — math complete for 6/20 models, OOD complete for 0/20. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -320,7 +320,7 @@ _Updated 2026-09-04 17:31Z — math complete for 5/19 models, OOD complete for 0
 | `rl_e2b_medium` | rl | medium | 34.6 / 54.3 | **22.1 / 43.0** | 16.0 / 38.7 | 15.9 / 33.2 | 19.6 / 45.9 |
 | `rl_e4b_easy` | rl | easy | **69.9 / 95.3** | 32.8 / 77.3 | 19.2 / 56.0 | 31.5 / 63.6 | 69.5 / 88.9 |
 | `rl_e4b_hard` | rl | hard | 39.9 / 79.3 | 20.0 / 56.7 | **15.4 / 47.7** | 16.7 / 48.0 | 43.0 / 77.4 |
-| `rl_e4b_medium` | rl | medium | — | — | — | — | — |
+| `rl_e4b_medium` | rl | medium | 62.2 / 94.3 | **29.1 / 71.3** | 17.2 / 58.3 | 26.5 / 61.6 | 65.4 / 88.9 |
 | `distill_12b_easy_to_e2b` | distilled | easy | — | — | — | — | — |
 | `distill_26b_easy_to_e2b` | distilled | easy | — | — | — | — | — |
 | `distill_e2b_easy_to_e2b` | distilled | easy | — | — | — | — | — |
@@ -329,6 +329,7 @@ _Updated 2026-09-04 17:31Z — math complete for 5/19 models, OOD complete for 0
 | `distill_26b_medium_to_e2b` | distilled | medium | — | — | — | — | — |
 | `distill_e2b_medium_to_e2b` | distilled | medium | — | — | — | — | — |
 | `distill_12b_easy_to_e4b` | distilled | easy | — | — | — | — | — |
+| `distill_e4b_easy_to_e4b` | distilled | easy | — | — | — | — | — |
 | `distill_12b_hard_to_e4b` | distilled | hard | — | — | — | — | — |
 | `distill_26b_hard_to_e4b` | distilled | hard | — | — | — | — | — |
 | `distill_12b_medium_to_e4b` | distilled | medium | — | — | — | — | — |
@@ -353,6 +354,7 @@ _Updated 2026-09-04 17:31Z — math complete for 5/19 models, OOD complete for 0
 | `distill_26b_medium_to_e2b` | — | — | — |
 | `distill_e2b_medium_to_e2b` | — | — | — |
 | `distill_12b_easy_to_e4b` | — | — | — |
+| `distill_e4b_easy_to_e4b` | — | — | — |
 | `distill_12b_hard_to_e4b` | — | — | — |
 | `distill_26b_hard_to_e4b` | — | — | — |
 | `distill_12b_medium_to_e4b` | — | — | — |

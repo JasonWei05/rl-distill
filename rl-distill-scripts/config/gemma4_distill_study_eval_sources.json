@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "protocol": "gemma4_rl_distill_eval_sources_v1",
-  "created_at_utc": "2026-09-04T17:23:14.725736+00:00",
+  "created_at_utc": "2026-09-04T17:34:19.569443+00:00",
   "study": "gemma4-distill-study",
   "models": [
     {
@@ -411,6 +411,28 @@
         "type": "hf_subfolder",
         "repo_id": "JWei05/gemma4-distill-v2-12b-medium-to-e4b-base",
         "revision": "b015fe8827dbe11a58225f961340b615dbf1fdc8",
+        "subfolder": "step_000500",
+        "metadata_repo": "google/gemma-4-E4B",
+        "metadata_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_e4b_easy_to_e4b",
+      "display_name": "Distilled E4B base <- e4b RL easy teacher (step_000500)",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "easy",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "hf_subfolder",
+        "repo_id": "JWei05/gemma4-distill-v2-e4b-easy-to-e4b-base",
+        "revision": "d9119f5119d898c5f660a5fb2ac473e1aee1d22a",
         "subfolder": "step_000500",
         "metadata_repo": "google/gemma-4-E4B",
         "metadata_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
