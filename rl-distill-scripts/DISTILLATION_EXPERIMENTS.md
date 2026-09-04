@@ -229,7 +229,7 @@ requests per vLLM call (every request carries its own deterministic seed, so the
 depend on batching); `EVAL_PREDICTIVE_TOPK_WIDTH=0` requests **no per-token logprobs** (the
 predictive-entropy diagnostics are recorded as null; with top-128 logprobs each eval was CPU-bound in
 vLLM's Python output processing at ~5 req/s); `EVAL_KV_CACHE_GIB=16` fixes each vLLM instance's KV
-budget so two models can share an 80 GB H100; `EVAL_GPU_MEMORY_UTILIZATION=0.45`.
+budget so two models can share an 80 GB H100; `EVAL_GPU_MEMORY_UTILIZATION=0.40` (only gates vLLM's startup free-memory check; the KV budget is fixed).
 
 ```bash
 # Local GPU-pool queue (the way the study is evaluated): 2 models per 80 GB H100 (EVAL_QUEUE_SLOTS_PER_GPU),

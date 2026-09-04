@@ -12,6 +12,8 @@
 # "No available memory for the cache blocks". Budget per slot: E4B 15.5 GiB weights + ~4 GiB
 # activations/graphs + 16 GiB KV ~ 36 GiB, x2 = 72 GiB of 80. Launches are staggered
 # (EVAL_QUEUE_LAUNCH_STAGGER seconds) to keep CUDA init and model downloads from piling up.
+# gpu_memory_utilization only gates vLLM's startup free-memory check here (the KV budget is fixed); 0.80/slots
+# leaves headroom for a co-located instance's profiling peak (0.45 tripped it: 34.2 GiB free < 35.75 required).
 #
 #   EVAL_QUEUE_GPUS=4,5,6,7 bash rl-distill-scripts/scale_train/run_gemma4_distill_study_eval_queue.sh
 #
@@ -64,7 +66,7 @@ export MATH_RESUME_TRACES="${MATH_RESUME_TRACES:-1}"   # finished dataset traces
 export EVAL_PHASES="${EVAL_PHASES:-math,ood}"   # "math" here + "ood" on another machine splits the suite
 export EVAL_PREDICTIVE_TOPK_WIDTH="${EVAL_PREDICTIVE_TOPK_WIDTH:-0}"   # 0 = no logprobs (set 128 to restore the entropy diagnostics)
 LAUNCH_STAGGER="${EVAL_QUEUE_LAUNCH_STAGGER:-20}"
-export EVAL_GPU_MEMORY_UTILIZATION="${EVAL_GPU_MEMORY_UTILIZATION:-$(awk -v s="${SLOTS_PER_GPU}" 'BEGIN{printf "%.2f", int(90/s)/100}')}"
+export EVAL_GPU_MEMORY_UTILIZATION="${EVAL_GPU_MEMORY_UTILIZATION:-$(awk -v s="${SLOTS_PER_GPU}" 'BEGIN{printf "%.2f", int(80/s)/100}')}"
 EXT_GPUS=()
 
 # --- shared assets, once -----------------------------------------------------------------------

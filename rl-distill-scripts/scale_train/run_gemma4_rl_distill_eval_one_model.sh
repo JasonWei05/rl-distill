@@ -35,8 +35,8 @@ case ",${EVAL_PHASES}," in *,math,*|*,ood,*) ;; *) echo "FATAL: EVAL_PHASES must
 run_phase() { [[ ",${EVAL_PHASES}," == *",$1,"* ]]; }
 
 case "${GPU_COUNT}" in
-  1|2) ;;
-  *) echo "FATAL: GPU_COUNT must be 1 or 2" >&2; exit 2 ;;
+  1|2|3|4|5) ;;
+  *) echo "FATAL: GPU_COUNT must be 1..5" >&2; exit 2 ;;
 esac
 
 if [[ -n "${PACKED_PHYSICAL_GPU_IDS:-}" ]]; then
