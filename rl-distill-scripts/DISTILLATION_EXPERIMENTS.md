@@ -307,7 +307,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-04 17:43Z — math complete for 8/20 models, OOD complete for 0/20. Partial rows are shown as they finish._
+_Updated 2026-09-04 17:48Z — math complete for 9/20 models, OOD complete for 0/20. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -323,7 +323,7 @@ _Updated 2026-09-04 17:43Z — math complete for 8/20 models, OOD complete for 0
 | `rl_e4b_medium` | rl | medium | 62.2 / 94.3 | **29.1 / 71.3** | 17.2 / 58.3 | 26.5 / 61.6 | 65.4 / 88.9 |
 | `distill_12b_easy_to_e2b` | distilled | easy | — | — | — | — | — |
 | `distill_26b_easy_to_e2b` | distilled | easy | **40.7 / 84.3** | 13.4 / 61.3 | 6.4 / 36.3 | 15.5 / 46.2 | 31.4 / 66.3 |
-| `distill_e2b_easy_to_e2b` | distilled | easy | — | — | — | — | — |
+| `distill_e2b_easy_to_e2b` | distilled | easy | **38.9 / 79.3** | 16.9 / 59.7 | 7.7 / 40.0 | 15.9 / 47.2 | 32.4 / 65.1 |
 | `distill_26b_hard_to_e2b` | distilled | hard | — | — | — | — | — |
 | `distill_e2b_hard_to_e2b` | distilled | hard | 19.6 / 47.7 | 15.7 / 39.3 | **13.1 / 31.0** | 10.0 / 28.0 | 8.4 / 25.7 |
 | `distill_26b_medium_to_e2b` | distilled | medium | — | — | — | — | — |
