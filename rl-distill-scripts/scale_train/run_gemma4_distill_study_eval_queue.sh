@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # GPU-pool queue for the distillation-study evaluation suite: every GPU is split into
-# EVAL_QUEUE_SLOTS_PER_GPU slots (default 4), one model per slot; the model runs its whole suite
-# (math: 3 bands + MATH500 + GSM8K, then OOD: MMLU-Pro / GPQA-Diamond / MMLU-14k) via
+# EVAL_QUEUE_SLOTS_PER_GPU slots (default 2 on 80 GB H100s), one model per slot; the model runs its
+# whole suite (math: 3 bands + MATH500 + GSM8K, then OOD: MMLU-Pro / GPQA-Diamond / MMLU-14k) via
 # run_gemma4_rl_distill_eval_one_model.sh, and the next model starts the moment a slot frees up.
-# Several models share a GPU because the math eval is CPU-bound on vLLM's per-token top-128 logprob
-# processing (~2 cores and a few % of a B200 per model); each vLLM instance gets 0.85/slots of GPU memory.
+# Models share a GPU because the math eval is CPU-bound on vLLM's per-token top-128 logprob
+# processing (~2 cores and little GPU per model). Each vLLM instance gets a FIXED KV-cache budget
+# (EVAL_KV_CACHE_GIB, default 16) instead of profiling-based sizing: vLLM's profiler measures
+# device-wide memory, so concurrent startups on one GPU otherwise mis-count each other and die with
+# "No available memory for the cache blocks". Budget per slot: E4B 15.5 GiB weights + ~4 GiB
+# activations/graphs + 16 GiB KV ~ 36 GiB, x2 = 72 GiB of 80. Launches are staggered
+# (EVAL_QUEUE_LAUNCH_STAGGER seconds) to keep CUDA init and model downloads from piling up.
 #
 #   EVAL_QUEUE_GPUS=4,5,6,7 bash rl-distill-scripts/scale_train/run_gemma4_distill_study_eval_queue.sh
 #
@@ -33,7 +38,9 @@ REGISTRY="${SOURCE_REGISTRY:-rl-distill-scripts/config/gemma4_distill_study_eval
 STUDY_ROOT="${STUDY_ROOT:-/tmp/gemma4_distill_study_eval}"
 export SHARED_DATA_ROOT="${SHARED_DATA_ROOT:-${STUDY_ROOT}/data}"
 export SHARED_MMMLU_ROOT="${SHARED_MMMLU_ROOT:-${STUDY_ROOT}/mmmlu14k_tasks}"
-export RESULT_ROOT_OVERRIDE="${RESULT_ROOT_OVERRIDE:-${STUDY_ROOT}/results}"
+# Each model gets its own results root (<RESULTS_BASE>/<tag>/{<tag>/math,<tag>/ood,RUN_COMPLETE.json}): the
+# runners write plan/state files and RUN_COMPLETE.json at the root, so a shared root would race.
+RESULTS_BASE="${RESULTS_BASE:-${STUDY_ROOT}/results}"
 export SOURCE_REGISTRY="${REGISTRY}"
 export EVAL_S3_ENABLE="${EVAL_S3_ENABLE:-true}"
 # Result mirroring to S3 needs the ml-worker profile (the bare instance role cannot PutObject).
@@ -43,14 +50,16 @@ if [[ -z "${AWS_PROFILE:-}" ]] && aws configure list-profiles 2>/dev/null | grep
 # one-question-at-a-time default; per-request seeds make the sampled set independent of batching).
 export MATH_QUESTIONS_PER_BATCH="${MATH_QUESTIONS_PER_BATCH:-64}"
 export MATH_REQUEST_BATCH_SIZE="${MATH_REQUEST_BATCH_SIZE:-1024}"
-LOG_ROOT="${STUDY_ROOT}/queue_logs"; mkdir -p "${LOG_ROOT}" "${RESULT_ROOT_OVERRIDE}"
+LOG_ROOT="${STUDY_ROOT}/queue_logs"; mkdir -p "${LOG_ROOT}" "${RESULTS_BASE}"
 POLL_SECONDS="${EVAL_QUEUE_POLL_SECONDS:-60}"
 REFRESH_EVERY="${EVAL_QUEUE_REFRESH_EVERY:-10}"   # registry refresh every N polls
 COMMIT_DOC="${EVAL_QUEUE_COMMIT_DOC:-true}"
 
 if [[ -n ${EVAL_QUEUE_GPUS:-} ]]; then IFS=',' read -r -a GPUS <<< "${EVAL_QUEUE_GPUS}"; else mapfile -t GPUS < <(nvidia-smi --query-gpu=index --format=csv,noheader | tr -d ' '); fi
-SLOTS_PER_GPU="${EVAL_QUEUE_SLOTS_PER_GPU:-4}"
-export EVAL_GPU_MEMORY_UTILIZATION="${EVAL_GPU_MEMORY_UTILIZATION:-$(awk -v s="${SLOTS_PER_GPU}" 'BEGIN{printf "%.2f", int(85/s)/100}')}"
+SLOTS_PER_GPU="${EVAL_QUEUE_SLOTS_PER_GPU:-2}"
+export EVAL_KV_CACHE_GIB="${EVAL_KV_CACHE_GIB:-16}"
+LAUNCH_STAGGER="${EVAL_QUEUE_LAUNCH_STAGGER:-20}"
+export EVAL_GPU_MEMORY_UTILIZATION="${EVAL_GPU_MEMORY_UTILIZATION:-$(awk -v s="${SLOTS_PER_GPU}" 'BEGIN{printf "%.2f", int(90/s)/100}')}"
 FREE_GPUS=(); for ((s = 0; s < SLOTS_PER_GPU; s++)); do FREE_GPUS+=("${GPUS[@]}"); done   # round-robin slots over GPUs
 
 # --- shared assets, once -----------------------------------------------------------------------
@@ -77,10 +86,10 @@ PY
 refresh_registry() {
   "${PY}" rl-distill-scripts/data/build_gemma4_distill_study_eval_registry.py --output "${REGISTRY}" >"${LOG_ROOT}/registry_refresh.log" 2>&1 || echo "EVAL_QUEUE warning: registry refresh failed (keeping previous roster)" >&2
 }
-is_complete() { [[ -s ${RESULT_ROOT_OVERRIDE}/$1/RUN_COMPLETE.json ]]; }
+is_complete() { [[ -s ${RESULTS_BASE}/$1/RUN_COMPLETE.json ]]; }
 
 update_doc() {
-  "${PY}" rl-distill-scripts/update_distill_study_results_doc.py --results-root "${RESULT_ROOT_OVERRIDE}" --registry "${REGISTRY}" \
+  "${PY}" rl-distill-scripts/update_distill_study_results_doc.py --results-base "${RESULTS_BASE}" --registry "${REGISTRY}" \
     && if [[ ${COMMIT_DOC} == true ]]; then
          git add rl-distill-scripts/DISTILLATION_EXPERIMENTS.md "${REGISTRY}" \
            && git commit --no-verify -q -m "Distill study evals: results update ($1 complete)" \
@@ -93,8 +102,9 @@ launch() {
   local tag="$1" gpu="${FREE_GPUS[0]}"; FREE_GPUS=("${FREE_GPUS[@]:1}")
   echo "EVAL_QUEUE launch model=${tag} gpu=${gpu} $(date -u +%FT%TZ)"
   env -u CUDA_VISIBLE_DEVICES MODEL_TAG="${tag}" GPU_COUNT=1 PACKED_PHYSICAL_GPU_IDS="${gpu}" PREPARE_SHARED_ASSETS=false \
-    MODEL_WORK_ROOT="${STUDY_ROOT}/work/${tag}" bash "${RUNNER}" >"${LOG_ROOT}/${tag}.log" 2>&1 &
+    MODEL_WORK_ROOT="${STUDY_ROOT}/work/${tag}" RESULT_ROOT_OVERRIDE="${RESULTS_BASE}/${tag}" bash "${RUNNER}" >"${LOG_ROOT}/${tag}.log" 2>&1 &
   PID_TAG[$!]="${tag}"; PID_GPU[$!]="${gpu}"; LAUNCHED[$tag]=1
+  sleep "${LAUNCH_STAGGER}"
 }
 reap() {
   local pid tag status progressed=1
@@ -109,7 +119,7 @@ reap() {
   return "${progressed}"
 }
 
-echo "EVAL_QUEUE start gpus=[${GPUS[*]}] slots_per_gpu=${SLOTS_PER_GPU} gpu_mem_util=${EVAL_GPU_MEMORY_UTILIZATION} registry=${REGISTRY} results=${RESULT_ROOT_OVERRIDE}"
+echo "EVAL_QUEUE start gpus=[${GPUS[*]}] slots_per_gpu=${SLOTS_PER_GPU} kv_cache_gib=${EVAL_KV_CACHE_GIB} gpu_mem_util=${EVAL_GPU_MEMORY_UTILIZATION} registry=${REGISTRY} results=${RESULTS_BASE}"
 poll=0
 while true; do
   if ((poll % REFRESH_EVERY == 0)); then refresh_registry; fi

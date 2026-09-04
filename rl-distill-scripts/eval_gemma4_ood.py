@@ -97,6 +97,7 @@ class OODEvalConfig:
     dtype: str = "bfloat16"
     tensor_parallel_size: int = 1
     gpu_memory_utilization: float = 0.7
+    kv_cache_memory_gib: float | None = None  # fixed KV budget; bypasses vLLM memory profiling
     max_model_len: int = 4096
     batch_size: str = "auto"
     seed: int = 0
@@ -135,6 +136,8 @@ def build_ood_commands(config: OODEvalConfig, *, lm_eval_executable: str) -> lis
         f"max_model_len={config.max_model_len}",
         "add_bos_token=True",
     ]
+    if config.kv_cache_memory_gib is not None:
+        model_args.append(f"kv_cache_memory_bytes={int(config.kv_cache_memory_gib * 2**30)}")
     if config.model_revision:
         model_args.append(f"revision={config.model_revision}")
 
@@ -402,6 +405,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.7)
+    parser.add_argument("--kv-cache-memory-gib", type=float, default=None)
     parser.add_argument("--max-model-len", type=int, default=4096)
     parser.add_argument("--batch-size", default="auto")
     parser.add_argument("--seed", type=int, default=0)
@@ -473,6 +477,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         dtype=args.dtype,
         tensor_parallel_size=args.tensor_parallel_size,
         gpu_memory_utilization=args.gpu_memory_utilization,
+        kv_cache_memory_gib=args.kv_cache_memory_gib,
         max_model_len=args.max_model_len,
         batch_size=args.batch_size,
         seed=args.seed,

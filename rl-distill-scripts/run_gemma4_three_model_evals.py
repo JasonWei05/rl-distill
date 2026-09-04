@@ -159,6 +159,7 @@ def build_math_command(
     gpu_memory_utilization: float,
     request_batch_size: int,
     questions_per_batch: int = 1,
+    kv_cache_memory_gib: float | None = None,
 ) -> list[str]:
     sampling = data_manifest["sampling"]
     command = [
@@ -205,6 +206,8 @@ def build_math_command(
         "--questions_per_batch",
         str(questions_per_batch),
     ]
+    if kv_cache_memory_gib is not None:
+        command.extend(["--kv_cache_memory_gib", str(kv_cache_memory_gib)])
     return command
 
 

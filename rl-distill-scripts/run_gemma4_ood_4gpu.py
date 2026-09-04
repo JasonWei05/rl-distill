@@ -355,6 +355,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mmmlu-manifest", type=Path, default=None)
     parser.add_argument("--skip-harness-git-check", action="store_true")
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.9)
+    parser.add_argument("--kv-cache-memory-gib", type=float, default=None)
     parser.add_argument("--poll-seconds", type=int, default=30)
     parser.add_argument("--no-wait-for-math", action="store_true")
     parser.add_argument("--no-resume", action="store_true")
@@ -419,6 +420,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "--max-model-len",
                 "8192",
             ]
+            if args.kv_cache_memory_gib is not None:
+                command.extend(["--kv-cache-memory-gib", str(args.kv_cache_memory_gib)])
             if args.mmmlu_task_dir is not None:
                 command.extend(["--mmmlu-task-dir", str(args.mmmlu_task_dir.resolve())])
             if args.mmmlu_manifest is not None:

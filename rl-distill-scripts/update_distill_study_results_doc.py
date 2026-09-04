@@ -2,7 +2,8 @@
 """Copy finished evaluation numbers into DISTILLATION_EXPERIMENTS.md (§8) as models complete.
 
 Scans one or more results roots for the per-model files the eval runners write
-(``<root>/<tag>/math/metrics.json`` and ``<root>/<tag>/ood/<benchmark>/**/results_*.json``),
+(``<root>/<tag>/math/metrics.json`` and ``<root>/<tag>/ood/<benchmark>/**/results_*.json``; the queue
+gives every model its own root ``<base>/<tag>/`` -- pass ``--results-base``),
 orders rows by the study registry, and rewrites the doc between the ``<!-- results:start -->``
 and ``<!-- results:end -->`` markers. Partial results are shown (missing cells as "—"), so it can
 run after every completed model. Math (repo ``\\boxed{}`` verifier) and OOD (lm-eval-harness) are
@@ -119,12 +120,18 @@ def render(models: list[dict[str, Any]], found: dict[str, dict[str, Any]]) -> st
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-root", type=Path, action="append", default=None,
-                        help="per-model results root(s); repeatable (default: /tmp/gemma4_distill_study_eval/results)")
+                        help="results root(s) laid out as <root>/<tag>/{math,ood}; repeatable")
+    parser.add_argument("--results-base", type=Path, default=None,
+                        help="directory whose immediate subdirectories are per-model results roots "
+                             "(the queue layout; default /tmp/gemma4_distill_study_eval/results when no --results-root)")
     parser.add_argument("--registry", type=Path, default=REGISTRY)
     parser.add_argument("--doc", type=Path, default=DOC)
     parser.add_argument("--dry-run", action="store_true", help="print the rendered section instead of editing the doc")
     args = parser.parse_args()
-    roots = args.results_root or [Path("/tmp/gemma4_distill_study_eval/results")]
+    roots = list(args.results_root or [])
+    base = args.results_base or (None if roots else Path("/tmp/gemma4_distill_study_eval/results"))
+    if base is not None and base.is_dir():
+        roots.extend(sorted(p for p in base.iterdir() if p.is_dir()))
 
     models = json.loads(args.registry.read_text())["models"]
     order = {"base": 0, "rl": 1, "distilled": 2}

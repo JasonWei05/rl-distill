@@ -218,9 +218,11 @@ Generation batches 64 questions × their seeded samples per vLLM call (`MATH_QUE
 not depend on batching — the one-question-at-a-time default left a B200 ~35 % busy).
 
 ```bash
-# Local GPU-pool queue (the way the study is evaluated): 4 models per GPU (EVAL_QUEUE_SLOTS_PER_GPU; the
-# math eval is CPU-bound on vLLM's top-128 logprob processing, ~2 cores and little GPU per model), full
-# suite per model (math -> OOD -> RUN_COMPLETE.json), next roster entry starts as soon as a slot frees. The roster
+# Local GPU-pool queue (the way the study is evaluated): 2 models per 80 GB H100 (EVAL_QUEUE_SLOTS_PER_GPU;
+# the math eval is CPU-bound on vLLM's top-128 logprob processing, ~2 cores and little GPU per model). Each
+# vLLM instance gets a fixed EVAL_KV_CACHE_GIB=16 KV budget (vLLM's memory profiler is device-wide, so
+# concurrent startups on a shared GPU otherwise mis-size each other and abort). Full suite per model
+# (math -> OOD -> RUN_COMPLETE.json); the next roster entry starts as soon as a slot frees. The roster
 # is refreshed from the Hub every 10 polls, so distilled students are picked up as they finish;
 # models with RUN_COMPLETE.json are skipped (safe to restart). After every completed model §8 below
 # is regenerated from the result files and committed/pushed.
@@ -230,7 +232,7 @@ tmux new-session -d -s eval-queue \
 # monitor
 grep -E "EVAL_QUEUE (launch|done|FAILED|skip)" /tmp/gemma4_distill_study_eval/eval_queue.log
 tail -3 /tmp/gemma4_distill_study_eval/queue_logs/<tag>.log        # per-model driver log
-ls /tmp/gemma4_distill_study_eval/results/<tag>/{math/metrics.json,ood/*/complete.json,RUN_COMPLETE.json}
+ls /tmp/gemma4_distill_study_eval/results/<tag>/{<tag>/math/metrics.json,<tag>/ood/*/complete.json,RUN_COMPLETE.json}
 # manual pieces
 /tmp/.venv-gemma4/bin/python rl-distill-scripts/data/build_gemma4_distill_study_eval_registry.py   # refresh roster
 MODEL_TAG=rl_e2b_easy GPU_COUNT=1 PACKED_PHYSICAL_GPU_IDS=4 \
@@ -238,9 +240,9 @@ MODEL_TAG=rl_e2b_easy GPU_COUNT=1 PACKED_PHYSICAL_GPU_IDS=4 \
 /tmp/.venv-gemma4/bin/python rl-distill-scripts/update_distill_study_results_doc.py                  # rebuild §8
 ```
 
-Results land under `/tmp/gemma4_distill_study_eval/results/<tag>/` (`math/metrics.json`,
-`math/traces/*.jsonl`, `ood/<bench>/`) and are mirrored to
-`s3://scale-ml/genai/rl-distill/gemma4-distill-study-evals-v1/<tag>/`.
+Results land under `/tmp/gemma4_distill_study_eval/results/<tag>/` — one root per model:
+`<tag>/math/metrics.json`, `<tag>/math/traces/*.jsonl`, `<tag>/ood/<bench>/`, `RUN_COMPLETE.json` —
+mirrored to `s3://scale-ml/genai/rl-distill/gemma4-distill-study-evals-v1/<tag>/`.
 
 ## 8. Results (updated as each model finishes)
 

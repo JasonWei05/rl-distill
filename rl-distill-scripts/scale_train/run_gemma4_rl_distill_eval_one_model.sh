@@ -93,6 +93,7 @@ RESOLVED_REGISTRY="${MODEL_ROOT}/resolved_model_registry.json"
   --data-manifest "${DATA_ROOT}/math_eval_manifest.json" \
   --output-root "${RESULT_ROOT}" \
   --gpu-memory-utilization "${EVAL_GPU_MEMORY_UTILIZATION:-0.9}" \
+  ${EVAL_KV_CACHE_GIB:+--kv-cache-memory-gib "${EVAL_KV_CACHE_GIB}"} \
   --request-batch-size "${MATH_REQUEST_BATCH_SIZE:-8}" --questions-per-batch "${MATH_QUESTIONS_PER_BATCH:-1}" --execute
 
 upload_results
@@ -106,6 +107,7 @@ upload_results
   --mmmlu-task-dir "${MMMLU_ROOT}" \
   --mmmlu-manifest "${MMMLU_ROOT}/manifest.json" \
   --gpu-memory-utilization "${EVAL_GPU_MEMORY_UTILIZATION:-0.9}" \
+  ${EVAL_KV_CACHE_GIB:+--kv-cache-memory-gib "${EVAL_KV_CACHE_GIB}"} \
   --skip-harness-git-check --execute
 
 "${PYTHON_BIN}" - "${MODEL_TAG}" "${RESULT_ROOT}" <<'PY'

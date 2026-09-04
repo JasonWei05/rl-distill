@@ -741,6 +741,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tensor_parallel_size", type=int, default=1)
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.9)
+    parser.add_argument(
+        "--kv_cache_memory_gib",
+        type=float,
+        default=None,
+        help="fixed KV-cache budget (GiB); bypasses vLLM memory profiling so several instances can share a GPU",
+    )
     parser.add_argument("--enforce_eager", action="store_true")
     return parser.parse_args(argv)
 
@@ -845,6 +851,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     }
     if args.model_revision and not Path(args.model).exists():
         llm_kwargs["revision"] = args.model_revision
+    if args.kv_cache_memory_gib is not None:
+        llm_kwargs["kv_cache_memory_bytes"] = int(args.kv_cache_memory_gib * 2**30)
     llm = LLM(**llm_kwargs)
     tokenizer = llm.get_tokenizer()
     chat_template = Path(args.chat_template).read_text()
