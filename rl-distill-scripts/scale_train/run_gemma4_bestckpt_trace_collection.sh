@@ -37,7 +37,7 @@ case "${TRACE_SPEC}" in
   e2b-medium) RUN_KEY=e2b-medium;     BAND=medium; BEST_STEP=240; DIRECTION=e2b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-medium-seed42-local2gpu; TEACHER_HF_REVISION=497e7964f98bb6d825e4c7fcc95d75fa928a6d83 ;;
   e2b-hard)   RUN_KEY=e2b-hard;       BAND=hard;   BEST_STEP=190; DIRECTION=e2b_hard_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-hard-seed42-local2gpu; TEACHER_HF_REVISION=59762d43bf94b6938d2e560e1fdbfdbf0d3f9e4c ;;
   26b-medium) RUN_KEY=26b-a4b-medium; BAND=medium; BEST_STEP=140; DIRECTION=26b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5; TEACHER_HF_REVISION=4da4c943785fa0549b647a5f9736047047b44702 ;;
-  26b-hard)   RUN_KEY=26b-a4b-hard;   BAND=hard;   BEST_STEP=180; DIRECTION=26b_hard_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-hard-seed42; TEACHER_HF_REVISION=7659c94add2a724743707e23e3fafff353d2627c ;;
+  26b-hard)   RUN_KEY=26b-a4b-hard;   BAND=hard;   BEST_STEP=180; DIRECTION=26b_hard_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-hard-seed42-teacher-step180; TEACHER_HF_REVISION=e5329d14a3a5fdbf48d7e22a8508625c33502694 ;;  # frozen copy of the rolling repo's step 180 (same LFS shas); the rolling repo prunes/squashes
   *)
     echo "FATAL: unsupported TRACE_SPEC=${TRACE_SPEC}" >&2
     exit 2
