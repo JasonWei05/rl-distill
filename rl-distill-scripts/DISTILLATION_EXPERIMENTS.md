@@ -275,8 +275,11 @@ uv pip install --python /tmp/.venv-gemma4/bin/python --no-deps -e ./lm-evaluatio
 **Other machine, run the OOD suite** (models are materialized from the pinned Hub commits in the registry):
 ```bash
 # whole roster, 2 models per 80 GB GPU, results under /tmp/gemma4_distill_study_eval/results/<tag>/
-EVAL_PHASES=ood EVAL_S3_ENABLE=false EVAL_QUEUE_GPUS=0,1,2,3,4,5,6,7 \
-  bash rl-distill-scripts/scale_train/run_gemma4_distill_study_eval_queue.sh
+# (EVAL_QUEUE_COMMIT_DOC=false: the OOD box must not commit §8; EVAL_QUEUE_WAIT_FOR_NEW=false: exit when the
+#  roster is done instead of idling for new distilled students; EVAL_QUEUE_TAGS="rl_e2b_medium rl_e2b_hard"
+#  restricts the roster to a subset; VENV points at the repo-local venv if that is where the harness is installed)
+EVAL_PHASES=ood EVAL_S3_ENABLE=false EVAL_QUEUE_COMMIT_DOC=false EVAL_QUEUE_WAIT_FOR_NEW=false \
+  EVAL_QUEUE_GPUS=0,1,2,3,4,5,6,7 bash rl-distill-scripts/scale_train/run_gemma4_distill_study_eval_queue.sh
 # or one model
 EVAL_PHASES=ood EVAL_S3_ENABLE=false MODEL_TAG=rl_e2b_easy GPU_COUNT=1 PACKED_PHYSICAL_GPU_IDS=0 \
   bash rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_one_model.sh

@@ -81,13 +81,19 @@ if [[ ! -s ${SHARED_MMMLU_ROOT}/manifest.json ]]; then
 fi
 test -x "${VENV}/bin/lm_eval" || { echo "FATAL: ${VENV}/bin/lm_eval missing (uv pip install -e ./lm-evaluation-harness)" >&2; exit 2; }
 
-roster() {  # tags in registry order: bases, rl, distilled
-  "${PY}" - "${REGISTRY}" <<'PY'
+roster() {  # tags in registry order: bases, rl, distilled; EVAL_QUEUE_TAGS="tag1 tag2" restricts to a subset
+  "${PY}" - "${REGISTRY}" "${EVAL_QUEUE_TAGS:-}" <<'PY'
 import json, sys
 models = json.load(open(sys.argv[1]))["models"]
+only = set(sys.argv[2].split()) if len(sys.argv) > 2 and sys.argv[2].strip() else None
+if only:
+    unknown = only - {m["tag"] for m in models}
+    if unknown:
+        sys.exit(f"EVAL_QUEUE_TAGS not in registry: {sorted(unknown)}")
 order = {"base": 0, "rl": 1, "distilled": 2}
 for m in sorted(models, key=lambda m: (order.get(m["category"], 9), m.get("architecture", ""), m.get("trained_on") or "", m["tag"])):
-    print(m["tag"])
+    if only is None or m["tag"] in only:
+        print(m["tag"])
 PY
 }
 refresh_registry() {

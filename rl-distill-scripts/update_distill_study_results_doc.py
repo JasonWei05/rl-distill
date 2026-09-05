@@ -48,20 +48,50 @@ def _math_results(metrics_path: Path) -> dict[str, dict[str, Any]]:
 
 
 def _ood_accuracy(bench_dir: Path, keys: tuple[str, ...]) -> float | None:
-    files = sorted(bench_dir.rglob("results_*.json"))
-    if not files:
+    """Accuracy of the benchmark's *aggregate* result (not its first subtask).
+
+    MMLU-Pro and MMLU-14k are lm-eval groups with 14 subtasks each; the harness results file lists the
+    subtasks alongside the group, so the first key is e.g. ``mmlu_pro_biology``. The benchmark's
+    ``complete.json`` records the aggregate key (``artifacts.result_key``) and the results file it refers to.
+    """
+    complete_path = bench_dir / "complete.json"
+    result_file: Path | None = None
+    result_key: str | None = None
+    if complete_path.is_file():
+        try:
+            artifacts = json.loads(complete_path.read_text(encoding="utf-8")).get("artifacts", {})
+            result_key = artifacts.get("result_key") or None
+            if artifacts.get("result_path"):
+                candidate = bench_dir / artifacts["result_path"]
+                if candidate.is_file():
+                    result_file = candidate
+        except (OSError, ValueError):
+            pass
+    if result_file is None:
+        files = sorted(bench_dir.glob("**/results_*.json"))
+        if not files:
+            return None
+        result_file = files[-1]
+    try:
+        results = json.loads(result_file.read_text(encoding="utf-8")).get("results", {})
+    except (OSError, ValueError):
         return None
-    results = json.loads(files[-1].read_text()).get("results", {})
     if not results:
         return None
-    # one task per benchmark dir (mmmlu14k aggregates its locales under one group)
-    task = next((t for t in results if not t.startswith("_")), None)
-    if task is None:
-        return None
+    task = None
+    if result_key and result_key in results:
+        task = result_key
+    else:
+        # Prefer a group/aggregate entry: the key that is a prefix of the other keys, else a lone task.
+        candidates = [t for t in results if not t.startswith("_")]
+        groups = [t for t in candidates if sum(1 for u in candidates if u != t and u.startswith(t)) > 0]
+        task = groups[0] if groups else (candidates[0] if len(candidates) == 1 else None)
+        if task is None:
+            return None
     for key in keys:
         value = results[task].get(key)
         if isinstance(value, (int, float)):
-            return 100 * float(value)
+            return float(value) * 100.0
     return None
 
 

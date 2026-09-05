@@ -358,6 +358,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--kv-cache-memory-gib", type=float, default=None)
     parser.add_argument("--poll-seconds", type=int, default=30)
     parser.add_argument("--no-wait-for-math", action="store_true")
+    parser.add_argument(
+        "--math-optional",
+        action="store_true",
+        help="Do not depend on the math phase at all (no wait, no completion marker required). Used when the "
+        "OOD suite runs on a machine that never ran the math family (EVAL_PHASES=ood).",
+    )
     parser.add_argument("--no-resume", action="store_true")
     parser.add_argument("--execute", action="store_true")
     return parser.parse_args(argv)
@@ -468,7 +474,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(json.dumps(plan, indent=2, sort_keys=True), flush=True)
     if not args.execute:
         return 0
-    if not args.no_wait_for_math:
+    if args.math_optional:
+        print(f"OOD: math phase not required (--math-optional); not waiting for {math_complete}", flush=True)
+    elif not args.no_wait_for_math:
         _wait_for_math(math_complete, math_state, args.poll_seconds)
     elif not math_complete.is_file():
         raise FileNotFoundError(f"math completion marker is missing: {math_complete}")

@@ -111,7 +111,9 @@ fi
 
 
 if run_phase ood; then
-"${PYTHON_BIN}" rl-distill-scripts/run_gemma4_ood_4gpu.py \
+# Without the math phase on this machine the OOD runner must not wait for the math completion marker.
+OOD_MATH_FLAG=(); if ! run_phase math; then OOD_MATH_FLAG=(--math-optional); fi
+"${PYTHON_BIN}" rl-distill-scripts/run_gemma4_ood_4gpu.py "${OOD_MATH_FLAG[@]}" \
   --gpus "${GPU_ARGS[@]}" \
   --models "${MODEL_TAG}" \
   --resolved-model-registry "${RESOLVED_REGISTRY}" \
