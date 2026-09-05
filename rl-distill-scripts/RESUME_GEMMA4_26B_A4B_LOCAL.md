@@ -15,7 +15,7 @@ no S3), so it works on any 8-GPU node.
 Both are FSDP2-sharded at `world_size=8`, so they **must** resume on **exactly 8 GPUs**
 (80 GB cards assumed; the memory knobs below target that). The `medium` checkpoint is a
 mid-training snapshot — the ScaleTrain run may have progressed further; resuming from it
-just replays the steps after 80.
+just replays the steps after `STEP`.
 
 The code path is `run_gemma4_pt_deepscaler_4of4strict_rl.sh` → `gemma3_pt_fewshot_math_rl.sh`
 → `python3 -m dapo.main_dapo`. The wrapper prepares the band dataset itself and, because
@@ -124,7 +124,8 @@ VENV="$PWD/.venv-gemma4" \
 
 - **Continue the original run's curve:** add `WANDB_RUN_ID=g4ds26b-26b-a4b-${BAND}-s42-v1
   WANDB_RESUME=allow`. (W&B enforces monotonic steps, so any step already logged by the old run is
-  rejected — the curve continues forward from `STEP`.)
+  rejected — the curve continues forward from `STEP`.) Check first that the original ScaleTrain job is
+  no longer alive (W&B run state / heartbeat): two live writers on one run id interleave their metrics.
 - **Fresh W&B run:** set `EXP_NAME=<your-name>` and omit `WANDB_RUN_ID`.
 - **No W&B:** leave `WANDB_API_KEY` out of `.env`.
 
@@ -150,15 +151,44 @@ offload is not possible on 80 GB cards: fp32 master + grads + Adam is 51.6 GB/GP
 another ~56 GB; sharding vLLM with `GEN_TP=8` made it worse (one engine holding all 1024 sequences
 replicates full-vocab logits on every rank, ~49 GB/GPU during generation).
 
-`rl-distill-scripts/resume_gemma4_26b_hard_local.sh` wraps the recipe with these defaults plus a local
-checkpoint cadence (`SAVE_FREQ=2`, `MAX_ACTOR_CKPT_TO_KEEP=2`, validation and HF push every 10 steps):
+`rl-distill-scripts/resume_gemma4_26b_a4b_local.sh` wraps the recipe with these defaults plus a local
+checkpoint cadence (`SAVE_FREQ=2`, `MAX_ACTOR_CKPT_TO_KEEP=2`, validation and HF push every 10 steps). It takes
+`BAND=medium|hard`; `resume_gemma4_26b_{medium,hard}_local.sh` are one-line wrappers that set it. Before launching
+it checks the venv and the vLLM R3 patch, and refuses to start unless `CUDA_VISIBLE_DEVICES` lists exactly 8 GPUs
+and `global_step_<STEP>/` holds 8 model + 8 optim + 8 extra-state shards, `data.pt`, and the early-stopping state.
+With `HF_PUSH_ENABLE=True` (the default) it also verifies the `HF_TOKEN` has write access and creates the push repo
+before training starts, since run-time pushes are non-fatal and a bad token would otherwise only show up in the log.
 
 ```bash
-CKPTS_DIR="$HOME/gemma4-26b-hard-s42/ckpts" bash rl-distill-scripts/resume_gemma4_26b_hard_local.sh
+CKPTS_DIR="$HOME/gemma4-26b-${BAND}-s42/ckpts" bash rl-distill-scripts/resume_gemma4_26b_${BAND}_local.sh
+
+# Preflight only: every check above plus model/dataset download and full Hydra config composition (--cfg job),
+# without starting Ray or touching a GPU.
+DRY_RUN=1 CKPTS_DIR="$HOME/gemma4-26b-${BAND}-s42/ckpts" bash rl-distill-scripts/resume_gemma4_26b_${BAND}_local.sh
 ```
+
+Per band it reproduces the original ScaleTrain run's experiment name (`RUN_NAME_SUFFIX` is empty for hard and
+`26b-bands-es5` for medium), so the W&B display name and the default HF push repo
+(`JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-<band>-seed42[-26b-bands-es5]`) match the original run, and
+`WANDB_RUN_ID` defaults to `g4ds26b-26b-a4b-<band>-s42-v1` with `WANDB_RESUME=allow`.
 
 Every knob is `${VAR:-default}`; `VLLM_SLEEP_MODE=False FSDP_CPU_OFFLOAD_POLICY=True OFFLOAD=False
 MICRO_BATCH_SIZE_PER_GPU=1 MAX_PADDED_TOKENS_PER_MICROBATCH=4096` reproduces the original recipe.
+
+### Continuing after early stopping with a longer patience
+
+A run that stopped on patience `P` leaves a terminal checkpoint whose `validation_early_stopping.json` says
+`triggered`. To keep training under a longer patience `Q` (e.g. "stop after three non-improving validations in a
+row" instead of two), resume from that checkpoint with both knobs; the saved best score and miss count are kept and
+only the trigger flag is recomputed, so the next validation is miss `P+1` of `Q`:
+
+```bash
+EARLY_STOPPING_PATIENCE=3 EARLY_STOPPING_MIGRATE_PATIENCE_FROM=2 \
+  CKPTS_DIR="$HOME/gemma4-26b-${BAND}-s42/ckpts" bash rl-distill-scripts/resume_gemma4_26b_${BAND}_local.sh
+```
+
+The log prints `EARLY_STOPPING_PATIENCE_MIGRATED ... triggered=False` on success. Without the migrate knob the
+trainer refuses the mismatched early-stopping config; with it but with the wrong old value it also refuses.
 
 Two operational notes:
 
@@ -169,7 +199,7 @@ Two operational notes:
   On a free-tier account the Hub rejects commits at the account cap
   (`You have exceeded your public storage space`), and freed space is reflected with delay; pushes are
   non-fatal (`HF_PUSH_REQUIRED=False`) so this cannot fail a finished run. Keep >= 3 so the
-  early-stopping best (patience 2) is always still on the Hub.
+  early-stopping best is always still on the Hub (the default keeps `EARLY_STOPPING_PATIENCE + 1` snapshots).
 
 ## 4. Confirm the resume actually restored optimizer + dataset position
 
@@ -202,8 +232,9 @@ dataloader cursor and the optimizer sharding.
 
 - **8 GPUs, no more, no less.** The shards are keyed `world_size_8`; a different world size cannot
   load them.
-- **New checkpoints** are written locally under `CKPTS_DIR/global_step_{90,100,...}` every
-  `SAVE_FREQ=10` steps. Bump `MAX_ACTOR_CKPT_TO_KEEP` (default keeps only the newest) to retain more.
+- **New checkpoints** are written locally under `CKPTS_DIR/global_step_N`: every `SAVE_FREQ=10` steps with the
+  section-3 block, every `SAVE_FREQ=2` steps (newest 2 kept) with the section-3b launcher. Bump
+  `MAX_ACTOR_CKPT_TO_KEEP` to retain more.
 - **Different GPU model / memory:** the `ROLLOUT_GPU_MEMORY_UTILIZATION`, `VLLM_KV_CACHE_MEMORY_BYTES`,
   and `MAX_PADDED_TOKENS_PER_MICROBATCH` values target 80 GB cards; lower them for smaller cards.
 - **R3 router replay** needs the patched vLLM from `setup_env_gemma4.sh` (step 1); do not skip it.

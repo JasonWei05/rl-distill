@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One off-policy top-128 forward-KL distillation run: TEACHER_SPEC's v2 traces -> STUDENT base.
 #
-#   TEACHER_SPEC=12b-easy STUDENT=e4b DISTILL_GPU_IDS=0,1 bash run_gemma4_distill_one.sh
+#   TEACHER_SPEC=12b-easy STUDENT=e4b DISTILL_GPU_IDS=0,1,2,3 bash run_gemma4_distill_one.sh
 #
 # Pipeline (all steps idempotent / cached under /tmp):
 #   1. locate the teacher's COMPLETE trace bundle (local trace root, else the HF dataset repo, else S3)
@@ -13,7 +13,10 @@
 #      singleton micro-batches under the audited 4096 padded-token ceiling
 #
 # Students: e4b -> google/gemma-4-E4B (4 GPUs), e2b -> google/gemma-4-E2B (2 GPUs): fp32 master +
-# Adam state does not fit e2b on one GPU or e4b on two alongside the activations. A teacher's
+# Adam state does not fit e2b on one GPU or e4b on two alongside the activations. On 2 GPUs the e2b
+# runs use a 2048-token vocab-KL chunk: with 4096 the 12b-medium traces ran the pair to 81.1/81.5 GB
+# and the cuDNN attention backward failed (2026-09-04); the chunk only changes memory, not the
+# objective. The runner refuses smaller layouts than these. A teacher's
 # trace set is reused for both students; the recorded direction label is passed through and
 # the student is verified by identity SHA (see preflight_gemma4_distill_training_view.py).
 
@@ -28,18 +31,22 @@ DISTILL_GPU_IDS="${DISTILL_GPU_IDS:?comma-separated physical GPU indices for thi
 IFS=',' read -r -a GPU_IDS <<< "${DISTILL_GPU_IDS}"
 
 case "${STUDENT}" in
-  e4b) STUDENT_REPO=google/gemma-4-E4B ;;
-  e2b) STUDENT_REPO=google/gemma-4-E2B ;;
+  e4b) STUDENT_REPO=google/gemma-4-E4B; STUDENT_REVISION_DEFAULT=411aa17b749aa952df1359d2dcea73917a544d9a; STUDENT_MIN_GPUS=4; KL_CHUNK_DEFAULT=4096 ;;
+  e2b) STUDENT_REPO=google/gemma-4-E2B; STUDENT_REVISION_DEFAULT=d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f; STUDENT_MIN_GPUS=2; KL_CHUNK_DEFAULT=2048 ;;
   *) echo "FATAL: STUDENT must be e4b or e2b, got ${STUDENT}" >&2; exit 2 ;;
 esac
-# Pin to an immutable revision for reproducible identities (default resolves `main` and logs it).
-STUDENT_REVISION="${STUDENT_REVISION:-main}"
+if (( ${#GPU_IDS[@]} < STUDENT_MIN_GPUS )) && [[ ${ALLOW_UNDERSIZED_STUDENT_LAYOUT:-false} != true ]]; then
+  echo "FATAL: ${STUDENT} student needs >= ${STUDENT_MIN_GPUS} GPUs (got ${#GPU_IDS[@]}: ${DISTILL_GPU_IDS}); set ALLOW_UNDERSIZED_STUDENT_LAYOUT=true to override" >&2
+  exit 2
+fi
+# Pinned to the base models' immutable commits (`main` on 2026-09-04) so every run shares one student
+# identity; override STUDENT_REVISION deliberately.
+STUDENT_REVISION="${STUDENT_REVISION:-${STUDENT_REVISION_DEFAULT}}"
 
 TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2}"
 TRACE_LOCAL_ROOT="${TRACE_LOCAL_ROOT:-/tmp/gemma4_bestckpt_traces_v2/${TEACHER_SPEC}}"
 VIEW_S3_BASE="${VIEW_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-distill-views-v2}"
 SOURCE_ROOT="${SOURCE_ROOT:-/tmp/gemma4_distill_sources/${TEACHER_SPEC}}"
-VIEW_ROOT="${VIEW_ROOT:-/tmp/gemma4_distill_views/${TEACHER_SPEC}}"
 STUDENTS_ROOT="${STUDENTS_ROOT:-/tmp/gemma4_distill_students}"
 
 # Band trace bundles: 3000 train questions x 8 samples + 300 validation questions x 1 sample.
@@ -53,6 +60,10 @@ VALIDATION_QUESTIONS="${VALIDATION_QUESTIONS:-128}"
 TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}"
 VALIDATION_SAMPLE_INDEX="${VALIDATION_SAMPLE_INDEX:-0}"
 VIEW_SEED="${VIEW_SEED:-42}"
+# One cached view per selection: the view is reused only when every selection knob matches, so a
+# changed VALIDATION_SOURCE or question count can never silently train on a stale view.
+VIEW_TAG="train${TRAIN_QUESTIONS}x${TRAIN_SAMPLES_PER_QUESTION}-val-${VALIDATION_SOURCE}${VALIDATION_QUESTIONS}-s${VALIDATION_SAMPLE_INDEX}-seed${VIEW_SEED}"
+VIEW_ROOT="${VIEW_ROOT:-/tmp/gemma4_distill_views/${TEACHER_SPEC}/${VIEW_TAG}}"
 
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-west-2}"
 export AWS_REGION="${AWS_REGION:-us-west-2}"
@@ -133,6 +144,19 @@ fi
 
 # --- 2. derived training view ----------------------------------------------------------------
 if [[ -f ${VIEW_ROOT}/dataset_index.json ]]; then
+  # A view left behind by another builder version fails deep inside the launcher; say so up front instead.
+  (cd rl-distill-scripts/data && "${PY}" - "${VIEW_ROOT}/dataset_index.json" <<'PY'
+import json
+import sys
+
+from build_gemma4_distill_training_view import VIEW_SCHEMA_VERSION
+
+path = sys.argv[1]
+found = json.load(open(path)).get("schema_version")
+if found != VIEW_SCHEMA_VERSION:
+    raise SystemExit(f"FATAL: cached view {path} has schema {found!r}, builder writes {VIEW_SCHEMA_VERSION!r}; remove that view directory (or set VIEW_ROOT) and rerun")
+PY
+  )
   echo "DISTILL_ONE view=cached ${VIEW_ROOT}"
 else
   echo "DISTILL_ONE view=build ${VIEW_ROOT}"
@@ -208,7 +232,7 @@ export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-64}"
 # per GPU on the 2-GPU e2b runs, 16 on the 4-GPU e4b runs.
 export MICRO_BATCH_SIZE_PER_GPU="${MICRO_BATCH_SIZE_PER_GPU:-1}"
 export MAX_PADDED_TOKENS_PER_MICROBATCH="${MAX_PADDED_TOKENS_PER_MICROBATCH:-4096}"
-export FULL_VOCAB_KL_CHUNK_SIZE="${FULL_VOCAB_KL_CHUNK_SIZE:-4096}"
+export FULL_VOCAB_KL_CHUNK_SIZE="${FULL_VOCAB_KL_CHUNK_SIZE:-${KL_CHUNK_DEFAULT}}"
 export TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-500}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-100}"
 export LR="${LR:-2.5e-6}"
@@ -216,9 +240,14 @@ export LR_WARMUP_STEPS="${LR_WARMUP_STEPS:-100}"
 export LR_SCHEDULER_TYPE="${LR_SCHEDULER_TYPE:-linear}"
 export MIN_LR_RATIO="${MIN_LR_RATIO:-0.1}"   # 2.5e-6 * 0.1 = 2.5e-7 final LR
 export PROJECT_NAME="${PROJECT_NAME:-gemma4-bestckpt-distill-v2}"
-export EXP_NAME="${EXP_NAME:-${TEACHER_SPEC}-to-${STUDENT}-base-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}}"
+# The run name carries the peak LR and GPU count so a redo at another LR gets its own W&B run.
+export EXP_NAME="${EXP_NAME:-${TEACHER_SPEC}-to-${STUDENT}-base-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}-lr${LR}-g${#GPU_IDS[@]}}"
 # Logging: console + wandb (project PROJECT_NAME); validation KL on the held-out rows every TEST_FREQ steps.
 export TRAIN_LOGGER="${TRAIN_LOGGER:-[\"console\",\"wandb\"]}"
+if [[ ${TRAIN_LOGGER} == *wandb* && -z ${WANDB_API_KEY:-} ]]; then
+  echo "FATAL: TRAIN_LOGGER includes wandb but WANDB_API_KEY is not set (add it to .env)" >&2
+  exit 2
+fi
 export TEST_FREQ="${TEST_FREQ:-10}"
 # Checkpoints: no periodic local saves (SAVE_FREQ=0 -> the trainer saves only at the final step), the
 # final save contains just the HF export (no FSDP/Adam shards), it is pushed to the Hub as
@@ -229,6 +258,27 @@ export HF_PUSH_ENABLE="${HF_PUSH_ENABLE:-true}"
 export HF_PUSH_REPO="${HF_PUSH_REPO:-JWei05/Distill-gemma4-${TEACHER_SPEC}-to-${STUDENT}-base}"
 export HF_PUSH_PRIVATE="${HF_PUSH_PRIVATE:-false}"
 export HF_PUSH_DELETE_LOCAL="${HF_PUSH_DELETE_LOCAL:-true}"
+if [[ ${HF_PUSH_ENABLE,,} == true ]]; then
+  # The in-run pusher only runs after training and its failures are non-fatal, so verify the token can
+  # write and create the destination repo now (the pusher's own create_repo(exist_ok=True) is idempotent).
+  : "${HF_TOKEN:?HF_PUSH_ENABLE=true requires HF_TOKEN in .env}"
+  "${PY}" - "${HF_PUSH_REPO}" "${HF_PUSH_PRIVATE}" <<'PY'
+import os
+import sys
+
+from huggingface_hub import HfApi
+
+repo, private = sys.argv[1], sys.argv[2].lower() == "true"
+api = HfApi(token=os.environ["HF_TOKEN"])
+who = api.whoami()
+token = who.get("auth", {}).get("accessToken", {})
+scoped = {p for s in token.get("fineGrained", {}).get("scoped", []) for p in s.get("permissions", [])}
+if token.get("role") != "write" and "repo.write" not in scoped:
+    raise SystemExit(f"FATAL: HF token for {who['name']} lacks write access (role={token.get('role')})")
+api.create_repo(repo_id=repo, repo_type="model", private=private, exist_ok=True)
+print(f"DISTILL_ONE hf_push_preflight_ok user={who['name']} repo={repo} private={private}")
+PY
+fi
 export PYTHON_BIN="${PY}"
-echo "DISTILL_ONE launch exp=${EXP_NAME} bs=${TRAIN_BATCH_SIZE} steps=${TOTAL_TRAINING_STEPS} epochs_cap=${TOTAL_EPOCHS} lr=${LR} warmup=${LR_WARMUP_STEPS} ${LR_SCHEDULER_TYPE}->min_ratio ${MIN_LR_RATIO}"
+echo "DISTILL_ONE launch exp=${EXP_NAME} bs=${TRAIN_BATCH_SIZE} steps=${TOTAL_TRAINING_STEPS} epochs_cap=${TOTAL_EPOCHS} lr=${LR} warmup=${LR_WARMUP_STEPS} ${LR_SCHEDULER_TYPE}->min_ratio ${MIN_LR_RATIO} kl_chunk=${FULL_VOCAB_KL_CHUNK_SIZE} hf_push=${HF_PUSH_ENABLE}:${HF_PUSH_REPO}"
 exec bash rl-distill-scripts/gemma4_topk_distill_fsdp2.sh

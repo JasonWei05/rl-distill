@@ -113,6 +113,13 @@ total_training_steps_args=()
 if [ -n "${total_training_steps}" ]; then
     total_training_steps_args+=(trainer.total_training_steps="${total_training_steps}")
 fi
+# DRY_RUN=1: compose and print the resolved Hydra job config, then exit without starting Ray or training.
+# Hydra's argparse rejects overrides that follow `--cfg`, so the flag must be the very last argument.
+dry_run_args=()
+if [ "${DRY_RUN:-0}" = 1 ]; then
+    echo "DRY_RUN=1: composing the Hydra config only (--cfg job); no Ray, no GPUs, no training"
+    dry_run_args=(--cfg job)
+fi
 
 # Do not put credentials in Hydra overrides: resolved configs, process listings,
 # and failure logs would expose the literal values. The DAPO entry point reads
@@ -227,4 +234,5 @@ python3 -m dapo.main_dapo \
     trainer.default_local_dir="${CKPTS_DIR}" \
     trainer.resume_mode="${RESUME_MODE:-auto}" \
     "${total_training_steps_args[@]}" \
-    "$@"
+    "$@" \
+    "${dry_run_args[@]}"

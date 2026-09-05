@@ -355,6 +355,28 @@ HF_PUSH_ENABLE=${HF_PUSH_ENABLE:-false}
 if [ "${HF_PUSH_ENABLE,,}" = "true" ]; then
     : "${HF_PUSH_REPO:?Set HF_PUSH_REPO when HF_PUSH_ENABLE=true}"
 fi
+HF_PUSH_DELETE_LOCAL=${HF_PUSH_DELETE_LOCAL:-false}
+case "${HF_PUSH_DELETE_LOCAL,,}" in
+    true|false) ;;
+    *) echo "HF_PUSH_DELETE_LOCAL must be true or false" >&2; exit 2 ;;
+esac
+# What each checkpoint contains. The default keeps a resumable FSDP checkpoint; '["hf_model"]' writes only the
+# bf16 HF export (no resume, ~1/6 the size). Validate here: a malformed list or a push without hf_model would
+# otherwise only fail after training, inside the checkpoint manager or the pusher.
+CHECKPOINT_SAVE_CONTENTS=${CHECKPOINT_SAVE_CONTENTS:-'["model","optimizer","extra","hf_model"]'}
+if ! "${PYTHON_BIN}" -c '
+import json
+import sys
+
+value = json.loads(sys.argv[1])
+allowed = {"model", "optimizer", "extra", "hf_model"}
+if not isinstance(value, list) or not value or not set(value) <= allowed or len(set(value)) != len(value):
+    raise SystemExit(f"CHECKPOINT_SAVE_CONTENTS must be a non-empty JSON list drawn from {sorted(allowed)}: {value!r}")
+if sys.argv[2].lower() == "true" and "hf_model" not in value:
+    raise SystemExit("HF_PUSH_ENABLE=true requires hf_model in CHECKPOINT_SAVE_CONTENTS")
+' "${CHECKPOINT_SAVE_CONTENTS}" "${HF_PUSH_ENABLE}"; then
+    exit 2
+fi
 if [ "${SMOKE_ONLY_ALLOW_DIRECT_FILES,,}" = "true" ] && [ "${HF_PUSH_ENABLE,,}" = "true" ]; then
     echo "HF checkpoint upload is disabled for the direct-file smoke-only path" >&2
     exit 2
@@ -618,10 +640,10 @@ COMMON_OVERRIDES=(
     trainer.hf_push.enable="${HF_PUSH_ENABLE}"
     trainer.hf_push.repo_id="${HF_PUSH_REPO:-unused}"
     trainer.hf_push.private="${HF_PUSH_PRIVATE}"
-    trainer.hf_push.delete_local_after="${HF_PUSH_DELETE_LOCAL:-false}"
+    trainer.hf_push.delete_local_after="${HF_PUSH_DELETE_LOCAL}"
     trainer.remote_checkpoint.enable="${REMOTE_CHECKPOINT_ENABLE}"
     trainer.remote_checkpoint.s3_uri="${REMOTE_CHECKPOINT_S3_URI}"
-    "checkpoint.save_contents=${CHECKPOINT_SAVE_CONTENTS:-[\"model\",\"optimizer\",\"extra\",\"hf_model\"]}"
+    "checkpoint.save_contents=${CHECKPOINT_SAVE_CONTENTS}"
     'checkpoint.load_contents=["model","optimizer","extra"]'
 )
 

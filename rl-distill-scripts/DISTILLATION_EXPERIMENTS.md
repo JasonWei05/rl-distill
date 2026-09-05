@@ -69,6 +69,12 @@ as a head start that the nodes reuse via S3; the two-node split is in §6. Verif
 regenerated v2 shards: 0% multimodal-token leakage, 0% length-cap runaways, width-128 top-k,
 correct-rates tracking val (12b-easy 0.75, 26b-easy 0.97 on first shards).
 
+Node 2's six COMPLETE bundles are published as public HF datasets with `data/upload_gemma4_trace_bundle_hf.py`
+(`JWei05/gemma4-bestckpt-traces-topk128-v2-{12b-easy,12b-medium,12b-hard,e4b-easy,e4b-medium,e4b-hard}`: 375
+train + 38 validation shards with manifests and run configs, the `source/` prompt rosters the view builder
+needs, `dataset_index.json`, `COMPLETE.json` and the final-validation log), so `run_gemma4_distill_one.sh`
+fetches them on a box that did not generate the traces.
+
 ## 3. Distillation grid (21 runs)
 
 Teacher = best RL checkpoint (§1). Student = base model of size ≤ teacher (distill "into smaller
@@ -185,6 +191,21 @@ TRACE_QUEUE_SPECS=12b-easy:2,12b-medium:2,12b-hard:2,e4b-easy:2,e4b-medium:2,e4b
 DISTILL_QUEUE_RUNS=12b-easy:e4b:4,12b-medium:e4b:4,12b-hard:e4b:4,e4b-easy:e4b:4,e4b-medium:e4b:4,e4b-hard:e4b:4,12b-easy:e2b:2,12b-medium:e2b:2,12b-hard:e2b:2,e4b-easy:e2b:2,e4b-medium:e2b:2,e4b-hard:e2b:2 \
   bash rl-distill-scripts/scale_train/run_gemma4_distill_queue.sh
 ```
+
+Queue knobs used on node 2 (2026-09-04):
+
+- **Sharing the node with the trace queue.** Start the distill queue with `DISTILL_QUEUE_DYNAMIC_GPUS=true
+  DISTILL_QUEUE_RESERVED_GPUS_LOG=<trace queue stdout log>` once the trace queue has launched every
+  collection. It then takes only GPUs that have no compute process *and* are not named in an open
+  `QUEUE launch spec=… gpus=…` entry of that log (a just-launched vLLM worker holds no GPU memory for its
+  first minute, so nvidia-smi alone is not enough), so distillation fills each pair the moment a collection
+  finishes.
+- **Per-run overrides.** A fourth run-spec field sets runner environment for one run, e.g.
+  `e4b-easy:e4b:4:LR=1e-6` (several with `;`). Used to redo the e4b→e4b self-distillations at peak lr 1e-6:
+  at 2.5e-6 their validation KL bottomed near step 80 and rose afterwards (0.036→0.048 easy, 0.028→0.039
+  medium); at 1e-6 it kept falling to 0.011 / 0.012 / 0.0066 (easy / medium / hard) by step 500.
+- **e2b students on 2 GPUs need the 2048-token KL chunk** (`run_gemma4_distill_one.sh` sets it per student):
+  with 4096 the 12b-medium traces ran the pair to 81.1/81.5 GB and the cuDNN attention backward failed.
 
 Single runs: `TEACHER_SPEC=12b-easy STUDENT=e4b DISTILL_GPU_IDS=0,1,2,3 bash
 rl-distill-scripts/scale_train/run_gemma4_distill_one.sh` (recipe defaults: bs 64, 500 steps,
