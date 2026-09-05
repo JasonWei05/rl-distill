@@ -343,7 +343,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-05 03:32Z — math complete for 29/29 models, OOD complete for 22/29. Partial rows are shown as they finish._
+_Updated 2026-09-05 04:02Z — math complete for 29/29 models, OOD complete for 29/29. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -394,24 +394,24 @@ _Updated 2026-09-05 03:32Z — math complete for 29/29 models, OOD complete for 
 | `distill_12b_easy_to_e2b` | 27.1 | 20.7 | 48.4 |
 | `distill_26b_easy_to_e2b` | 27.3 | 26.3 | 48.6 |
 | `distill_e2b_easy_to_e2b` | 28.0 | 20.2 | 48.4 |
-| `distill_e4b_easy_to_e2b` | 27.1 | — | — |
-| `distill_12b_hard_to_e2b` | 27.3 | — | — |
+| `distill_e4b_easy_to_e2b` | 27.1 | 19.7 | 48.1 |
+| `distill_12b_hard_to_e2b` | 27.3 | 20.2 | 47.8 |
 | `distill_26b_hard_to_e2b` | 24.6 | 18.7 | 47.8 |
 | `distill_e2b_hard_to_e2b` | 25.7 | 25.3 | 48.0 |
-| `distill_e4b_hard_to_e2b` | 25.9 | — | — |
-| `distill_12b_medium_to_e2b` | 23.9 | — | — |
+| `distill_e4b_hard_to_e2b` | 25.9 | 25.8 | 47.1 |
+| `distill_12b_medium_to_e2b` | 23.9 | 19.2 | 48.2 |
 | `distill_26b_medium_to_e2b` | 25.0 | 17.7 | 48.3 |
 | `distill_e2b_medium_to_e2b` | 26.8 | 19.7 | 48.1 |
-| `distill_e4b_medium_to_e2b` | 26.3 | — | — |
+| `distill_e4b_medium_to_e2b` | 26.3 | 24.2 | 47.9 |
 | `distill_12b_easy_to_e4b` | 39.0 | 18.7 | 57.6 |
 | `distill_26b_easy_to_e4b` | 41.5 | 24.7 | 60.0 |
 | `distill_e4b_easy_to_e4b` | 44.1 | 24.7 | 60.9 |
 | `distill_12b_hard_to_e4b` | 41.6 | 22.7 | 58.5 |
 | `distill_26b_hard_to_e4b` | 41.4 | 21.7 | 59.8 |
-| `distill_e4b_hard_to_e4b` | 40.3 | — | — |
+| `distill_e4b_hard_to_e4b` | 40.3 | 20.7 | 59.5 |
 | `distill_12b_medium_to_e4b` | 39.6 | 14.6 | 58.9 |
 | `distill_26b_medium_to_e4b` | 41.4 | 19.2 | 59.6 |
-| `distill_e4b_medium_to_e4b` | 43.7 | — | — |
+| `distill_e4b_medium_to_e4b` | 43.7 | 26.3 | 61.1 |
 <!-- results:end -->
 
 ### 8.1 pass@k curves — E4B student
