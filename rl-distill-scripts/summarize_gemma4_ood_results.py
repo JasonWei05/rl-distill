@@ -70,6 +70,14 @@ def main() -> int:
     roots = sorted(d for d in a.results_base.iterdir() if d.is_dir() and not d.name.startswith("_"))
     summary = summarize(roots)
     a.output.parent.mkdir(parents=True, exist_ok=True)
+    if a.output.is_file():
+        try:
+            previous = json.loads(a.output.read_text(encoding="utf-8"))
+        except ValueError:
+            previous = {}
+        if previous.get("models") == summary["models"] and previous.get("benchmarks") == summary["benchmarks"]:
+            print(f"unchanged {a.output}: {len(summary['models'])} models with OOD results")
+            return 0  # keep the previous generated_at/host so a no-op refresh leaves git clean
     a.output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     n_full = sum(1 for m in summary["models"].values() if len(m["ood"]) == len(summary["benchmarks"]))
     print(f"wrote {a.output}: {len(summary['models'])} models with OOD results ({n_full} complete)")

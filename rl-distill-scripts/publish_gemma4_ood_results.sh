@@ -30,8 +30,10 @@ print(" ".join(sorted(t for t,m in d["models"].items() if all(x in m["ood"] for 
 PY
 )"
   local n_complete; n_complete=$(wc -w <<<"${complete_tags}")
+  # Only the summary's model data decides whether there is something to publish (the doc's timestamp line
+  # would otherwise make every cycle look like a change).
+  if git diff --quiet -- "${SUMMARY}"; then log "nothing new (${n_complete} models complete)"; return 0; fi
   regen_doc || { log "doc regeneration failed"; return 1; }
-  if git diff --quiet -- "${SUMMARY}" "${DOC}"; then log "nothing new (${n_complete} models complete)"; return 0; fi
   local newly; newly="$(git diff -- "${SUMMARY}" | grep -E '^\+ {4}"[a-z0-9_]+": \{$' | sed -E 's/.*"([a-z0-9_]+)".*/\1/' | tr '\n' ' ')"
   git add "${SUMMARY}" "${DOC}"
   git commit -q -m "Distill study evals: OOD results update (${n_complete} models complete${newly:+; new: ${newly% }})
