@@ -289,6 +289,11 @@ if the host has the `ml-worker` profile.) **This machine, math only:** relaunch 
 `EVAL_PHASES=math`. **Merging:** copy each `results/<tag>/<tag>/ood/` directory from the other machine
 into the same path under this box's results base (or `aws s3 sync <prefix>/ /tmp/gemma4_distill_study_eval/results/`),
 then `python rl-distill-scripts/update_distill_study_results_doc.py` fills the OOD columns of §8.
+The OOD numbers also travel with the repo: the OOD box writes
+`rl-distill-scripts/config/gemma4_distill_study_ood_summary.json` (`summarize_gemma4_ood_results.py`,
+accuracies + result-file sha256s, no samples) and the updater reads it with `--summary <file>` on any
+machine; `--fallback-from-doc` keeps the other family's cells already in §8 when a box has data for only
+one family (that is how the OOD box refreshes its columns without blanking the math numbers).
 
 Results land under `/tmp/gemma4_distill_study_eval/results/<tag>/` — one root per model:
 `<tag>/math/metrics.json`, `<tag>/math/traces/*.jsonl`, `<tag>/ood/<bench>/`, `RUN_COMPLETE.json` —
@@ -317,7 +322,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-05 01:00Z — math complete for 29/29 models, OOD complete for 0/29. Partial rows are shown as they finish._
+_Updated 2026-09-05 03:28Z — math complete for 29/29 models, OOD complete for 22/29. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -357,35 +362,35 @@ _Updated 2026-09-05 01:00Z — math complete for 29/29 models, OOD complete for 
 
 | Model | MMLU-Pro | GPQA-Diamond | MMLU-14k |
 |---|---|---|---|
-| `base_e2b` | — | — | — |
-| `base_e4b` | — | — | — |
-| `rl_e2b_easy` | — | — | — |
-| `rl_e2b_hard` | — | — | — |
-| `rl_e2b_medium` | — | — | — |
-| `rl_e4b_easy` | — | — | — |
-| `rl_e4b_hard` | — | — | — |
-| `rl_e4b_medium` | — | — | — |
-| `distill_12b_easy_to_e2b` | — | — | — |
-| `distill_26b_easy_to_e2b` | — | — | — |
-| `distill_e2b_easy_to_e2b` | — | — | — |
-| `distill_e4b_easy_to_e2b` | — | — | — |
-| `distill_12b_hard_to_e2b` | — | — | — |
-| `distill_26b_hard_to_e2b` | — | — | — |
-| `distill_e2b_hard_to_e2b` | — | — | — |
-| `distill_e4b_hard_to_e2b` | — | — | — |
-| `distill_12b_medium_to_e2b` | — | — | — |
-| `distill_26b_medium_to_e2b` | — | — | — |
-| `distill_e2b_medium_to_e2b` | — | — | — |
-| `distill_e4b_medium_to_e2b` | — | — | — |
-| `distill_12b_easy_to_e4b` | — | — | — |
-| `distill_26b_easy_to_e4b` | — | — | — |
-| `distill_e4b_easy_to_e4b` | — | — | — |
-| `distill_12b_hard_to_e4b` | — | — | — |
-| `distill_26b_hard_to_e4b` | — | — | — |
-| `distill_e4b_hard_to_e4b` | — | — | — |
-| `distill_12b_medium_to_e4b` | — | — | — |
-| `distill_26b_medium_to_e4b` | — | — | — |
-| `distill_e4b_medium_to_e4b` | — | — | — |
+| `base_e2b` | 23.9 | 22.7 | 48.2 |
+| `base_e4b` | 37.9 | 19.2 | 61.6 |
+| `rl_e2b_easy` | 28.4 | 24.2 | 48.2 |
+| `rl_e2b_hard` | 26.0 | 21.7 | 47.6 |
+| `rl_e2b_medium` | 27.0 | 24.7 | 47.8 |
+| `rl_e4b_easy` | 44.0 | 20.2 | 60.7 |
+| `rl_e4b_hard` | 40.2 | 24.2 | 59.4 |
+| `rl_e4b_medium` | 43.9 | 26.3 | 61.3 |
+| `distill_12b_easy_to_e2b` | 27.1 | 20.7 | 48.4 |
+| `distill_26b_easy_to_e2b` | 27.3 | 26.3 | 48.6 |
+| `distill_e2b_easy_to_e2b` | 28.0 | 20.2 | 48.4 |
+| `distill_e4b_easy_to_e2b` | 27.1 | — | — |
+| `distill_12b_hard_to_e2b` | 27.3 | — | — |
+| `distill_26b_hard_to_e2b` | 24.6 | 18.7 | 47.8 |
+| `distill_e2b_hard_to_e2b` | 25.7 | 25.3 | 48.0 |
+| `distill_e4b_hard_to_e2b` | 25.9 | — | — |
+| `distill_12b_medium_to_e2b` | 23.9 | — | — |
+| `distill_26b_medium_to_e2b` | 25.0 | 17.7 | 48.3 |
+| `distill_e2b_medium_to_e2b` | 26.8 | 19.7 | 48.1 |
+| `distill_e4b_medium_to_e2b` | 26.3 | — | — |
+| `distill_12b_easy_to_e4b` | 39.0 | 18.7 | 57.6 |
+| `distill_26b_easy_to_e4b` | 41.5 | 24.7 | 60.0 |
+| `distill_e4b_easy_to_e4b` | 44.1 | 24.7 | 60.9 |
+| `distill_12b_hard_to_e4b` | 41.6 | 22.7 | 58.5 |
+| `distill_26b_hard_to_e4b` | 41.4 | 21.7 | 59.8 |
+| `distill_e4b_hard_to_e4b` | 40.3 | — | — |
+| `distill_12b_medium_to_e4b` | 39.6 | 14.6 | 58.9 |
+| `distill_26b_medium_to_e4b` | 41.4 | 19.2 | 59.6 |
+| `distill_e4b_medium_to_e4b` | 43.7 | — | — |
 <!-- results:end -->
 
 ### 8.1 pass@k curves — E4B student

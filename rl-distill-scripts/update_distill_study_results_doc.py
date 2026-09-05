@@ -95,6 +95,60 @@ def _ood_accuracy(bench_dir: Path, keys: tuple[str, ...]) -> float | None:
     return None
 
 
+def _apply_summaries(found: dict[str, dict[str, Any]], summaries: list[Path]) -> None:
+    """Fill cells from committed summary files (summarize_gemma4_ood_results.py) when no result files exist."""
+    for path in summaries:
+        data = json.loads(path.read_text(encoding="utf-8")).get("models", {})
+        for tag, entry in data.items():
+            if tag not in found:
+                continue
+            for bench, cell in (entry.get("ood") or {}).items():
+                if bench not in found[tag]["ood"] and isinstance(cell.get("accuracy"), (int, float)):
+                    found[tag]["ood"][bench] = float(cell["accuracy"])
+            for dataset, cell in (entry.get("math") or {}).items():
+                if dataset not in found[tag]["math"] and "mean@k" in cell and "pass@k" in cell:
+                    found[tag]["math"][dataset] = {"mean@k": float(cell["mean@k"]), "pass@k": float(cell["pass@k"])}
+
+
+def _apply_doc_fallback(found: dict[str, dict[str, Any]], doc: Path) -> None:
+    """Keep the cells already in the doc's §8 when this machine has no data for them (opt-in).
+
+    Lets a machine that only produced one family (e.g. the OOD box) refresh its columns without blanking
+    the other family's numbers that another machine wrote.
+    """
+    if not doc.is_file():
+        return
+    text = doc.read_text(encoding="utf-8")
+    if START not in text or END not in text:
+        return
+    section = text.split(START, 1)[1].split(END, 1)[0]
+    math_keys = [d for d, _ in MATH_COLUMNS]
+    ood_keys = [b for b, _, _ in OOD_COLUMNS]
+    for line in section.splitlines():
+        if not line.startswith("| `"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        tag = cells[0].strip("`")
+        if tag not in found:
+            continue
+        if len(cells) == 3 + len(math_keys):  # math table: tag, category, trained_on, datasets...
+            for dataset, cell in zip(math_keys, cells[3:]):
+                cell = cell.strip("*")
+                if "/" in cell and dataset not in found[tag]["math"]:
+                    mean_s, pass_s = (x.strip() for x in cell.split("/", 1))
+                    try:
+                        found[tag]["math"][dataset] = {"mean@k": float(mean_s), "pass@k": float(pass_s)}
+                    except ValueError:
+                        pass
+        elif len(cells) == 1 + len(ood_keys):  # ood table: tag, benchmarks...
+            for bench, cell in zip(ood_keys, cells[1:]):
+                if bench not in found[tag]["ood"]:
+                    try:
+                        found[tag]["ood"][bench] = float(cell)
+                    except ValueError:
+                        pass
+
+
 def collect(roots: list[Path], tags: list[str]) -> dict[str, dict[str, Any]]:
     found: dict[str, dict[str, Any]] = {tag: {"math": {}, "ood": {}} for tag in tags}
     for root in roots:
@@ -157,6 +211,12 @@ def main() -> int:
     parser.add_argument("--registry", type=Path, default=REGISTRY)
     parser.add_argument("--doc", type=Path, default=DOC)
     parser.add_argument("--dry-run", action="store_true", help="print the rendered section instead of editing the doc")
+    parser.add_argument("--summary", type=Path, action="append", default=None,
+                        help="committed summary JSON(s) from summarize_gemma4_ood_results.py; fills cells that have "
+                             "no result files under the roots (repeatable)")
+    parser.add_argument("--fallback-from-doc", action="store_true",
+                        help="keep the cells already present in the doc's results section when this machine has "
+                             "no data for them (for a box that produced only one of the two families)")
     args = parser.parse_args()
     roots = list(args.results_root or [])
     base = args.results_base or (None if roots else Path("/tmp/gemma4_distill_study_eval/results"))
@@ -166,7 +226,12 @@ def main() -> int:
     models = json.loads(args.registry.read_text())["models"]
     order = {"base": 0, "rl": 1, "distilled": 2}
     models.sort(key=lambda m: (order.get(m["category"], 9), m.get("architecture", ""), m.get("trained_on") or "", m["tag"]))
-    section = render(models, collect(roots, [m["tag"] for m in models]))
+    found = collect(roots, [m["tag"] for m in models])
+    if args.summary:
+        _apply_summaries(found, args.summary)
+    if args.fallback_from_doc:
+        _apply_doc_fallback(found, args.doc)
+    section = render(models, found)
     if args.dry_run:
         print(section)
         return 0
