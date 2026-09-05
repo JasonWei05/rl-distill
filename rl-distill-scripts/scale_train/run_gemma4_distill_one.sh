@@ -4,7 +4,7 @@
 #   TEACHER_SPEC=12b-easy STUDENT=e4b DISTILL_GPU_IDS=0,1 bash run_gemma4_distill_one.sh
 #
 # Pipeline (all steps idempotent / cached under /tmp):
-#   1. locate the teacher's COMPLETE trace bundle (local trace root, else synced from S3)
+#   1. locate the teacher's COMPLETE trace bundle (local trace root, else the HF dataset repo, else S3)
 #   2. build the derived training view (build_gemma4_distill_training_view.py)
 #   3. snapshot the student base model; compute the teacher/student identity SHAs the
 #      audited launcher pins
@@ -72,6 +72,46 @@ export HF_HOME="${HF_HOME:-/tmp/hf_cache}"
 echo "DISTILL_ONE teacher=${TEACHER_SPEC} student=${STUDENT} gpus=${DISTILL_GPU_IDS} nproc=${#GPU_IDS[@]}"
 
 # --- 1. teacher trace bundle -----------------------------------------------------------------
+# Resolution order: local bundle -> HF dataset repo (${TRACE_HF_DATASET_BASE}-<spec>, the layout
+# data/upload_gemma4_trace_bundle_hf.py produces) -> S3 mirror. The HF download lands in the local
+# root so later runs on this node take the local branch. TRACE_HF_DATASET_BASE="" disables the HF step.
+TRACE_HF_DATASET_BASE="${TRACE_HF_DATASET_BASE-JWei05/gemma4-bestckpt-traces-topk128-v2}"
+TRACE_HF_REVISION="${TRACE_HF_REVISION:-main}"
+if [[ ! -f ${TRACE_LOCAL_ROOT}/dataset_index.json && -n ${TRACE_HF_DATASET_BASE} ]]; then
+  echo "DISTILL_ONE bundle=hf hf://datasets/${TRACE_HF_DATASET_BASE}-${TEACHER_SPEC}@${TRACE_HF_REVISION} -> ${TRACE_LOCAL_ROOT}"
+  "${PY}" - "${TRACE_HF_DATASET_BASE}-${TEACHER_SPEC}" "${TRACE_HF_REVISION}" "${TRACE_LOCAL_ROOT}" "${TEACHER_SPEC}" <<'PY'
+import json
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+
+from huggingface_hub import snapshot_download
+from huggingface_hub.utils import RepositoryNotFoundError
+
+repo, revision, local_root, spec = sys.argv[1:5]
+try:
+    snapshot_download(repo, repo_type="dataset", revision=revision, local_dir=local_root,
+                      ignore_patterns=[".gitattributes", "README.md"])
+except RepositoryNotFoundError:
+    print(f"DISTILL_ONE bundle=hf-missing {repo} (falling through to S3)")
+    sys.exit(0)
+root = Path(local_root)
+index_path = root / "dataset_index.json"
+if not index_path.exists():
+    raise SystemExit(f"FATAL: {repo} has no dataset_index.json; it is not a validated trace bundle")
+if not (root / "COMPLETE.json").exists():
+    # dataset_index.json is only written by a successful final validation, so it is equivalent
+    # evidence of completion; older uploads omitted the marker.
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    (root / "COMPLETE.json").write_text(json.dumps({
+        "schema_version": 1, "trace_spec": spec, "s3_uri": f"hf://datasets/{repo}@{revision}",
+        "completed_at": datetime.now(UTC).isoformat(), "dataset_index_sha256": index["dataset_index_sha256"],
+        "total_rows": index["total_rows"], "total_response_tokens": index["total_response_tokens"],
+    }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"DISTILL_ONE bundle=hf wrote COMPLETE.json from dataset_index.json ({index['total_rows']} rows)")
+PY
+fi
+
 if [[ -f ${TRACE_LOCAL_ROOT}/dataset_index.json && -f ${TRACE_LOCAL_ROOT}/COMPLETE.json ]]; then
   SOURCE_ROOT="${TRACE_LOCAL_ROOT}"
   echo "DISTILL_ONE bundle=local ${SOURCE_ROOT}"
@@ -83,11 +123,12 @@ else
   mkdir -p "${SOURCE_ROOT}"
   echo "DISTILL_ONE bundle=s3 ${TRACE_S3_BASE}/${TEACHER_SPEC} -> ${SOURCE_ROOT}"
   aws s3 sync --only-show-errors "${TRACE_S3_BASE}/${TEACHER_SPEC}" "${SOURCE_ROOT}"
-  if ! compgen -G "${SOURCE_ROOT}/source/*.parquet" >/dev/null; then
-    echo "FATAL: the view builder needs the bundle's source/ roster parquet; it is not in S3 for ${TEACHER_SPEC}." >&2
-    echo "       Run this on the node that generated the traces (local root ${TRACE_LOCAL_ROOT}) or copy source/ over." >&2
-    exit 3
-  fi
+fi
+if ! compgen -G "${SOURCE_ROOT}/source/*.parquet" >/dev/null; then
+  echo "FATAL: the view builder needs the bundle's source/ roster parquet; ${SOURCE_ROOT}/source/ has none." >&2
+  echo "       Re-upload the bundle with data/upload_gemma4_trace_bundle_hf.py (it includes source/), or copy" >&2
+  echo "       source/ from the node that generated the traces." >&2
+  exit 3
 fi
 
 # --- 2. derived training view ----------------------------------------------------------------
