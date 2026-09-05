@@ -399,3 +399,17 @@ curves are indistinguishable (RL leads at k=1 by 2–3 points, 12b/26b students 
 72, 12b→E4B 61, RL 48, base 38; MATH500 from the hard-band models: 73 / 65 / 48 / 51 — hard-band RL does not
 beat the base at k=16 on MATH500, the distilled students do by 15–22 points). GSM8K follows the same order
 except for the easy band, where RL is best at small k.
+
+### 8.2 pass@k curves — E2B student
+
+![pass@k, E2B student](figures/passk_e2b.png)
+
+`figures/passk_e2b.png` (`python rl-distill-scripts/plot_distill_study_passk.py --student e2b --teachers 12b 26b`;
+add `e4b` to `--teachers` for the e4b-teacher students), same layout as §8.1 with E2B→E2B self-distillation omitted.
+Read (2026-09-05): the curves **cross**. On every band the RL model leads at k=1 (medium 22.1 vs 15.8/14.7, hard
+13.2 vs 9.3/8.0) but the 12b/26b-distilled students overtake it by k≈2–3 and end far ahead at k=16 (medium 65 vs 43,
+hard 45 vs 28). On the easy band the distilled students are ahead at every k (pass@16 84 vs 76). Transfer shows the
+same shape: medium/hard-band RL barely beats the base on MATH500 and GSM8K at k=16 (hard-band RL is *below* the base
+on both), while the distilled students reach 50–55 on MATH500 and 64–72 on GSM8K. So for the 2B student, RL sharpens
+single-sample accuracy on its band; distillation from a bigger teacher broadens coverage and transfers, at a cost in
+mean@16 on medium/hard.
