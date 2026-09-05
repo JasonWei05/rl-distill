@@ -277,6 +277,10 @@ class vLLMColocateWorkerExtension:
             model = self.model_runner.model
             model_config = self.model_runner.vllm_config.model_config
             process_weights_after_loading(model, model_config, self.device)
+        # Fork change: weight reload (dummy-initialized engine + process_weights_after_loading) leaves
+        # freed blocks in this process's caching allocator; return them to the device so the colocated
+        # trainer (vLLM stays resident, sleep mode is off) keeps its headroom across steps.
+        torch.cuda.empty_cache()
 
     def _update_weights(self, weights: list[tuple[str, torch.Tensor]], peft_config: dict, base_sync_done: bool):
         if peft_config and base_sync_done:
@@ -302,6 +306,16 @@ class vLLMColocateWorkerExtension:
                 logger.info("Loading standard weights (non-FP8, async)")
                 weights = _filter_multimodal_reload_weights(weights)
                 self.model_runner.model.load_weights(weights)
+
+    def release_cached_device_memory(self) -> None:
+        """rl-distill fork: return this engine process's cached, unused allocator blocks to the device.
+
+        Called via collective_rpc right after a generation round when the engine stays resident
+        (free_cache_engine=False) so the colocated trainer's update gets the memory the sampler and
+        attention workspaces left in vLLM's caching allocator.
+        """
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
 
     def _get_zmq_handle(self) -> str:
         """Get ZMQ handle for communication."""

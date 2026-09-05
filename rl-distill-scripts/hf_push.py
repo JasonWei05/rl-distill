@@ -204,7 +204,9 @@ class HFPusher:
     private: bool = True
     token: str | None = None
     enable_hf_transfer: bool = True
-    max_retries: int = 3
+    # rl-distill: 10 GB uploads hit transient Hub timeouts; 3 tries with 2/4/8 s backoff lost a
+    # step-40 folder on 2026-09-03. Default 8 attempts, backoff capped at 120 s (HF_PUSH_MAX_RETRIES).
+    max_retries: int = field(default_factory=lambda: int(os.environ.get("HF_PUSH_MAX_RETRIES", "8")))
     # Keep the newest N step-folders on the Hub (None = keep all). Before each upload the repo is pruned to
     # N-1 and after it to N; pruned LFS blobs are released by squashing history (see _prune).
     max_to_keep: int | None = None
@@ -282,8 +284,8 @@ class HFPusher:
                 )
                 return True
             except (HfHubHTTPError, OSError, ConnectionError) as e:
-                wait = 2**attempt
-                print(f"[HFPusher] step {step} attempt {attempt} failed: {e}. retrying in {wait}s", flush=True)
+                wait = min(2**attempt, 120)
+                print(f"[HFPusher] step {step} attempt {attempt}/{self.max_retries} failed: {e}. retrying in {wait}s", flush=True)
                 time.sleep(wait)
             except Exception as e:
                 print(f"[HFPusher] step {step} non-retryable error: {e}", flush=True)

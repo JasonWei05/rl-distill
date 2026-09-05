@@ -85,6 +85,12 @@ from ..base import BaseEngine, BaseEngineCtx, EngineRegistry
 from ..utils import enable_full_determinism, postprocess_batch_func, prepare_micro_batches
 from .utils import create_device_mesh, get_sharding_strategy
 
+from verl.utils.fsdp2_cpu_offload_pinned_patch import apply_if_enabled as _apply_fsdp2_pinned_accum_patch
+
+# rl-distill fork: opt-in (VERL_FSDP2_CPU_OFFLOAD_PINNED_ACCUM=1) pinned-memory gradient accumulation
+# for FSDP2 CPUOffloadPolicy; must run in the worker before any fully_shard() call.
+_apply_fsdp2_pinned_accum_patch()
+
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 

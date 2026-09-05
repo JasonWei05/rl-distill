@@ -728,6 +728,11 @@ class vLLMHttpServer:
         if self.node_rank == 0:
             await self.engine.reset_prefix_cache()
 
+    async def release_cached_memory(self):
+        """rl-distill fork: empty the engine workers' CUDA caching allocator (resident-engine mode)."""
+        if self.node_rank == 0:
+            await self.engine.collective_rpc("release_cached_device_memory")
+
     async def set_global_steps(self, global_steps: int):
         """Set the global steps of the model weights."""
         self.global_steps = global_steps

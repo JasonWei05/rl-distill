@@ -81,6 +81,11 @@ from verl.utils.fsdp_utils import (
 )
 from verl.utils.import_utils import import_external_libs
 from verl.utils.memory_utils import aggressive_empty_cache
+from verl.utils.fsdp2_cpu_offload_pinned_patch import apply_if_enabled as _apply_fsdp2_pinned_accum_patch
+
+# rl-distill fork: opt-in (VERL_FSDP2_CPU_OFFLOAD_PINNED_ACCUM=1) pinned-memory gradient accumulation
+# for FSDP2 CPUOffloadPolicy; must run before any fully_shard() call in this process.
+_apply_fsdp2_pinned_accum_patch()
 from verl.utils.model import convert_weight_keys
 from verl.utils.profiler import DistProfiler, DistProfilerExtension, ProfilerConfig, log_gpu_memory_usage, simple_timer
 from verl.utils.profiler.performance import reduce_timing, topk_reduce_ratio_min_max

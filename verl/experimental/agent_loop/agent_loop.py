@@ -1043,6 +1043,9 @@ class AgentLoopManager:
     ):
         self.config = config
         self.rollout_config, self.model_config = _get_rollout_and_model_config(config)
+        self._release_rollout_cache_after_generation = os.environ.get(
+            "VERL_ROLLOUT_RELEASE_CACHE_AFTER_GEN", "0"
+        ).lower() in ("1", "true", "yes") and not self.rollout_config.free_cache_engine
         self.worker_group = worker_group
         self.rollout_resource_pool = rollout_resource_pool
         self.reward_loop_worker_handles = reward_loop_worker_handles
@@ -1197,6 +1200,13 @@ class AgentLoopManager:
         )
         if self.stream_teacher_with_rollout:
             await self.teacher_model_manager.sleep()
+
+        # rl-distill fork (opt-in): with a resident engine (free_cache_engine=False) vLLM's caching
+        # allocator keeps the generation-time workspace (~10 GB/GPU for Gemma 4 E2B) through the
+        # trainer's update. Hand it back before old-logprob/update; the next round re-allocates.
+        if self._release_rollout_cache_after_generation:
+            await asyncio.gather(*[replica.release_cached_memory() for replica in self.rollout_replicas])
+
         output = DataProto.concat(outputs)
 
         # calculate performance metrics

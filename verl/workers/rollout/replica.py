@@ -292,6 +292,10 @@ class RolloutReplica(ABC):
         """reset kv cache in each rollout server."""
         await asyncio.gather(*[server.clear_kv_cache.remote() for server in self.servers])
 
+    async def release_cached_memory(self):
+        """rl-distill fork: ask each rollout server to empty its CUDA caching allocator."""
+        await asyncio.gather(*[server.release_cached_memory.remote() for server in self.servers])
+
     async def start_profile(self, **kwargs):
         """Start profiling on the replica."""
         await asyncio.gather(*[server.start_profile.remote(**kwargs) for server in self.servers])
