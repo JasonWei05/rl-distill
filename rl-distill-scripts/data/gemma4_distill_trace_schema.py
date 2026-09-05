@@ -393,7 +393,9 @@ def validate_trace_record(
             "chat_template_path": expected_semantic_config["chat_template"]["path"],
             "chat_template_sha256": expected_semantic_config["chat_template"]["sha256"],
             "global_seed": expected_semantic_config["global_seed"],
-            "generator_commit": expected_semantic_config["generator"]["commit"],
+            # ``generator_commit`` is provenance only: the generator identity is the hashed source
+            # (``generator_source_sha256``), and a resumed collection legitimately carries the commit
+            # that was checked out when each shard was produced.
             "generator_source_sha256": expected_semantic_config["generator"]["source_sha256"],
         }
         for field_name, expected_value in expected_fields.items():

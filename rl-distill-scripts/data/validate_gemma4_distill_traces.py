@@ -51,23 +51,6 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _record_expectations(run_config: Mapping[str, Any]) -> dict[str, Any]:
-    """Run config with the repository commit re-attached for per-row checks.
-
-    The generator keeps the repository commit out of the hashed semantic config (so shards stay
-    resumable across commits when the generator source is byte-identical) and records it under
-    ``generator_repository``; rows still carry ``generator_commit``. ``validate_trace_record`` expects it
-    at ``semantic_config.generator.commit``, so splice it back in on a copy. ``generation_config_sha256``
-    is left untouched because the shard/manifest hash checks compare against the recorded value.
-    """
-    semantic = run_config["semantic_config"]
-    generator = dict(semantic.get("generator") or {})
-    repository = run_config.get("generator_repository")
-    if "commit" not in generator and isinstance(repository, Mapping) and "commit" in repository:
-        generator["commit"] = repository["commit"]
-    return {**run_config, "semantic_config": {**semantic, "generator": generator}}
-
-
 def load_run_config(split_dir: Path) -> dict[str, Any]:
     path = split_dir / "run_config.json"
     try:
@@ -227,7 +210,7 @@ def validate_dataset(
         for shard_id, parquet_path in sorted(discovered.items()):
             manifest, validation = validate_shard_bundle(
                 parquet_path,
-                run_config=_record_expectations(run_config),
+                run_config=run_config,
                 decoder=decoder,
                 external_stats=aggregate_stats,
             )
