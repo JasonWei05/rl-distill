@@ -58,6 +58,7 @@ LOG_ROOT="${STUDY_ROOT}/queue_logs"; mkdir -p "${LOG_ROOT}" "${RESULTS_BASE}"
 POLL_SECONDS="${EVAL_QUEUE_POLL_SECONDS:-60}"
 REFRESH_EVERY="${EVAL_QUEUE_REFRESH_EVERY:-10}"   # registry refresh every N polls
 COMMIT_DOC="${EVAL_QUEUE_COMMIT_DOC:-true}"
+OOD_SUMMARY_JSON="${OOD_SUMMARY_JSON:-rl-distill-scripts/config/gemma4_distill_study_ood_summary.json}"; [[ -s ${OOD_SUMMARY_JSON} ]] || OOD_SUMMARY_JSON=""
 
 if [[ -n ${EVAL_QUEUE_GPUS:-} ]]; then IFS=',' read -r -a GPUS <<< "${EVAL_QUEUE_GPUS}"; else mapfile -t GPUS < <(nvidia-smi --query-gpu=index --format=csv,noheader | tr -d ' '); fi
 SLOTS_PER_GPU="${EVAL_QUEUE_SLOTS_PER_GPU:-2}"
@@ -128,7 +129,9 @@ compute_free_slots() {  # all slots minus one per running child (PID_GPU) minus 
 }
 
 update_doc() {
+  # --summary: OOD cells produced on another box live in the committed summary JSON; without it a local update would blank them.
   "${PY}" rl-distill-scripts/update_distill_study_results_doc.py --results-base "${RESULTS_BASE}" --registry "${REGISTRY}" \
+    ${OOD_SUMMARY_JSON:+--summary "${OOD_SUMMARY_JSON}"} \
     && if [[ ${COMMIT_DOC} == true ]]; then
          git add rl-distill-scripts/DISTILLATION_EXPERIMENTS.md "${REGISTRY}" \
            && git commit --no-verify -q -m "Distill study evals: results update ($1 complete)" \
