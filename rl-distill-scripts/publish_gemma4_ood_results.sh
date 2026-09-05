@@ -32,7 +32,7 @@ PY
   local n_complete; n_complete=$(wc -w <<<"${complete_tags}")
   regen_doc || { log "doc regeneration failed"; return 1; }
   if git diff --quiet -- "${SUMMARY}" "${DOC}"; then log "nothing new (${n_complete} models complete)"; return 0; fi
-  local newly; newly="$(git diff -- "${SUMMARY}" | grep -E '^\+ +"[a-z0-9_]+": \{$' | sed -E 's/.*"([a-z0-9_]+)".*/\1/' | tr '\n' ' ')"
+  local newly; newly="$(git diff -- "${SUMMARY}" | grep -E '^\+ {4}"[a-z0-9_]+": \{$' | sed -E 's/.*"([a-z0-9_]+)".*/\1/' | tr '\n' ' ')"
   git add "${SUMMARY}" "${DOC}"
   git commit -q -m "Distill study evals: OOD results update (${n_complete} models complete${newly:+; new: ${newly% }})
 
@@ -65,13 +65,12 @@ case "${1:---once}" in
   --once) publish_once ;;
   --watch)
     POLL="${PUBLISH_POLL_SECONDS:-120}"
-    TARGET="${PUBLISH_UNTIL_MODELS:-$("${PY}" -c "import json;print(len(json.load(open('${REGISTRY}'))['models']))")}"
-    log "watching ${RESULTS_BASE} until ${TARGET} models are complete (poll ${POLL}s)"
+    log "watching ${RESULTS_BASE} (poll ${POLL}s); stop with: touch ${STOP_FILE}${PUBLISH_UNTIL_MODELS:+ or when ${PUBLISH_UNTIL_MODELS} models are complete}"
     last=-1
     while [ ! -f "${STOP_FILE}" ]; do
       n=$(ls "${RESULTS_BASE}"/*/RUN_COMPLETE.json 2>/dev/null | wc -l)
       if [ "$n" -ne "$last" ]; then publish_once; last=$n; fi
-      if [ "$n" -ge "${TARGET}" ]; then log "all ${TARGET} models complete; done"; exit 0; fi
+      if [ -n "${PUBLISH_UNTIL_MODELS:-}" ] && [ "$n" -ge "${PUBLISH_UNTIL_MODELS}" ]; then log "${n} models complete; done"; exit 0; fi
       sleep "${POLL}"
     done
     log "stop file present; exiting" ;;
