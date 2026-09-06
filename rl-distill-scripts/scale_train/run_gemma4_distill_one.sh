@@ -26,14 +26,22 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${PROJECT_ROOT}"
 
 TEACHER_SPEC="${TEACHER_SPEC:?e.g. 12b-easy (any trace spec of run_gemma4_bestckpt_trace_collection.sh)}"
-STUDENT="${STUDENT:?e4b or e2b}"
+STUDENT="${STUDENT:?e4b, e2b, 12b or 26b}"
 DISTILL_GPU_IDS="${DISTILL_GPU_IDS:?comma-separated physical GPU indices for this run}"
 IFS=',' read -r -a GPU_IDS <<< "${DISTILL_GPU_IDS}"
 
 case "${STUDENT}" in
   e4b) STUDENT_REPO=google/gemma-4-E4B; STUDENT_REVISION_DEFAULT=411aa17b749aa952df1359d2dcea73917a544d9a; STUDENT_MIN_GPUS=4; KL_CHUNK_DEFAULT=4096 ;;
   e2b) STUDENT_REPO=google/gemma-4-E2B; STUDENT_REVISION_DEFAULT=d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f; STUDENT_MIN_GPUS=2; KL_CHUNK_DEFAULT=2048 ;;
-  *) echo "FATAL: STUDENT must be e4b or e2b, got ${STUDENT}" >&2; exit 2 ;;
+  # Larger students for the pre-training control (E4B base traces -> 12B / 26B-A4B). fp32 master + Adam need
+  # all 8 H100s; 12B uses the unified decoder layer class, 26B-A4B (MoE experts live inside the text layer) the text one.
+  12b) STUDENT_REPO=google/gemma-4-12B;     STUDENT_REVISION_DEFAULT=023679ed352de9bb66cc873c9009ce3482585c08; STUDENT_MIN_GPUS=8; KL_CHUNK_DEFAULT=2048 ;;
+  26b) STUDENT_REPO=google/gemma-4-26B-A4B; STUDENT_REVISION_DEFAULT=24548b62aa021d562695c04aaf7758a1ea47990b; STUDENT_MIN_GPUS=8; KL_CHUNK_DEFAULT=1024 ;;
+  *) echo "FATAL: STUDENT must be e4b, e2b, 12b or 26b, got ${STUDENT}" >&2; exit 2 ;;
+esac
+case "${STUDENT}" in
+  12b) export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Gemma4UnifiedTextDecoderLayer}" ;;
+  *)   export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Gemma4TextDecoderLayer}" ;;
 esac
 if (( ${#GPU_IDS[@]} < STUDENT_MIN_GPUS )) && [[ ${ALLOW_UNDERSIZED_STUDENT_LAYOUT:-false} != true ]]; then
   echo "FATAL: ${STUDENT} student needs >= ${STUDENT_MIN_GPUS} GPUs (got ${#GPU_IDS[@]}: ${DISTILL_GPU_IDS}); set ALLOW_UNDERSIZED_STUDENT_LAYOUT=true to override" >&2
@@ -43,8 +51,21 @@ fi
 # identity; override STUDENT_REVISION deliberately.
 STUDENT_REVISION="${STUDENT_REVISION:-${STUDENT_REVISION_DEFAULT}}"
 
-TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2}"
-TRACE_LOCAL_ROOT="${TRACE_LOCAL_ROOT:-/tmp/gemma4_bestckpt_traces_v2/${TEACHER_SPEC}}"
+# Trace family follows the spec: RL-teacher study bundles (bestckpt v2) or the E4B-base control bundles
+# (run_gemma4_bestckpt_trace_collection.sh e4b-base-* specs: 16 train samples, own local/S3 prefix, no HF dataset mirror).
+case "${TEACHER_SPEC}" in
+  e4b-base-*)
+    TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-e4b-base-traces-topk128-v1}"
+    TRACE_LOCAL_ROOT="${TRACE_LOCAL_ROOT:-/tmp/gemma4_e4b_base_traces_v1/${TEACHER_SPEC}}"
+    TRACE_HF_DATASET_BASE="${TRACE_HF_DATASET_BASE-}"
+    TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}"
+    PROJECT_NAME="${PROJECT_NAME:-gemma4-e4b-base-distill-v1}"
+    ;;
+  *)
+    TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2}"
+    TRACE_LOCAL_ROOT="${TRACE_LOCAL_ROOT:-/tmp/gemma4_bestckpt_traces_v2/${TEACHER_SPEC}}"
+    ;;
+esac
 VIEW_S3_BASE="${VIEW_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-distill-views-v2}"
 SOURCE_ROOT="${SOURCE_ROOT:-/tmp/gemma4_distill_sources/${TEACHER_SPEC}}"
 STUDENTS_ROOT="${STUDENTS_ROOT:-/tmp/gemma4_distill_students}"

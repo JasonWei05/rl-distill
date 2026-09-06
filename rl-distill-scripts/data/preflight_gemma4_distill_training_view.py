@@ -45,6 +45,9 @@ ALLOWED_DIRECTIONS = {
     "e2b_easy_to_e2b",
     "e2b_medium_to_e2b",
     "e2b_hard_to_e2b",
+    # E4B *base* teacher -> 12B / 26B-A4B students (pre-training control)
+    "e4b_base_medium_to_12b_26b",
+    "e4b_base_hard_to_12b_26b",
 }
 
 

@@ -448,6 +448,12 @@ export FSDP_PARAM_DTYPE=${FSDP_PARAM_DTYPE:-bf16}
 export FSDP_REDUCE_DTYPE=${FSDP_REDUCE_DTYPE:-fp32}
 export FSDP_BUFFER_DTYPE=${FSDP_BUFFER_DTYPE:-fp32}
 export FSDP_CAST_FORWARD_INPUTS=${FSDP_CAST_FORWARD_INPUTS:-true}
+# CPU offload of FSDP params / optimizer state (only needed for the 26B-A4B student's fp32 master + Adam).
+export FSDP_PARAM_OFFLOAD=${FSDP_PARAM_OFFLOAD:-false}
+export FSDP_OPTIMIZER_OFFLOAD=${FSDP_OPTIMIZER_OFFLOAD:-false}
+for _flag in FSDP_PARAM_OFFLOAD FSDP_OPTIMIZER_OFFLOAD; do
+    case "${!_flag,,}" in true|false) ;; *) echo "${_flag} must be true or false" >&2; exit 2 ;; esac
+done
 export ALLOW_UNSAFE_GEMMA4_FSDP_PARAM_DTYPE=${ALLOW_UNSAFE_GEMMA4_FSDP_PARAM_DTYPE:-false}
 case "${FSDP_PARAM_DTYPE}" in
     bf16) ;;
@@ -615,6 +621,8 @@ COMMON_OVERRIDES=(
     model.enable_gradient_checkpointing="${ENABLE_GRADIENT_CHECKPOINTING}"
     model.override_config.attn_implementation=sdpa
     engine.fsdp_size=-1
+    engine.param_offload="${FSDP_PARAM_OFFLOAD}"
+    engine.optimizer_offload="${FSDP_OPTIMIZER_OFFLOAD}"
     engine.model_dtype="${MODEL_DTYPE}"
     engine.use_torch_compile=false
     "engine.wrap_policy.transformer_layer_cls_to_wrap=[\"${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP}\"]"
