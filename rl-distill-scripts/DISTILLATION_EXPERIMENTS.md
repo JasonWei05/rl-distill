@@ -502,5 +502,11 @@ distillation (it only sees other eval runners).
 
 (The base model answers much more tersely than the RL teachers; all sampled responses ended on a stop token.)
 
-**Distillation runs:** _(in progress — `e4b-base-medium → 12b` on GPUs 0,5,6,7 (4 GPUs, no offload: ~12 GB fp32
-params per GPU after the FSDP wrap), relaunched 22:31Z after the optimizer-only-offload assertion)_
+**Distillation runs:** `e4b-base-medium → 12b` training since 22:43Z on GPUs 0,5,6,7 (4 GPUs, no offload;
+67–77 GB/GPU; ~21 s/step → 500 steps ≈ 3 h; W&B project `gemma4-e4b-base-distill-v1`). Early metrics: top-128
+teacher mass 0.992, KL/token 0.22 → 0.15 over the first 20 steps, val loss 0.169 at step 10. Two fixes were needed
+to run a big student: verl's engine offloads model+optimizer+grads together (single `FSDP_OFFLOAD` knob), and the
+`skip_lm_head` hidden-state passthrough had to be added for `Gemma4UnifiedForConditionalGeneration` (12B) —
+commit 74730fe8. Next: `e4b-base-hard → 12b` on the same GPUs, then the 26B-A4B students once a GPU layout is
+settled (8 GPUs, or 4 with `FSDP_OFFLOAD=true`). Control baselines `base_12b` / `base_26b` math evals running on
+GPUs 1 / 3.
