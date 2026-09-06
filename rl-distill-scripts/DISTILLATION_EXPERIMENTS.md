@@ -475,13 +475,13 @@ at the end; directions `e4b_base_{medium,hard}_to_12b_26b`). Source data = the b
 500 steps, lr 2.5e-6 → 2.5e-7). The launcher now accepts `STUDENT=12b|26b` (8-GPU floor, fp32 master +
 Adam; 12B wraps `Gemma4UnifiedTextDecoderLayer`, 26B-A4B `Gemma4TextDecoderLayer`), picks the e4b-base
 trace family for `TEACHER_SPEC=e4b-base-*` (16 train samples, no HF dataset mirror), and exposes
-`FSDP_PARAM_OFFLOAD` / `FSDP_OPTIMIZER_OFFLOAD` for the 26B footprint. Tokenizer identity verified: E4B, 12B
+`FSDP_OFFLOAD=true` (params **and** optimizer together — verl's engine rejects offloading only one) for the 26B footprint. Tokenizer identity verified: E4B, 12B
 and 26B-A4B share the same tokenizer fingerprint (262,144 tokens), which the top-k KL preflight requires.
 
 ```bash
 # one run per (band, student); 4 runs total, sequential on 8 GPUs (each ~ the §4 recipe's wall time)
 TEACHER_SPEC=e4b-base-medium STUDENT=12b DISTILL_GPU_IDS=0,1,2,3,4,5,6,7 bash rl-distill-scripts/scale_train/run_gemma4_distill_one.sh
-TEACHER_SPEC=e4b-base-medium STUDENT=26b DISTILL_GPU_IDS=0,1,2,3,4,5,6,7 FSDP_OPTIMIZER_OFFLOAD=true bash rl-distill-scripts/scale_train/run_gemma4_distill_one.sh
+TEACHER_SPEC=e4b-base-medium STUDENT=26b DISTILL_GPU_IDS=0,1,2,3,4,5,6,7 FSDP_OFFLOAD=true bash rl-distill-scripts/scale_train/run_gemma4_distill_one.sh
 # ... e4b-base-hard likewise; students push to JWei05/Distill-gemma4-e4b-base-<band>-to-<student>-base/step_000500
 ```
 Then evaluate with §7 (math suite first). The registry builder now rosters the 12B and 26B-A4B bases
@@ -502,4 +502,5 @@ distillation (it only sees other eval runners).
 
 (The base model answers much more tersely than the RL teachers; all sampled responses ended on a stop token.)
 
-**Distillation runs:** _(in progress — first run `e4b-base-medium → 12b` on GPUs 0,5,6,7, started 22:2xZ)_
+**Distillation runs:** _(in progress — `e4b-base-medium → 12b` on GPUs 0,5,6,7 (4 GPUs, no offload: ~12 GB fp32
+params per GPU after the FSDP wrap), relaunched 22:31Z after the optimizer-only-offload assertion)_

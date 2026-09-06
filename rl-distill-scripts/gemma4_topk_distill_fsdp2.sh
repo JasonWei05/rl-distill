@@ -448,12 +448,13 @@ export FSDP_PARAM_DTYPE=${FSDP_PARAM_DTYPE:-bf16}
 export FSDP_REDUCE_DTYPE=${FSDP_REDUCE_DTYPE:-fp32}
 export FSDP_BUFFER_DTYPE=${FSDP_BUFFER_DTYPE:-fp32}
 export FSDP_CAST_FORWARD_INPUTS=${FSDP_CAST_FORWARD_INPUTS:-true}
-# CPU offload of FSDP params / optimizer state (only needed for the 26B-A4B student's fp32 master + Adam).
-export FSDP_PARAM_OFFLOAD=${FSDP_PARAM_OFFLOAD:-false}
-export FSDP_OPTIMIZER_OFFLOAD=${FSDP_OPTIMIZER_OFFLOAD:-false}
-for _flag in FSDP_PARAM_OFFLOAD FSDP_OPTIMIZER_OFFLOAD; do
-    case "${!_flag,,}" in true|false) ;; *) echo "${_flag} must be true or false" >&2; exit 2 ;; esac
-done
+# CPU offload of FSDP params + optimizer state (only for the 26B-A4B student's fp32 master + Adam). verl's
+# FSDP engine moves model, optimizer and grads together ("Model must be moved to device along with optimizer
+# and grad"), so a single knob drives both: FSDP_OFFLOAD=true|false (FSDP_PARAM_OFFLOAD / FSDP_OPTIMIZER_OFFLOAD
+# are accepted as aliases and coerced to the same value).
+export FSDP_OFFLOAD=${FSDP_OFFLOAD:-${FSDP_PARAM_OFFLOAD:-${FSDP_OPTIMIZER_OFFLOAD:-false}}}
+case "${FSDP_OFFLOAD,,}" in true|false) ;; *) echo "FSDP_OFFLOAD must be true or false" >&2; exit 2 ;; esac
+export FSDP_PARAM_OFFLOAD="${FSDP_OFFLOAD,,}" FSDP_OPTIMIZER_OFFLOAD="${FSDP_OFFLOAD,,}"
 export ALLOW_UNSAFE_GEMMA4_FSDP_PARAM_DTYPE=${ALLOW_UNSAFE_GEMMA4_FSDP_PARAM_DTYPE:-false}
 case "${FSDP_PARAM_DTYPE}" in
     bf16) ;;
