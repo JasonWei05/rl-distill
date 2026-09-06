@@ -484,8 +484,11 @@ TEACHER_SPEC=e4b-base-medium STUDENT=12b DISTILL_GPU_IDS=0,1,2,3,4,5,6,7 bash rl
 TEACHER_SPEC=e4b-base-medium STUDENT=26b DISTILL_GPU_IDS=0,1,2,3,4,5,6,7 FSDP_OPTIMIZER_OFFLOAD=true bash rl-distill-scripts/scale_train/run_gemma4_distill_one.sh
 # ... e4b-base-hard likewise; students push to JWei05/Distill-gemma4-e4b-base-<band>-to-<student>-base/step_000500
 ```
-Then evaluate with §7 (math suite first; the registry builder needs a `-to-(12b|26b)-base` pattern and
-12B/26B architecture entries).
+Then evaluate with §7 (math suite first). The registry builder now rosters the 12B and 26B-A4B bases
+(`base_12b`, `base_26b`, the control baselines) and discovers `…-e4b-base-<band>-to-(12b|26b)-base` students
+(tags `distill_e4b_base_<band>_to_<student>`). Note for the queue: a 26B-A4B model (52 GB bf16) needs one
+eval slot per GPU (`EVAL_QUEUE_SLOTS_PER_GPU=1`), and the eval queue must not share GPUs with a running
+distillation (it only sees other eval runners).
 
 ### 9.1 Results
 

@@ -34,6 +34,9 @@ MATH_DATASETS = ["id_easy", "id_medium", "id_hard", "math500", "gsm8k"]
 BASES = {  # architecture -> (repo, pinned revision) — same pins as the earlier eval registry
     "gemma-4-E2B": ("google/gemma-4-E2B", "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"),
     "gemma-4-E4B": ("google/gemma-4-E4B", "411aa17b749aa952df1359d2dcea73917a544d9a"),
+    # Larger bases: students of the pre-training-control study (E4B base traces -> 12B / 26B-A4B), §9.
+    "gemma-4-12B": ("google/gemma-4-12B", "023679ed352de9bb66cc873c9009ce3482585c08"),
+    "gemma-4-26B-A4B": ("google/gemma-4-26B-A4B", "24548b62aa021d562695c04aaf7758a1ea47990b"),
 }
 # The small RL teachers: W&B val mean@16 peaks, pinned to the Hub commit that holds that step
 # (identical to the pins in scale_train/run_gemma4_bestckpt_trace_collection.sh).
@@ -46,9 +49,9 @@ RL_TEACHERS = [
     ("e4b", "hard", 120, "JWei05/DAPO-gemma4-e4b-PT-DeepScaleR-gemma26b-hard-seed42-26b-bands-es5", "627bd9d825ffdab1552fb3bbc1af410a8d2ac0a1"),
 ]
 DISTILLED_NAME = re.compile(
-    r"^JWei05/(?:Distill-gemma4|gemma4-distill-v2)-(?P<teacher>26b|12b|e4b|e2b)-(?P<band>easy|medium|hard)-to-(?P<student>e4b|e2b)-base$"
+    r"^JWei05/(?:Distill-gemma4|gemma4-distill-v2)-(?P<teacher>26b|12b|e4b|e2b|e4b-base)-(?P<band>easy|medium|hard)-to-(?P<student>e4b|e2b|12b|26b)-base$"
 )
-ARCH = {"e2b": "gemma-4-E2B", "e4b": "gemma-4-E4B"}
+ARCH = {"e2b": "gemma-4-E2B", "e4b": "gemma-4-E4B", "12b": "gemma-4-12B", "26b": "gemma-4-26B-A4B"}
 
 
 def _token() -> str | None:
@@ -94,7 +97,7 @@ def discover_distilled(session: requests.Session, existing: dict[str, dict[str, 
         if not match:
             continue
         teacher, band, student = match["teacher"], match["band"], match["student"]
-        tag = f"distill_{teacher}_{band}_to_{student}"
+        tag = f"distill_{teacher.replace('-', '_')}_{band}_to_{student}"   # e4b-base -> e4b_base
         if tag in seen:
             print(f"  WARNING {item['id']}: same direction as {seen[tag]} (tag {tag}); not rostered -- add by hand with a distinct tag if both runs matter")
             continue
@@ -137,11 +140,11 @@ def main() -> int:
 
     models: list[dict[str, Any]] = []
     for architecture, (repo, revision) in ([] if args.no_bases else BASES.items()):
-        student = architecture.split("-")[-1].lower()
+        student = {"gemma-4-E2B": "e2b", "gemma-4-E4B": "e4b", "gemma-4-12B": "12b", "gemma-4-26B-A4B": "26b"}[architecture]
         models.append(
             {
                 "tag": f"base_{student}",
-                "display_name": f"Gemma 4 {architecture.split('-')[-1]} PT base",
+                "display_name": f"Gemma 4 {architecture.removeprefix('gemma-4-')} PT base",
                 "category": "base",
                 "architecture": architecture,
                 "trained_on": None,
