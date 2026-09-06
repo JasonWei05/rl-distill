@@ -45,16 +45,21 @@ case "${TRACE_SPEC}" in
   e2b-hard)   RUN_KEY=e2b-hard;       BAND=hard;   BEST_STEP=190; DIRECTION=e2b_hard_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-e2b-PT-DeepScaleR-gemma26b-hard-seed42-local2gpu; TEACHER_HF_REVISION=59762d43bf94b6938d2e560e1fdbfdbf0d3f9e4c ;;
   26b-medium) RUN_KEY=26b-a4b-medium; BAND=medium; BEST_STEP=140; DIRECTION=26b_medium_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5; TEACHER_HF_REVISION=4da4c943785fa0549b647a5f9736047047b44702 ;;
   26b-hard)   RUN_KEY=26b-a4b-hard;   BAND=hard;   BEST_STEP=180; DIRECTION=26b_hard_to_e2b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-hard-seed42-teacher-step180; TEACHER_HF_REVISION=e5329d14a3a5fdbf48d7e22a8508625c33502694 ;;  # frozen copy of the rolling repo's step 180 (same LFS shas); the rolling repo prunes/squashes
+  # Untrained E4B base as the teacher (pre-training control: small base -> 12b/26b students). The Hub repo
+  # holds the model at its root (no step_NNNNNN/ subdir); 16 samples per training question by default.
+  e4b-base-medium) RUN_KEY=e4b-base; BAND=medium; BEST_STEP=0; DIRECTION=e4b_base_medium_to_12b_26b; TEACHER_HF_REPO=google/gemma-4-E4B; TEACHER_HF_REVISION=411aa17b749aa952df1359d2dcea73917a544d9a; TEACHER_HF_ROOT=1 ;;
+  e4b-base-hard)   RUN_KEY=e4b-base; BAND=hard;   BEST_STEP=0; DIRECTION=e4b_base_hard_to_12b_26b;   TEACHER_HF_REPO=google/gemma-4-E4B; TEACHER_HF_REVISION=411aa17b749aa952df1359d2dcea73917a544d9a; TEACHER_HF_ROOT=1 ;;
   *)
     echo "FATAL: unsupported TRACE_SPEC=${TRACE_SPEC}" >&2
     exit 2
     ;;
 esac
+TEACHER_HF_ROOT="${TEACHER_HF_ROOT:-0}"
 
 # TEACHER_SOURCE=s3 pulls the e4b/12b/26b-easy teachers from the S3 full checkpoints instead
 # of their Hub re-uploads (same weights, same content hash; only for boxes with S3 access).
 if [[ ${TEACHER_SOURCE:-hf} == s3 ]]; then
-  case "${RUN_KEY}" in e4b-*|12b-*|26b-a4b-easy) TEACHER_HF_REPO="" ;; esac
+  case "${RUN_KEY}" in e4b-easy|e4b-medium|e4b-hard|12b-*|26b-a4b-easy) TEACHER_HF_REPO="" ;; esac
 fi
 FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-20260819-full-checkpoints}"
 TEACHER_S3_URI="${FULL_CHECKPOINT_S3_BASE}/${RUN_KEY}/global_step_${BEST_STEP}/actor/huggingface"
@@ -108,12 +113,19 @@ export VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-0}"
 MODEL_DIR="${MODEL_DIR:-/tmp/gemma4_trace_models/${TRACE_SPEC}}"
 mkdir -p "${MODEL_DIR}"
 if [[ -n ${TEACHER_HF_REPO} ]]; then
-  TEACHER_HF_SUBDIR="$(printf 'step_%06d' "${BEST_STEP}")"
-  TEACHER_SOURCE_URI="hf://${TEACHER_HF_REPO}/${TEACHER_HF_SUBDIR}"
-  TEACHER_SOURCE_SUBFOLDER="${TEACHER_HF_SUBDIR}"
+  if [[ ${TEACHER_HF_ROOT} == 1 ]]; then
+    TEACHER_HF_SUBDIR=""   # base-model repo: weights at the repo root, no step_NNNNNN/ subdir
+    TEACHER_SOURCE_URI="hf://${TEACHER_HF_REPO}"
+    TEACHER_SOURCE_SUBFOLDER="."
+  else
+    TEACHER_HF_SUBDIR="$(printf 'step_%06d' "${BEST_STEP}")"
+    TEACHER_SOURCE_URI="hf://${TEACHER_HF_REPO}/${TEACHER_HF_SUBDIR}"
+    TEACHER_SOURCE_SUBFOLDER="${TEACHER_HF_SUBDIR}"
+  fi
   echo "TEACHER_DOWNLOAD spec=${TRACE_SPEC} hf=${TEACHER_SOURCE_URI} revision=${TEACHER_HF_REVISION:-main}"
-  # Pull only the best-step subdir, onto local disk (not the EFS HF cache), then flatten it
-  # into MODEL_DIR so the rest of the pipeline is source-agnostic.
+  # Pull only the best-step subdir (or, for a base model, the repo-root model/tokenizer/processor files),
+  # onto local disk (not the EFS HF cache), then flatten it into MODEL_DIR so the rest of the pipeline
+  # is source-agnostic.
   "${VENV}/bin/python" - "${TEACHER_HF_REPO}" "${TEACHER_HF_SUBDIR}" "${MODEL_DIR}" "${TEACHER_HF_REVISION:-main}" <<'PY'
 import shutil
 import sys
@@ -122,11 +134,14 @@ from pathlib import Path
 from huggingface_hub import snapshot_download
 
 repo, subdir, model_dir, revision = sys.argv[1], sys.argv[2], Path(sys.argv[3]), sys.argv[4]
-staged = Path(
-    snapshot_download(repo, revision=revision, allow_patterns=[f"{subdir}/*"], local_dir=str(model_dir.with_name(model_dir.name + "_hf")))
-)
-for path in (staged / subdir).iterdir():
-    shutil.copy2(path, model_dir / path.name)
+if subdir:
+    patterns, src = [f"{subdir}/*"], subdir
+else:
+    patterns, src = ["*.json", "*.safetensors", "*.jinja", "*.model", "*.txt"], "."
+staged = Path(snapshot_download(repo, revision=revision, allow_patterns=patterns, local_dir=str(model_dir.with_name(model_dir.name + "_hf"))))
+for path in (staged / src).iterdir():
+    if path.is_file():
+        shutil.copy2(path, model_dir / path.name)
 PY
 else
   TEACHER_SOURCE_URI="${TEACHER_S3_URI}"
@@ -181,7 +196,7 @@ fi
 
 # --- Source: the band's training + validation data (same as RL) ---
 GLOBAL_SEED="${GLOBAL_SEED:-42}"
-TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}"
+case "${TRACE_SPEC}" in e4b-base-*) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" ;; *) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}" ;; esac
 VALIDATION_SAMPLES_PER_QUESTION="${VALIDATION_SAMPLES_PER_QUESTION:-1}"
 PROMPTS_PER_SHARD="${PROMPTS_PER_SHARD:-8}"
 ROW_GROUP_ROWS="${ROW_GROUP_ROWS:-2}"
@@ -198,10 +213,15 @@ MAX_WORKER_ATTEMPTS="${MAX_WORKER_ATTEMPTS:-5}"
 # Separate local root per trace version: the generator refuses to write into a directory
 # holding a different generation configuration, so v2 must not share v1's local dirs
 # (their stale v1 run_config.json would block every spec that ran under v1).
-OUTPUT_ROOT="${OUTPUT_ROOT:-/tmp/gemma4_bestckpt_traces_v2/${TRACE_SPEC}}"
+# Trace family: RL-teacher study bundles vs the E4B-base (pre-training control) bundles.
+case "${TRACE_SPEC}" in
+  e4b-base-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/gemma4_e4b_base_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-e4b-base-traces-topk128-v1}" ;;
+  *)          TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/gemma4_bestckpt_traces_v2}";  TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2}" ;;
+esac
+OUTPUT_ROOT="${OUTPUT_ROOT:-${TRACE_LOCAL_BASE}/${TRACE_SPEC}}"
 # v2: v1 was generated through a text-only architecture override that corrupted the
 # top-k logprobs and leaked <image|> into ~70% of responses; v1 must not be used.
-TRACE_OUTPUT_S3_URI="${TRACE_OUTPUT_S3_URI:-s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2/${TRACE_SPEC}}"
+TRACE_OUTPUT_S3_URI="${TRACE_OUTPUT_S3_URI:-${TRACE_S3_BASE}/${TRACE_SPEC}}"
 TRACE_S3_MIRROR_ENABLE="${TRACE_S3_MIRROR_ENABLE:-true}"
 DATA_DIR="${DATA_DIR:-${OUTPUT_ROOT}/source}"
 TRAIN_DIR="${OUTPUT_ROOT}/train"

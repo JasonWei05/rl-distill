@@ -81,6 +81,9 @@ DIRECTIONS = (
     "e2b_easy_to_e2b",
     "e2b_medium_to_e2b",
     "e2b_hard_to_e2b",
+    # E4B *base* (untrained) teacher -> larger students (12b, 26b); pre-training control for the distillation study.
+    "e4b_base_medium_to_12b_26b",
+    "e4b_base_hard_to_12b_26b",
 )
 SPLITS = ("train", "validation")
 

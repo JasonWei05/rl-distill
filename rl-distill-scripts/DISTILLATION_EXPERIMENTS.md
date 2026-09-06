@@ -442,3 +442,36 @@ same shape: medium/hard-band RL barely beats the base on MATH500 and GSM8K at k=
 on both), while the distilled students reach 50–55 on MATH500 and 64–72 on GSM8K. So for the 2B student, RL sharpens
 single-sample accuracy on its band; distillation from a bigger teacher broadens coverage and transfers, at a cost in
 mean@16 on medium/hard.
+
+## 9. Pre-training control: E4B *base* teacher → 12B / 26B students (started 2026-09-06)
+
+Goal: separate what distillation transfers from what the teacher's pre-training already knows, by
+distilling traces from the **untrained** Gemma 4 E4B PT model (`google/gemma-4-E4B` @ `411aa17b`)
+into the larger 12B and 26B-A4B bases on the **medium** and **hard** bands.
+
+**Step 1 — trace generation (running locally):** same sampler and prompt as every trace bundle in
+this study (temp 1.0 / top-p 1.0 / top-k −1, 8192 max response tokens, 12-shot
+`data/gemma3_it_fewshot_math.jinja`), **16 responses per training question, 1 per validation
+question**, with top-128 logprobs + token ids per position. Two collections run at once, each with
+2 GPUs as 2 data-parallel workers (TP 1):
+
+```bash
+# spec e4b-base-medium on GPUs 0,5 and e4b-base-hard on GPUs 6,7 (tmux trace-<spec>)
+TRACE_SPEC=e4b-base-medium TRACE_GPU_IDS=0,5 TENSOR_PARALLEL_SIZE=1 TRAIN_SAMPLES_PER_QUESTION=16 \
+  VALIDATION_SAMPLES_PER_QUESTION=1 VENV=/tmp/.venv-gemma4 AWS_PROFILE=ml-worker \
+  bash rl-distill-scripts/scale_train/run_gemma4_bestckpt_trace_collection.sh
+TRACE_SPEC=e4b-base-hard TRACE_GPU_IDS=6,7 ... (same)
+# progress: ls /tmp/gemma4_e4b_base_traces_v1/<spec>/{train,validation}/*.parquet | wc -l ; logs under <spec>/logs/
+```
+
+The `e4b-base-*` specs (collection script) pull the base repo root (no `step_NNNNNN/`), default to 16
+train samples, and write to `/tmp/gemma4_e4b_base_traces_v1/<spec>/` mirrored to
+`s3://scale-ml/genai/rl-distill/gemma4-e4b-base-traces-topk128-v1/<spec>/` (bundle `COMPLETE.json`
+at the end; directions `e4b_base_{medium,hard}_to_12b_26b`). Source data = the band train split
+(3,000 q) and the 300-q validation split of `JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k@a0ba3c3d`.
+
+**Step 2 (next):** distill into `google/gemma-4-12B` and `google/gemma-4-26B-A4B` bases with the §4
+recipe (top-128 forward KL), then evaluate with §7 (math suite first).
+
+### 9.1 Results
+_(pending — trace generation in progress)_
