@@ -309,52 +309,71 @@ def _patch_gemma4_skip_lm_head():
     The off-policy distillation path projects response-token hidden states through the
     vocabulary head in small chunks. Gemma 4's native ``logits_to_keep`` still applies
     the complete LM head in one call, which defeats that memory bound for long traces.
+    Both Gemma 4 causal-LM classes are patched: ``Gemma4ForConditionalGeneration`` (E2B/E4B/26B-A4B)
+    and ``Gemma4UnifiedForConditionalGeneration`` (12B); they share the forward structure
+    (``self.model(...)`` -> ``last_hidden_state`` -> ``lm_head`` -> softcap).
     """
+    from dataclasses import fields
 
+    targets = []
     try:
-        from dataclasses import fields
-
         from transformers.models.gemma4.modeling_gemma4 import (
             Gemma4CausalLMOutputWithPast,
             Gemma4ForConditionalGeneration,
         )
+
+        targets.append((Gemma4ForConditionalGeneration, Gemma4CausalLMOutputWithPast))
     except Exception:
-        return
+        pass
+    try:
+        from transformers.models.gemma4_unified.modeling_gemma4_unified import (
+            Gemma4UnifiedCausalLMOutputWithPast,
+            Gemma4UnifiedForConditionalGeneration,
+        )
 
-    if getattr(Gemma4ForConditionalGeneration, "_verl_skip_lm_head_patched", False):
-        return
+        targets.append((Gemma4UnifiedForConditionalGeneration, Gemma4UnifiedCausalLMOutputWithPast))
+    except Exception:
+        pass
 
-    orig_forward = Gemma4ForConditionalGeneration.forward
+    for model_cls, output_cls in targets:
+        if getattr(model_cls, "_verl_skip_lm_head_patched", False):
+            continue
+        orig_forward = model_cls.forward
 
-    @wraps(orig_forward)
-    def forward_with_skip_lm_head(self, *args, skip_lm_head=False, **kwargs):
-        if not skip_lm_head:
-            return orig_forward(self, *args, **kwargs)
+        def make_forward(orig_forward, output_cls):
+            @wraps(orig_forward)
+            def forward_with_skip_lm_head(self, *args, skip_lm_head=False, **kwargs):
+                if not skip_lm_head:
+                    return orig_forward(self, *args, **kwargs)
 
-        logits_to_keep = kwargs.pop("logits_to_keep", 0)
-        logits_to_keep_batch_indices = kwargs.pop("logits_to_keep_batch_indices", None)
-        return_dict = kwargs.pop("return_dict", True)
-        if return_dict is False:
-            raise ValueError("Gemma 4 skip_lm_head requires return_dict=True")
+                logits_to_keep = kwargs.pop("logits_to_keep", 0)
+                logits_to_keep_batch_indices = kwargs.pop("logits_to_keep_batch_indices", None)
+                return_dict = kwargs.pop("return_dict", True)
+                if return_dict is False:
+                    raise ValueError("Gemma 4 skip_lm_head requires return_dict=True")
 
-        outputs = self.model(*args, return_dict=True, **kwargs)
-        hidden_states = outputs.last_hidden_state
-        hidden_states = _select_hidden_states_for_lm_head(hidden_states, logits_to_keep, logits_to_keep_batch_indices)
+                outputs = self.model(*args, return_dict=True, **kwargs)
+                hidden_states = outputs.last_hidden_state
+                hidden_states = _select_hidden_states_for_lm_head(
+                    hidden_states, logits_to_keep, logits_to_keep_batch_indices
+                )
 
-        output_kwargs = {"loss": None, "logits": hidden_states}
-        for field in fields(Gemma4CausalLMOutputWithPast):
-            if field.name not in output_kwargs:
-                output_kwargs[field.name] = getattr(outputs, field.name, None)
-        output = Gemma4CausalLMOutputWithPast(**output_kwargs)
-        # Transformers 5.5's causal-LM output dataclass does not yet declare
-        # Gemma 4's cache-sharing carrier, but the backbone returns it and
-        # generation/resume callers may rely on the attribute being preserved.
-        if hasattr(outputs, "shared_kv_states"):
-            output.shared_kv_states = outputs.shared_kv_states
-        return output
+                output_kwargs = {"loss": None, "logits": hidden_states}
+                for field in fields(output_cls):
+                    if field.name not in output_kwargs:
+                        output_kwargs[field.name] = getattr(outputs, field.name, None)
+                output = output_cls(**output_kwargs)
+                # Transformers 5.5's causal-LM output dataclass does not yet declare
+                # Gemma 4's cache-sharing carrier, but the backbone returns it and
+                # generation/resume callers may rely on the attribute being preserved.
+                if hasattr(outputs, "shared_kv_states"):
+                    output.shared_kv_states = outputs.shared_kv_states
+                return output
 
-    Gemma4ForConditionalGeneration.forward = forward_with_skip_lm_head
-    Gemma4ForConditionalGeneration._verl_skip_lm_head_patched = True
+            return forward_with_skip_lm_head
+
+        model_cls.forward = make_forward(orig_forward, output_cls)
+        model_cls._verl_skip_lm_head_patched = True
 
 
 _patch_gemma4_skip_lm_head()
