@@ -343,12 +343,14 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-05 04:04Z — math complete for 29/29 models, OOD complete for 29/29. Partial rows are shown as they finish._
+_Updated 2026-09-06 23:37Z — math complete for 30/31 models, OOD complete for 29/31. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
 | Model | Category | Trained on | id_easy (16) | id_medium (16) | id_hard (16) | MATH500 (16) | GSM8K (8) |
 |---|---|---|---|---|---|---|---|
+| `base_12b` | base | — | — | — | — | — | — |
+| `base_26b` | base | — | 62.3 / 99.7 | 23.8 / 86.3 | 9.9 / 69.7 | 27.2 / 71.8 | 56.7 / 93.6 |
 | `base_e2b` | base | — | 11.2 / 55.0 | 4.3 / 36.7 | 3.1 / 32.0 | 4.8 / 37.0 | 8.2 / 36.0 |
 | `base_e4b` | base | — | 29.6 / 89.3 | 8.6 / 60.3 | 4.2 / 38.0 | 10.9 / 50.6 | 26.4 / 72.6 |
 | `rl_e2b_easy` | rl | easy | **40.7 / 76.3** | 17.0 / 57.7 | 8.4 / 39.0 | 16.3 / 46.2 | 33.8 / 64.5 |
@@ -383,6 +385,8 @@ _Updated 2026-09-05 04:04Z — math complete for 29/29 models, OOD complete for 
 
 | Model | MMLU-Pro | GPQA-Diamond | MMLU-14k |
 |---|---|---|---|
+| `base_12b` | — | — | — |
+| `base_26b` | — | — | — |
 | `base_e2b` | 23.9 | 22.7 | 48.2 |
 | `base_e4b` | 37.9 | 19.2 | 61.6 |
 | `rl_e2b_easy` | 28.4 | 24.2 | 48.2 |
