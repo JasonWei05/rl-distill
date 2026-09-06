@@ -488,4 +488,15 @@ Then evaluate with §7 (math suite first; the registry builder needs a `-to-(12b
 12B/26B architecture entries).
 
 ### 9.1 Results
-_(pending — trace generation in progress)_
+
+**Traces (done 2026-09-06, 18:39–22:12Z on GPUs 0,5 / 6,7):** both bundles `COMPLETE`, mirrored to
+`s3://scale-ml/genai/rl-distill/gemma4-e4b-base-traces-topk128-v1/<spec>/` (1,666 objects, 10.7 GB).
+
+| Bundle | train rows | validation rows | sampled mean / max response tokens (train) | top-k width | `<image\|>` leakage |
+|---|---|---|---|---|---|
+| e4b-base-medium | 48,000 (3,000 q × 16) | 300 (× 1) | 239 / 1,735 | 128 | 0 |
+| e4b-base-hard | 48,000 (3,000 q × 16) | 300 (× 1) | 170 / 748 | 128 | 0 |
+
+(The base model answers much more tersely than the RL teachers; all sampled responses ended on a stop token.)
+
+**Distillation runs:** _(in progress — first run `e4b-base-medium → 12b` on GPUs 0,5,6,7, started 22:2xZ)_
