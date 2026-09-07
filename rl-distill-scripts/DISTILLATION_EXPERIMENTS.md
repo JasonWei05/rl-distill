@@ -578,7 +578,21 @@ python rl-distill-scripts/eval_student_checkpoints_passk.py --gpu 7 --poll-minut
 
 (The base model answers much more tersely than the RL teachers; all sampled responses ended on a stop token.)
 
-**Distillation runs — local training stopped 2026-09-07 00:05Z at the user's request (to be run off this box).**
+**Distillation runs — ScaleTrain (launched 2026-09-07 ~17:30Z, mediums first):** `gemma4-e4bbase-med-12b`
+(p5.48xlarge:4, 4×H100) and `gemma4-e4bbase-med-26b` (p5.48xlarge, 8×H100), priority high, borrowing on, run-file
+`scale_train/run_gemma4_e4b_base_distill_st.sh` (v2 recipe: batch 128, lr 2e-6 → 2e-7, 1000 steps, validate every
+10, save + push every 250; image built remotely from the tree at a9c50024+). Students land at
+`JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base/step_000250…step_001000`; the local checkpoint watchers
+(GPUs 6/7) evaluate each step with the ×32 protocol and refresh `figures/passk_*_val32.png`. Hard-band jobs: not
+launched yet. Launch command pattern:
+```bash
+cd rl-distill-scripts/scale_train
+python3 launch_st_job.py --cluster eks --build-env remote --n-instances 1 --gpus-per-instance 4 --job-name gemma4-e4bbase-med-12b \
+  --priority high --allow-borrowing --active-deadline-hours 72 --run-file run_gemma4_e4b_base_distill_st.sh \
+  --env-vars "TEACHER_SPEC=e4b-base-medium,STUDENT=12b"          # 26B: --gpus-per-instance 8, STUDENT=26b, deadline 96 h
+```
+
+_(Earlier local attempt, 2026-09-07 00:05Z, stopped at the user's request — kept for the record:)_
 The first run, `e4b-base-medium → 12b` on GPUs 0,5,6,7 (4 GPUs, no offload; 67–77 GB/GPU; ~21 s/step), was killed at
 step 250/500 with KL/token 0.22 → 0.09 and val loss 0.169 → 0.088; no student was pushed. Two fixes made big students
 runnable and are committed (74730fe8): verl's engine offloads model+optimizer+grads together (single `FSDP_OFFLOAD`
