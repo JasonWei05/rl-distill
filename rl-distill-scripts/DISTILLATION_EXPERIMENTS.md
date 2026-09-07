@@ -506,11 +506,11 @@ distillation (it only sees other eval runners).
 
 (The base model answers much more tersely than the RL teachers; all sampled responses ended on a stop token.)
 
-**Distillation runs:** `e4b-base-medium → 12b` training since 22:43Z on GPUs 0,5,6,7 (4 GPUs, no offload;
-67–77 GB/GPU; ~21 s/step → 500 steps ≈ 3 h; W&B project `gemma4-e4b-base-distill-v1`). Early metrics: top-128
-teacher mass 0.992, KL/token 0.22 → 0.15 over the first 20 steps, val loss 0.169 at step 10. Two fixes were needed
-to run a big student: verl's engine offloads model+optimizer+grads together (single `FSDP_OFFLOAD` knob), and the
-`skip_lm_head` hidden-state passthrough had to be added for `Gemma4UnifiedForConditionalGeneration` (12B) —
-commit 74730fe8. Next: `e4b-base-hard → 12b` on the same GPUs, then the 26B-A4B students once a GPU layout is
-settled (8 GPUs, or 4 with `FSDP_OFFLOAD=true`). Control baselines `base_12b` / `base_26b` math evals running on
-GPUs 1 / 3.
+**Distillation runs — local training stopped 2026-09-07 00:05Z at the user's request (to be run off this box).**
+The first run, `e4b-base-medium → 12b` on GPUs 0,5,6,7 (4 GPUs, no offload; 67–77 GB/GPU; ~21 s/step), was killed at
+step 250/500 with KL/token 0.22 → 0.09 and val loss 0.169 → 0.088; no student was pushed. Two fixes made big students
+runnable and are committed (74730fe8): verl's engine offloads model+optimizer+grads together (single `FSDP_OFFLOAD`
+knob), and the `skip_lm_head` hidden-state passthrough now covers `Gemma4UnifiedForConditionalGeneration` (12B).
+To run elsewhere: the step-2 commands above (`STUDENT=12b|26b`, 8 GPUs; `FSDP_OFFLOAD=true` for 26B-A4B on fewer),
+bundles from the S3 prefix (or copy `/tmp/gemma4_e4b_base_traces_v1/<spec>/`). Control baselines `base_12b` /
+`base_26b` math results are in §8.
