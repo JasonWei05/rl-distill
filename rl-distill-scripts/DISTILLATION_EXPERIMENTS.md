@@ -559,6 +559,15 @@ python rl-distill-scripts/eval_student_checkpoints_passk.py --gpu 7 --poll-minut
 
 ### 9.1 Results
 
+**E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
+
+| band (300 q) | mean@32 | maj@32 | pass@1 | pass@2 | pass@4 | pass@8 | pass@16 | pass@32 |
+|---|---|---|---|---|---|---|---|---|
+| id_medium | 8.4 | 20.3 | 8.4 | 15.4 | 26.6 | 41.9 | 59.3 | 74.7 |
+| id_hard | 3.9 | 9.0 | 3.9 | 7.4 | 13.5 | 23.1 | 35.8 | 50.7 |
+
+![E4B base validation pass@k ×32](figures/passk_e4b_base_val32.png)
+
 **Traces (done 2026-09-06, 18:39–22:12Z on GPUs 0,5 / 6,7):** both bundles `COMPLETE`, mirrored to
 `s3://scale-ml/genai/rl-distill/gemma4-e4b-base-traces-topk128-v1/<spec>/` (1,666 objects, 10.7 GB).
 
