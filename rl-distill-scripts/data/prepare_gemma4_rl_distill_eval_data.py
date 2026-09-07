@@ -36,6 +36,7 @@ BAND_VALIDATION_SHA256 = {
     "hard": "7dd10c2a983f9386ae9509571bca3e22447b884bf3ab0aecaba5ad678f045d90",
 }
 SAMPLES_PER_QUESTION = {"id_easy": 16, "id_medium": 16, "id_hard": 16, "math500": 16, "gsm8k": 8}
+PROTOCOL = "gemma4_rl_distill_math_eval_v2"
 ID_SOURCES = {
     f"id_{band}": {
         "repo_id": BAND_REPO_ID,
@@ -136,7 +137,7 @@ def materialize(
 
     manifest = {
         "schema_version": 1,
-        "protocol": "gemma4_rl_distill_math_eval_v2",
+        "protocol": PROTOCOL,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "repetition_rule": {
             "policy": "fixed_by_dataset",
@@ -171,11 +172,27 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--chat-template", type=Path, default=DEFAULT_CHAT_TEMPLATE)
     parser.add_argument("--threshold", type=int, default=DEFAULT_THRESHOLD)
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--samples-override", default=None,
+                        help='per-dataset samples per question, e.g. "id_medium=32,id_hard=32" (requires --protocol)')
+    parser.add_argument("--protocol", default=None,
+                        help="protocol name recorded in the manifest (default gemma4_rl_distill_math_eval_v2; a variant "
+                             "such as gemma4_rl_distill_math_eval_v2_x32 must also be listed in eval_math_passk.py)")
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    global PROTOCOL
     args = parse_args(argv)
+    if args.samples_override:
+        if not args.protocol:
+            raise SystemExit("--samples-override requires --protocol (a new protocol name for the variant)")
+        for item in args.samples_override.split(","):
+            name, value = item.split("=")
+            if name.strip() not in SAMPLES_PER_QUESTION:
+                raise SystemExit(f"unknown dataset in --samples-override: {name}")
+            SAMPLES_PER_QUESTION[name.strip()] = int(value)
+    if args.protocol:
+        PROTOCOL = args.protocol
     from datasets import load_dataset
     from huggingface_hub import hf_hub_download
 

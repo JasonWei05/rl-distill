@@ -494,6 +494,50 @@ Then evaluate with §7 (math suite first). The registry builder now rosters the 
 eval slot per GPU (`EVAL_QUEUE_SLOTS_PER_GPU=1`), and the eval queue must not share GPUs with a running
 distillation (it only sees other eval runners).
 
+**Target:** the distilled 12B / 26B students should reproduce the E4B teacher's **pass@k curve** on the
+in-distribution validation set of their band (not just mean@16). Reference curves: the E4B base sampled
+**32×** per validation question (protocol `gemma4_rl_distill_math_eval_v2_x32`, k = 1..32):
+
+```bash
+# manifest variant (only id_medium / id_hard at 32 samples; everything else as v2)
+python rl-distill-scripts/data/prepare_gemma4_rl_distill_eval_data.py --output-dir /tmp/gemma4_e4b_val32/data \
+  --overwrite --samples-override "id_medium=32,id_hard=32" --protocol gemma4_rl_distill_math_eval_v2_x32
+# one eval per band (E4B base; identical sampler/prompt/verifier to the study), then the curves:
+python rl-distill-scripts/eval_math_passk.py --model <E4B base dir> --expected_model_identity_sha256 <sha> --tag base_e4b \
+  --datasets /tmp/gemma4_e4b_val32/data/id_medium.parquet --dataset_manifest /tmp/gemma4_e4b_val32/data/math_eval_manifest.json \
+  --out /tmp/gemma4_e4b_val32/id_medium/metrics.json --trace_dir /tmp/gemma4_e4b_val32/id_medium/traces --ks 1 2 4 8 16 32 \
+  --temperature 1.0 --top_k -1 --top_p 1.0 --max_tokens 8192 --max_prompt_tokens 4096 --max_model_len 12288 \
+  --predictive_topk_width 0 --request_batch_size 2048 --questions_per_batch 64 --subset_strategy monte_carlo --monte_carlo_resamples 4096
+python rl-distill-scripts/plot_passk_from_traces.py --out rl-distill-scripts/figures/passk_e4b_base_val32.png \
+  --trace "E4B base=/tmp/gemma4_e4b_val32/id_medium/traces/base_e4b__id_medium.jsonl" --trace "E4B base=/tmp/gemma4_e4b_val32/id_hard/traces/base_e4b__id_hard.jsonl"
+```
+Evaluate each student checkpoint with the same ×32 protocol and add its trace to the plot to compare curves.
+
+**Step 2 hyperparameters — what we ran before vs. these runs (run off this box, 4 GPUs each):**
+
+| | e2b/e4b students (§4, 2026-09-04) | 12B / 26B-A4B students (§9) |
+|---|---|---|
+| data | 3,000 q × 8 teacher samples = 24k rows | 3,000 q × 16 = 48k rows (`TRAIN_SAMPLES_PER_QUESTION=16`) |
+| global batch / steps | 64 / 500 (≈1.3 epochs) | **128 / 1000** (≈2.7 epochs; `TOTAL_EPOCHS=100` cap) |
+| LR schedule | 2.5e-6 peak, 100 warmup, linear → 2.5e-7 | **2e-6** peak, 100 warmup, linear → 2e-7 (`MIN_LR_RATIO=0.1`) |
+| micro-batching | 1 seq / micro-batch, 4096 padded-token ceiling, KL chunk 4096 (e4b) / 2048 (e2b) | same; KL chunk 2048 (12B) / 1024 (26B) |
+| precision / FSDP | fp32 master + Adam, bf16 param views, grad ckpt, max_length 12288 | same; 12B fits on 4×H100 (67–77 GB); 26B-A4B on 4 GPUs needs `FSDP_OFFLOAD=true` (8 GPUs preferred) |
+| validation | top-128 KL on 128 teacher val generations every 10 steps | same, `TEST_FREQ=20`; plus pass@k×32 on saved checkpoints |
+| checkpoints | final only (`SAVE_FREQ=0`) → `step_000500` on the Hub | `SAVE_FREQ=250` → `step_000250/500/750/1000` pushed (pass@k over training) |
+| wrap class | `Gemma4TextDecoderLayer` | 12B `Gemma4UnifiedTextDecoderLayer`, 26B-A4B `Gemma4TextDecoderLayer` (set by `STUDENT`) |
+
+```bash
+# on a node with the repo + .venv-gemma4 + .env (HF_TOKEN, WANDB_API_KEY); bundles are fetched from S3 (or copy the local dirs)
+COMMON="TRAIN_BATCH_SIZE=128 LR=2e-6 TOTAL_TRAINING_STEPS=1000 LR_WARMUP_STEPS=100 MIN_LR_RATIO=0.1 TEST_FREQ=20 SAVE_FREQ=250 \
+        ALLOW_UNDERSIZED_STUDENT_LAYOUT=true PROJECT_NAME=gemma4-e4b-base-distill-v1"
+env $COMMON TEACHER_SPEC=e4b-base-medium STUDENT=12b DISTILL_GPU_IDS=0,1,2,3 bash rl-distill-scripts/scale_train/run_gemma4_distill_one.sh
+env $COMMON TEACHER_SPEC=e4b-base-hard   STUDENT=12b DISTILL_GPU_IDS=4,5,6,7 bash rl-distill-scripts/scale_train/run_gemma4_distill_one.sh
+env $COMMON FSDP_OFFLOAD=true TEACHER_SPEC=e4b-base-medium STUDENT=26b DISTILL_GPU_IDS=0,1,2,3 bash rl-distill-scripts/scale_train/run_gemma4_distill_one.sh
+env $COMMON FSDP_OFFLOAD=true TEACHER_SPEC=e4b-base-hard   STUDENT=26b DISTILL_GPU_IDS=4,5,6,7 bash rl-distill-scripts/scale_train/run_gemma4_distill_one.sh
+```
+Expected wall time (from the local 12B run: 21 s/step at batch 64 on 4 H100s): 12B ≈ 12 h per run at batch 128;
+26B-A4B with offload on 4 GPUs is several times slower (untested) — 8 GPUs without offload is the practical layout.
+
 ### 9.1 Results
 
 **Traces (done 2026-09-06, 18:39–22:12Z on GPUs 0,5 / 6,7):** both bundles `COMPLETE`, mirrored to
