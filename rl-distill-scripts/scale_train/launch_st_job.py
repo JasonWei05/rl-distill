@@ -122,6 +122,12 @@ def main() -> None:
     parser.add_argument("--run-file", default="run_gemma3_12b_pt_topk128_distill.sh")
     parser.add_argument("--container-project-root", default="/workspace/rl-distill")
     parser.add_argument("--env-vars", default=None)
+    parser.add_argument(
+        "--code-s3-uri",
+        default=None,
+        help="git-archive tarball of the commit to run (s3://...). The job command first unpacks it over the container "
+             "project root, so a pre-built --image can run a run-file that did not exist when the image was built.",
+    )
     parser.add_argument("--dotenv", default="../../.env")
     parser.add_argument("--dotenv-keys", default="HF_TOKEN,WANDB_API_KEY,WANDB_BASE_URL")
     parser.add_argument(
@@ -190,7 +196,17 @@ def main() -> None:
     else:
         run_file = str(local_run_file)
 
-    command = ["sudo", "-E"] + [f"{key}={value}" for key, value in sorted(env.items())] + ["bash", run_file]
+    if args.code_s3_uri:
+        env.setdefault("CODE_S3_URI", args.code_s3_uri)
+        bootstrap = (
+            f"aws s3 cp --only-show-errors {args.code_s3_uri} /tmp/rl-distill-code.tar.gz"
+            f" && tar -xzf /tmp/rl-distill-code.tar.gz -C {args.container_project_root}"
+            f" && echo CODE_BOOTSTRAPPED $(tar -tzf /tmp/rl-distill-code.tar.gz | wc -l) files"
+            f" && exec bash {run_file}"
+        )
+        command = ["sudo", "-E"] + [f"{key}={value}" for key, value in sorted(env.items())] + ["bash", "-c", bootstrap]
+    else:
+        command = ["sudo", "-E"] + [f"{key}={value}" for key, value in sorted(env.items())] + ["bash", run_file]
     secret_keys = dotenv_keys | {
         key for key in env if key.upper().endswith(("_TOKEN", "_API_KEY", "_SECRET", "_PASSWORD"))
     }
