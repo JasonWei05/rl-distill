@@ -10,6 +10,15 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${PROJECT_ROOT}"
 echo "ST_DISTILL_START $(date -u +%FT%TZ) host=$(hostname) commit=$(git rev-parse --short HEAD 2>/dev/null || echo baked)"
 
+# Optional code refresh: when the job runs on a pre-built image (--image ...), CODE_S3_URI points at a `git archive`
+# tarball of the commit to run; it is unpacked over the baked /workspace/rl-distill so the pod runs current code.
+if [ -n "${CODE_S3_URI:-}" ]; then
+  echo "### refreshing repo code from ${CODE_S3_URI}"
+  aws s3 cp --only-show-errors "${CODE_S3_URI}" /tmp/rl-distill-code.tar.gz
+  tar -xzf /tmp/rl-distill-code.tar.gz -C "${PROJECT_ROOT}"
+  echo "CODE_REFRESHED $(sha256sum /tmp/rl-distill-code.tar.gz | cut -c1-16) files=$(tar -tzf /tmp/rl-distill-code.tar.gz | wc -l)"
+fi
+
 TEACHER_SPEC="${TEACHER_SPEC:-e4b-base-medium}"
 STUDENT="${STUDENT:?12b or 26b}"
 case "${TEACHER_SPEC}" in e4b-base-medium|e4b-base-hard) ;; *) echo "FATAL: TEACHER_SPEC must be e4b-base-medium|e4b-base-hard" >&2; exit 2 ;; esac
