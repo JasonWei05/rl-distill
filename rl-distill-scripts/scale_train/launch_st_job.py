@@ -201,7 +201,7 @@ def main() -> None:
         bootstrap = (
             f"aws s3 cp --only-show-errors {args.code_s3_uri} /tmp/rl-distill-code.tar.gz"
             f" && tar -xzf /tmp/rl-distill-code.tar.gz -C {args.container_project_root}"
-            f" && echo CODE_BOOTSTRAPPED $(tar -tzf /tmp/rl-distill-code.tar.gz | wc -l) files"
+            f" && echo CODE_BOOTSTRAPPED"   # no '$(...)': the job config is rendered through string.Template
             f" && exec bash {run_file}"
         )
         command = ["sudo", "-E"] + [f"{key}={value}" for key, value in sorted(env.items())] + ["bash", "-c", bootstrap]
