@@ -581,11 +581,13 @@ python rl-distill-scripts/eval_student_checkpoints_passk.py --gpu 7 --poll-minut
 **Distillation runs — ScaleTrain (launched 2026-09-07 ~17:30Z, mediums first):** `gemma4-e4bbase-med-12b`
 (p5.48xlarge:4, 4×H100) and `gemma4-e4bbase-med-26b` (p5.48xlarge, 8×H100), priority high, borrowing on, run-file
 `scale_train/run_gemma4_e4b_base_distill_st.sh` (v2 recipe: batch 128, lr 2e-6 → 2e-7, 1000 steps, validate every
-10, save + push every 250). Jobs `job_dafgj4qlrg1g089aq1gg` (12B) and `job_dafgj7alrg1g07lkeu60` (26B), created 18:59Z.
+10, save + push every 250). Jobs `job_dafhsaalrg1g089aq1ig` (12B) and `job_dafhsaqlrg1g089aq1j0` (26B), created 20:27Z
+(the 18:59Z pair failed instantly: the 08-29 image predates the run-file, so `launch_st_job.py --code-s3-uri` now
+unpacks the code tarball *before* invoking it).
 The remote image builds (`--build-env remote`) never produced an image, so the jobs run the known-good 2026-08-29
 image (`…/tmp:20260829-002920.cd13c11a…`) and refresh the code from a `git archive` tarball of commit 7469ba29
-(`CODE_S3_URI=s3://scale-ml/genai/rl-distill/code/rl-distill-code-7469ba29.tar.gz`, unpacked over the baked repo
-at pod start). Students land at
+(`--code-s3-uri s3://scale-ml/genai/rl-distill/code/rl-distill-code-d303b54f.tar.gz`, unpacked over the baked repo
+before the run-file starts). Students land at
 `JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base/step_000250…step_001000`; the local checkpoint watchers
 (GPUs 6/7) evaluate each step with the ×32 protocol and refresh `figures/passk_*_val32.png`. Hard-band jobs: not
 launched yet. Launch command pattern:
@@ -595,7 +597,8 @@ python3 launch_st_job.py --cluster eks --build-env remote --n-instances 1 --gpus
   --priority high --allow-borrowing --active-deadline-hours 72 --run-file run_gemma4_e4b_base_distill_st.sh \
   --env-vars "TEACHER_SPEC=e4b-base-medium,STUDENT=12b"          # 26B: --gpus-per-instance 8, STUDENT=26b, deadline 96 h
 # used in practice (remote build failed): --image <ECR uri of a working rl-distill image> and add
-#   CODE_S3_URI=s3://scale-ml/genai/rl-distill/code/rl-distill-code-<sha>.tar.gz   (git archive HEAD | aws s3 cp, ml-worker profile)
+#   --code-s3-uri s3://scale-ml/genai/rl-distill/code/rl-distill-code-<sha>.tar.gz   (git archive HEAD | aws s3 cp, ml-worker profile;
+#   the job command must not contain $(...) — the job config is Template-rendered)
 # status (non-interactive): scratchpad st_status.py via the CLI client library; pods: env -u AWS_PROFILE kubectl get pods -n train | grep e4bbase
 ```
 
