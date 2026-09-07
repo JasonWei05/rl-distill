@@ -135,6 +135,15 @@ def main() -> None:
     # is on the env (the default AWS profile here has no region). The ECR registry is us-west-2.
     os.environ.setdefault("AWS_DEFAULT_REGION", "us-west-2")
     os.environ.setdefault("AWS_REGION", "us-west-2")
+    # --build-env remote uploads the Docker context to s3://scale-ml; the bare EC2 instance role cannot write
+    # there (AccessDenied on CreateMultipartUpload, 2026-09-07). Use the ml-worker profile when one is configured.
+    if "AWS_PROFILE" not in os.environ:
+        try:
+            profiles = subprocess.run(["aws", "configure", "list-profiles"], capture_output=True, text=True, check=False).stdout.split()
+        except OSError:
+            profiles = []
+        if "ml-worker" in profiles:
+            os.environ["AWS_PROFILE"] = "ml-worker"
 
     here = Path(__file__).resolve().parent
     build_manifest = (here / args.build_manifest_path).resolve()
