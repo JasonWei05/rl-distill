@@ -522,13 +522,13 @@ Evaluate each student checkpoint with the same ×32 protocol and add its trace t
 | LR schedule | 2.5e-6 peak, 100 warmup, linear → 2.5e-7 | **2e-6** peak, 100 warmup, linear → 2e-7 (`MIN_LR_RATIO=0.1`) |
 | micro-batching | 1 seq / micro-batch, 4096 padded-token ceiling, KL chunk 4096 (e4b) / 2048 (e2b) | same; KL chunk 2048 (12B) / 1024 (26B) |
 | precision / FSDP | fp32 master + Adam, bf16 param views, grad ckpt, max_length 12288 | same; 12B fits on 4×H100 (67–77 GB); 26B-A4B on 4 GPUs needs `FSDP_OFFLOAD=true` (8 GPUs preferred) |
-| validation | top-128 KL on 128 teacher val generations every 10 steps | same, `TEST_FREQ=20`; plus pass@k×32 on saved checkpoints |
+| validation | top-128 KL on 128 teacher val generations every 10 steps | same (`TEST_FREQ=10`); plus pass@k×32 on every saved checkpoint |
 | checkpoints | final only (`SAVE_FREQ=0`) → `step_000500` on the Hub | `SAVE_FREQ=250` → `step_000250/500/750/1000` pushed (pass@k over training) |
 | wrap class | `Gemma4TextDecoderLayer` | 12B `Gemma4UnifiedTextDecoderLayer`, 26B-A4B `Gemma4TextDecoderLayer` (set by `STUDENT`) |
 
 ```bash
 # on a node with the repo + .venv-gemma4 + .env (HF_TOKEN, WANDB_API_KEY); bundles are fetched from S3 (or copy the local dirs)
-COMMON="TRAIN_BATCH_SIZE=128 LR=2e-6 TOTAL_TRAINING_STEPS=1000 LR_WARMUP_STEPS=100 MIN_LR_RATIO=0.1 TEST_FREQ=20 SAVE_FREQ=250 \
+COMMON="TRAIN_BATCH_SIZE=128 LR=2e-6 TOTAL_TRAINING_STEPS=1000 LR_WARMUP_STEPS=100 MIN_LR_RATIO=0.1 TEST_FREQ=10 SAVE_FREQ=250 \
         ALLOW_UNDERSIZED_STUDENT_LAYOUT=true PROJECT_NAME=gemma4-e4b-base-distill-v1"
 env $COMMON TEACHER_SPEC=e4b-base-medium STUDENT=12b DISTILL_GPU_IDS=0,1,2,3 bash rl-distill-scripts/scale_train/run_gemma4_distill_one.sh
 env $COMMON TEACHER_SPEC=e4b-base-hard   STUDENT=12b DISTILL_GPU_IDS=4,5,6,7 bash rl-distill-scripts/scale_train/run_gemma4_distill_one.sh
@@ -537,6 +537,25 @@ env $COMMON FSDP_OFFLOAD=true TEACHER_SPEC=e4b-base-hard   STUDENT=26b DISTILL_G
 ```
 Expected wall time (from the local 12B run: 21 s/step at batch 64 on 4 H100s): 12B ≈ 12 h per run at batch 128;
 26B-A4B with offload on 4 GPUs is several times slower (untested) — 8 GPUs without offload is the practical layout.
+
+**Parallelism of a distillation run:** FSDP2 fully-sharded data parallel over the run's GPUs (`engine.fsdp_size=-1`,
+ZeRO-3 style: fp32 master params, grads and Adam state sharded across all ranks, bf16 parameter views gathered
+per layer for compute) — no tensor, pipeline or sequence parallelism (the top-k KL loss requires `sp_size=1`).
+Each rank processes one sequence per micro-batch (4,096-padded-token ceiling) and accumulates gradients:
+global batch 128 on 4 GPUs = 32 micro-steps per rank per optimizer step. The MoE experts of 26B-A4B are
+ordinary sharded linear layers (no expert parallelism); `FSDP_OFFLOAD=true` moves the sharded fp32 params +
+optimizer state to CPU between uses.
+
+**pass@k for every checkpoint (runs here, as checkpoints appear on the Hub):** `eval_student_checkpoints_passk.py`
+polls each student repo, evaluates every new `step_NNNNNN/` on the band's validation set with the ×32 protocol
+(materialize → identity SHA → `eval_math_passk.py`), and re-plots `figures/passk_<student>_val32.png` (all steps
+vs the E4B-base teacher curve). Results under `/tmp/gemma4_e4b_val32/students/<repo>__<step>/`.
+```bash
+python rl-distill-scripts/eval_student_checkpoints_passk.py --gpu 6 --poll-minutes 10 \
+  --repo JWei05/Distill-gemma4-e4b-base-medium-to-12b-base --repo JWei05/Distill-gemma4-e4b-base-hard-to-12b-base
+python rl-distill-scripts/eval_student_checkpoints_passk.py --gpu 7 --poll-minutes 10 \
+  --repo JWei05/Distill-gemma4-e4b-base-medium-to-26b-base --repo JWei05/Distill-gemma4-e4b-base-hard-to-26b-base
+```
 
 ### 9.1 Results
 
