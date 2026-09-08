@@ -56,9 +56,34 @@ def st_jobs(st_python: str, prefix: str) -> list[dict]:
     return json.loads(proc.stdout)
 
 
-def s3_result_exists(s3_root: str, tag: str) -> bool:
+def s3_result_revision(s3_root: str, tag: str) -> str | None:
+    """Hub revision the finished result under <s3_root>/<tag>/ was evaluated at (None = no result)."""
     proc = subprocess.run(["aws", "s3", "ls", f"{s3_root.rstrip('/')}/{tag}/metrics.json"], capture_output=True, text=True)
-    return proc.returncode == 0 and "metrics.json" in proc.stdout
+    if proc.returncode != 0 or "metrics.json" not in proc.stdout:
+        return None
+    proc = subprocess.run(["aws", "s3", "cp", "--only-show-errors", f"{s3_root.rstrip('/')}/{tag}/source_registry.json", "-"],
+                          capture_output=True, text=True)
+    try:
+        return str(json.loads(proc.stdout)["models"][0]["source"]["revision"])
+    except (ValueError, KeyError, IndexError):
+        return "unknown"
+
+
+def supersede_result(s3_root: str, tag: str, old_revision: str) -> None:
+    """A relaunched run re-pushed this export: park the stale result under _superseded/ so the step is re-evaluated."""
+    root = s3_root.rstrip("/")
+    subprocess.run(["aws", "s3", "mv", "--recursive", "--only-show-errors", f"{root}/{tag}/", f"{root}/_superseded/{tag}__{old_revision[:8]}/"],
+                   check=False)
+
+
+def export_commits(api: HfApi, repo: str) -> dict[str, str]:
+    """step_NNNNNN -> oid of the last commit that touched that export (changes when a relaunched run re-pushes it)."""
+    out = {}
+    for entry in api.list_repo_tree(repo, revision="main", expand=True):
+        if entry.path.startswith("step_"):
+            last = getattr(entry, "last_commit", None)
+            out[entry.path] = str(getattr(last, "oid", "") or "")
+    return out
 
 
 def job_name(band: str, student: str, step: str) -> str:
@@ -114,18 +139,29 @@ def main() -> int:
                 raise SystemExit(f"repo name not recognised: {repo}")
             band, student = m["band"], m["student"]
             try:
-                steps = sorted(e.path for e in api.list_repo_tree(repo, revision="main") if e.path.startswith("step_"))
+                commits = export_commits(api, repo)
             except RepositoryNotFoundError:
                 print(f"[{now()}] {repo}: not on the Hub yet", flush=True)
                 continue
             summary = []
-            for step in steps:
+            for step in sorted(commits):
                 tag = step_tag(repo, step)
+                revision = commits[step]
                 entry = state.setdefault(tag, {"repo": repo, "step": step, "attempts": 0, "jobs": []})
-                if entry.get("done") or s3_result_exists(args.s3_root, tag):
-                    entry["done"] = True
+                if entry.get("done") and entry.get("revision") == revision:
                     summary.append(f"{step}=done")
                     continue
+                result_revision = s3_result_revision(args.s3_root, tag)
+                if result_revision is not None:
+                    if revision and result_revision != revision:
+                        print(f"[{now()}] {tag}: export re-pushed ({result_revision[:8]} -> {revision[:8]}); superseding the old result and re-evaluating", flush=True)
+                        supersede_result(args.s3_root, tag, result_revision)
+                        entry.update(done=False, attempts=0, jobs=[], superseded=entry.get("superseded", []) + [result_revision])
+                        save()
+                    else:
+                        entry.update(done=True, revision=result_revision)
+                        summary.append(f"{step}=done")
+                        continue
                 name = job_name(band, student, step)
                 live = next((j for j in jobs.values() if j["name"].startswith(name + "-") and j["status"] in LIVE), None)
                 if live:

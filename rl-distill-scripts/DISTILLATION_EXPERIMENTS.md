@@ -554,7 +554,8 @@ on this box (tmux `ckpt-passk-submit`, `ckpt-passk-plot`; logs under `/tmp/gemma
    export with no result in S3 and no live job, submits `run_gemma4_student_ckpt_passk_st.sh` with
    `STUDENT=<student>,STEP=<step>,BANDS=<band>` via `launch_st_with_code.sh` (HEAD tarball + known-good image; priority high,
    borrowing off, 12 h deadline). Job names `g4e4b-pk-<band[:3]>-<student>-s<step>`; state in
-   `/tmp/gemma4_e4b_val32/passk_jobs_state.json`; a job that ends FAILED/CANCELLED without a result is resubmitted (≤3 attempts).
+   `/tmp/gemma4_e4b_val32/passk_jobs_state.json`; a job that ends FAILED/CANCELLED without a result is resubmitted (≤3 attempts);
+   an export re-pushed by a relaunched run (new last-commit on the Hub) supersedes its old result and is evaluated again.
 2. The pod evaluates that one export with `eval_student_checkpoints_passk.py --step` (materialize → identity SHA →
    `eval_math_passk.py`, ×32 protocol, grader = the RL reward) and uploads metrics + traces to
    `s3://scale-ml/genai/rl-distill/gemma4-e4b-base-student-passk-v1/<tag>/`, then exits. GPU layout: **12B = dp 2** (one
@@ -645,7 +646,12 @@ continued), process group killed mid-save at step 8 (simulated preemption) → r
 Jobs launched before this change keep running without resume until relaunched. **Second round of preemptions:** the 12B
 job went QUEUED at 17:07Z (at ~step 235, before its first push), ran 17:12–17:22Z, and restarted again at 18:44Z from step 0;
 the 26B job went QUEUED at 17:33Z (at ~step 450, after pushing step 250) and had no pod as of 19:25Z. Every preemption
-of these jobs discards all progress. Launch command pattern:
+of these jobs discards all progress. Both pods were replaced yet again at 20:02Z/20:05Z (12B: third restart from step 0), so at
+20:22Z the two jobs were cancelled and **relaunched with the resumable run-file** (commit aba46d6b, permanent 250 / rolling 50):
+`gemma4-e4bbase-med-12b` = job_dag6svilrg1g07lkf1a0 (p5:4), `gemma4-e4bbase-med-26b` = job_dag6t1hob6s007k81o80 (p5:8), borrowing on,
+priority high. They push to the same Hub repos; the submitter re-evaluates an export whose last Hub commit differs from the
+revision recorded in its S3 result (the old result is parked under `_superseded/`), so the step-250 point above will be replaced
+by the relaunched 26B run's own step 250. Launch command pattern:
 ```bash
 cd rl-distill-scripts/scale_train
 python3 launch_st_job.py --cluster eks --build-env remote --n-instances 1 --gpus-per-instance 4 --job-name gemma4-e4bbase-med-12b \
