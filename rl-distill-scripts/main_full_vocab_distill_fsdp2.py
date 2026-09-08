@@ -187,8 +187,10 @@ class FullVocabDistillTrainer(SFTTrainer):
 
     def _build_ckpt_handler(self):
         super()._build_ckpt_handler()
+        self._raw_ckpt_save = self.ckpt_handler.save_checkpoint   # plain local save, before the push/upload wrappers
         self._init_hf_pusher()
         self._init_remote_checkpoint_persistence()
+        self._init_rolling_checkpoints()
 
     def _init_remote_checkpoint_persistence(self):
         import torch.distributed as dist
@@ -196,11 +198,12 @@ class FullVocabDistillTrainer(SFTTrainer):
         cfg = self._remote_checkpoint_config(self.config)
         if cfg is None:
             return
-        from full_checkpoint_s3 import upload_checkpoint
+        from full_checkpoint_s3 import retire_rolling_checkpoint, upload_checkpoint
 
         original_save = self.ckpt_handler.save_checkpoint
         checkpoint_root = Path(self.config.trainer.default_local_dir)
         s3_uri = str(cfg.s3_uri)
+        rolling_enabled = int(cfg.get("rolling_freq", 0) or 0) > 0
 
         def save_and_upload(step):
             original_save(step=step)
@@ -208,6 +211,11 @@ class FullVocabDistillTrainer(SFTTrainer):
             if dist.get_rank() == 0:
                 try:
                     upload_checkpoint(checkpoint_root, int(step), s3_uri)
+                    if rolling_enabled:
+                        try:  # the rolling slot is superseded by this permanent checkpoint; the permanent one is the guarantee
+                            retire_rolling_checkpoint(s3_uri, int(step))
+                        except Exception as error:
+                            print(f"[RollingCheckpointS3] retire after permanent step {step} skipped: {error}", flush=True)
                     result[0] = {"ok": True}
                 except Exception as error:
                     result[0] = {"ok": False, "error": f"{type(error).__name__}: {error}"}
@@ -218,6 +226,86 @@ class FullVocabDistillTrainer(SFTTrainer):
         self.ckpt_handler.save_checkpoint = save_and_upload
         if dist.get_rank() == 0:
             print(f"[FullCheckpointS3] enabled: {s3_uri}", flush=True)
+
+    def _init_rolling_checkpoints(self):
+        """Rolling resumable checkpoints between the permanent ones (borrowed ScaleTrain pods get preempted).
+
+        With ``trainer.remote_checkpoint.rolling_freq = R`` the fit loop saves every R steps. Steps that are a
+        multiple of the configured ``trainer.save_freq`` (and the last step) take the permanent path -- local save
+        with the HF export, HF push, permanent S3 upload. Every other multiple of R is a local save *without* the
+        HF export (model + optimizer + LR/RNG + dataloader position) whose upload replaces the single rolling S3
+        slot from a background thread (best effort: a failed rolling upload is logged, the run continues). The
+        startup restore already picks the newest of permanent/rolling, so a preempted run resumes from the last
+        rolling step, not the last pushed one.
+        """
+        import threading
+
+        import torch.distributed as dist
+
+        cfg = self._remote_checkpoint_config(self.config)
+        rolling_freq = int(cfg.get("rolling_freq", 0) or 0) if cfg is not None else 0
+        if rolling_freq <= 0:
+            return
+        if not isinstance(self.save_freq, int) or self.save_freq <= 0 or self.save_freq % rolling_freq:
+            raise ValueError(
+                f"remote_checkpoint.rolling_freq={rolling_freq} needs an integer trainer.save_freq that is a "
+                f"multiple of it (got {self.save_freq!r})"
+            )
+        from full_checkpoint_s3 import upload_rolling_checkpoint
+
+        permanent_freq = self.save_freq
+        self.save_freq = rolling_freq                      # the fit loop now saves every rolling_freq steps
+        permanent_save = self.ckpt_handler.save_checkpoint  # local save + HF push + permanent S3 upload
+        raw_save = self._raw_ckpt_save
+        checkpoint_root = Path(self.config.trainer.default_local_dir)
+        s3_uri = str(cfg.s3_uri)
+        trainer = self
+        self._rolling_thread = None
+
+        def join_rolling():
+            if trainer._rolling_thread is not None:
+                trainer._rolling_thread.join()
+                trainer._rolling_thread = None
+
+        def upload_rolling(step):
+            try:
+                upload_rolling_checkpoint(checkpoint_root, step, s3_uri)
+            except Exception as error:
+                print(
+                    f"[RollingCheckpointS3] upload FAILED step={step}: {type(error).__name__}: {error} "
+                    "(permanent checkpoints are unaffected)",
+                    flush=True,
+                )
+
+        def save(step):
+            step = int(step)
+            if dist.get_rank() == 0:
+                join_rolling()  # this save may prune the local dir the previous rolling upload reads
+            if step % permanent_freq == 0 or step >= int(trainer.total_training_steps):
+                permanent_save(step=step)
+                return
+            engine = trainer.ckpt_handler.engine
+            original_engine_save = engine.save_checkpoint
+            engine.save_checkpoint = lambda *args, **kwargs: original_engine_save(
+                *args, **{**kwargs, "save_hf_model": False}
+            )
+            try:
+                raw_save(step=step)
+            finally:
+                engine.save_checkpoint = original_engine_save
+            if dist.get_rank() == 0:
+                trainer._rolling_thread = threading.Thread(
+                    target=upload_rolling, args=(step,), name=f"rolling-upload-{step}", daemon=True
+                )
+                trainer._rolling_thread.start()
+
+        self.ckpt_handler.save_checkpoint = save
+        if dist.get_rank() == 0:
+            print(
+                f"[RollingCheckpointS3] enabled: resumable checkpoint every {rolling_freq} steps -> {s3_uri}/rolling "
+                f"(permanent checkpoint + HF push every {permanent_freq})",
+                flush=True,
+            )
 
     def _init_hf_pusher(self):
         import torch.distributed as dist

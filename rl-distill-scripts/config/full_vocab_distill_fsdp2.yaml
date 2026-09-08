@@ -99,6 +99,7 @@ trainer:
   remote_checkpoint:
     enable: ${oc.decode:${oc.env:REMOTE_CHECKPOINT_ENABLE,false}}
     s3_uri: ${oc.env:REMOTE_CHECKPOINT_S3_URI,""}
+    rolling_freq: ${oc.decode:${oc.env:ROLLING_CHECKPOINT_FREQ,0}}   # resumable ckpt every N steps between permanent saves (0 = off)
 
 model:
   path: ${oc.env:MODEL_PATH,/tmp/hf_models/gemma-3-27b-pt}

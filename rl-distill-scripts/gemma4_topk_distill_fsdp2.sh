@@ -583,6 +583,13 @@ case "${REMOTE_CHECKPOINT_ENABLE,,}" in
     false) ;;
     *) echo "REMOTE_CHECKPOINT_ENABLE must be true or false" >&2; exit 2 ;;
 esac
+export ROLLING_CHECKPOINT_FREQ=${ROLLING_CHECKPOINT_FREQ:-0}   # resumable S3 checkpoint every N steps between the SAVE_FREQ saves
+if [[ ! "${ROLLING_CHECKPOINT_FREQ}" =~ ^[0-9]+$ ]]; then echo "ROLLING_CHECKPOINT_FREQ must be a non-negative integer" >&2; exit 2; fi
+if (( ROLLING_CHECKPOINT_FREQ > 0 )); then
+    [[ "${REMOTE_CHECKPOINT_ENABLE,,}" == "true" ]] || { echo "ROLLING_CHECKPOINT_FREQ requires REMOTE_CHECKPOINT_ENABLE=true" >&2; exit 2; }
+    (( SAVE_FREQ > 0 && SAVE_FREQ % ROLLING_CHECKPOINT_FREQ == 0 )) || { echo "SAVE_FREQ (${SAVE_FREQ}) must be a positive multiple of ROLLING_CHECKPOINT_FREQ (${ROLLING_CHECKPOINT_FREQ})" >&2; exit 2; }
+    [[ "${CHECKPOINT_SAVE_CONTENTS}" == *'"optimizer"'* ]] || { echo "ROLLING_CHECKPOINT_FREQ needs resumable CHECKPOINT_SAVE_CONTENTS (model, optimizer, extra)" >&2; exit 2; }
+fi
 
 export NNODES=${NNODES:-1}
 export NPROC_PER_NODE
@@ -652,6 +659,7 @@ COMMON_OVERRIDES=(
     trainer.hf_push.delete_local_after="${HF_PUSH_DELETE_LOCAL}"
     trainer.remote_checkpoint.enable="${REMOTE_CHECKPOINT_ENABLE}"
     trainer.remote_checkpoint.s3_uri="${REMOTE_CHECKPOINT_S3_URI}"
+    trainer.remote_checkpoint.rolling_freq="${ROLLING_CHECKPOINT_FREQ}"
     "checkpoint.save_contents=${CHECKPOINT_SAVE_CONTENTS}"
     'checkpoint.load_contents=["model","optimizer","extra"]'
 )

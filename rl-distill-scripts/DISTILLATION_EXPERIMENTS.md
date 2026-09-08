@@ -523,12 +523,12 @@ Evaluate each student checkpoint with the same ×32 protocol and add its trace t
 | micro-batching | 1 seq / micro-batch, 4096 padded-token ceiling, KL chunk 4096 (e4b) / 2048 (e2b) | same; KL chunk 2048 (12B) / 1024 (26B) |
 | precision / FSDP | fp32 master + Adam, bf16 param views, grad ckpt, max_length 12288 | same; 12B fits on 4×H100 (67–77 GB); 26B-A4B on 4 GPUs needs `FSDP_OFFLOAD=true` (8 GPUs preferred) |
 | validation | top-128 KL on 128 teacher val generations every 10 steps | same (`TEST_FREQ=10`); plus pass@k×32 on every saved checkpoint |
-| checkpoints | final only (`SAVE_FREQ=0`), HF export only | `SAVE_FREQ=125` → `step_000125 … step_001000` pushed (pass@k over training); every save is a **full resumable checkpoint** (fp32 model + Adam + LR/RNG `extra` + dataloader position `data_<rank>.pt` + HF export) mirrored to S3 (`REMOTE_CHECKPOINT_*`), restored at startup — borrowed ScaleTrain pods get preempted and restart the run-file |
+| checkpoints | final only (`SAVE_FREQ=0`), HF export only | `SAVE_FREQ=250` → `step_000250/500/750/1000` pushed (pass@k over training) as **permanent** full checkpoints (fp32 model + Adam + LR/RNG `extra` + dataloader position `data_<rank>.pt` + HF export) in S3; plus a **rolling** resumable checkpoint every 50 steps (`ROLLING_CHECKPOINT_FREQ=50`: same contents minus the HF export, single S3 slot `…/rolling/`, uploaded in a background thread, retired by the next permanent save). Startup restores the newest of permanent/rolling — borrowed ScaleTrain pods get preempted and restart the run-file, losing ≤50 steps |
 | wrap class | `Gemma4TextDecoderLayer` | 12B `Gemma4UnifiedTextDecoderLayer`, 26B-A4B `Gemma4TextDecoderLayer` (set by `STUDENT`) |
 
 ```bash
 # on a node with the repo + .venv-gemma4 + .env (HF_TOKEN, WANDB_API_KEY); bundles are fetched from S3 (or copy the local dirs)
-COMMON="TRAIN_BATCH_SIZE=128 LR=2e-6 TOTAL_TRAINING_STEPS=1000 LR_WARMUP_STEPS=100 MIN_LR_RATIO=0.1 TEST_FREQ=10 SAVE_FREQ=125 \
+COMMON="TRAIN_BATCH_SIZE=128 LR=2e-6 TOTAL_TRAINING_STEPS=1000 LR_WARMUP_STEPS=100 MIN_LR_RATIO=0.1 TEST_FREQ=10 SAVE_FREQ=250 ROLLING_CHECKPOINT_FREQ=50 \
         CHECKPOINT_SAVE_CONTENTS='["model","optimizer","extra","hf_model"]' MAX_CKPT_TO_KEEP=1 HF_PUSH_DELETE_LOCAL=false \
         REMOTE_CHECKPOINT_ENABLE=true REMOTE_CHECKPOINT_S3_URI=s3://scale-ml/genai/rl-distill/gemma4-e4b-base-distill-ckpts-v1/<spec>-to-<student>-bs128-s1000-lr2e-6 \
         ALLOW_UNDERSIZED_STUDENT_LAYOUT=true PROJECT_NAME=gemma4-e4b-base-distill-v1"   # the ST run-file sets exactly these
@@ -633,10 +633,15 @@ teacher's curve, i.e. well *below* its own pre-training ability, after 250 steps
 
 **Preemption (2026-09-08):** both jobs were evicted once under borrowing — the 26B pod had trained to step 20 (val loss
 0.147 → 0.141, 13:28–13:59Z) when the job went back to QUEUED; new pods started 14:08Z (12B) and 14:15Z (26B) and, because
-those jobs save only the HF export, training restarted from step 0. The run-file now saves a full resumable checkpoint
-(model, Adam, LR/RNG, dataloader position, HF export) every 125 steps, mirrors each to S3 and restores the newest complete
-one at startup; validated locally with an E2B smoke run (5 steps → checkpoint dir wiped → restored step 5 from S3, identical
-step-5 val loss, dataloader `samples_yielded` 20 → 24 with the same base seed, LR schedule continued, steps 6–8 trained).
+those jobs save only the HF export, training restarted from step 0. The run-file now saves a permanent full checkpoint
+(model, Adam, LR/RNG, dataloader position, HF export) every 250 steps and a rolling one (no HF export) every 50 steps, mirrors
+both to S3 and restores the newest complete one at startup (`main_full_vocab_distill_fsdp2.py` `_init_rolling_checkpoints`,
+yaml `trainer.remote_checkpoint.rolling_freq`, env `ROLLING_CHECKPOINT_FREQ`). Validated locally with E2B smoke runs:
+(a) permanent-only: 5 steps → checkpoint dir wiped → restored step 5 from S3, identical step-5 val loss, dataloader
+`samples_yielded` 20 → 24 with the same base seed, LR schedule continued, steps 6–8 trained; (b) rolling: `SAVE_FREQ=4`,
+`ROLLING_CHECKPOINT_FREQ=2` → rolling 2, permanent 4 (rolling 2 retired), rolling 6 uploaded (57 GB, async, training
+continued), process group killed mid-save at step 8 (simulated preemption) → relaunch restored ROLLING step 6 and resumed
+(phase-2 details in the smoke logs under `/tmp/gemma4_e4b_base_distill/rolling_smoke_p*.log`).
 Jobs launched before this change keep running without resume until relaunched. **Second round of preemptions:** the 12B
 job went QUEUED at 17:07Z (at ~step 235, before its first push), ran 17:12–17:22Z, and restarted again at 18:44Z from step 0;
 the 26B job went QUEUED at 17:33Z (at ~step 450, after pushing step 250) and had no pod as of 19:25Z. Every preemption
