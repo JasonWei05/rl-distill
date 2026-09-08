@@ -523,13 +523,15 @@ Evaluate each student checkpoint with the same ×32 protocol and add its trace t
 | micro-batching | 1 seq / micro-batch, 4096 padded-token ceiling, KL chunk 4096 (e4b) / 2048 (e2b) | same; KL chunk 2048 (12B) / 1024 (26B) |
 | precision / FSDP | fp32 master + Adam, bf16 param views, grad ckpt, max_length 12288 | same; 12B fits on 4×H100 (67–77 GB); 26B-A4B on 4 GPUs needs `FSDP_OFFLOAD=true` (8 GPUs preferred) |
 | validation | top-128 KL on 128 teacher val generations every 10 steps | same (`TEST_FREQ=10`); plus pass@k×32 on every saved checkpoint |
-| checkpoints | final only (`SAVE_FREQ=0`) → `step_000500` on the Hub | `SAVE_FREQ=250` → `step_000250/500/750/1000` pushed (pass@k over training) |
+| checkpoints | final only (`SAVE_FREQ=0`), HF export only | `SAVE_FREQ=125` → `step_000125 … step_001000` pushed (pass@k over training); every save is a **full resumable checkpoint** (fp32 model + Adam + LR/RNG `extra` + dataloader position `data_<rank>.pt` + HF export) mirrored to S3 (`REMOTE_CHECKPOINT_*`), restored at startup — borrowed ScaleTrain pods get preempted and restart the run-file |
 | wrap class | `Gemma4TextDecoderLayer` | 12B `Gemma4UnifiedTextDecoderLayer`, 26B-A4B `Gemma4TextDecoderLayer` (set by `STUDENT`) |
 
 ```bash
 # on a node with the repo + .venv-gemma4 + .env (HF_TOKEN, WANDB_API_KEY); bundles are fetched from S3 (or copy the local dirs)
-COMMON="TRAIN_BATCH_SIZE=128 LR=2e-6 TOTAL_TRAINING_STEPS=1000 LR_WARMUP_STEPS=100 MIN_LR_RATIO=0.1 TEST_FREQ=10 SAVE_FREQ=250 \
-        ALLOW_UNDERSIZED_STUDENT_LAYOUT=true PROJECT_NAME=gemma4-e4b-base-distill-v1"
+COMMON="TRAIN_BATCH_SIZE=128 LR=2e-6 TOTAL_TRAINING_STEPS=1000 LR_WARMUP_STEPS=100 MIN_LR_RATIO=0.1 TEST_FREQ=10 SAVE_FREQ=125 \
+        CHECKPOINT_SAVE_CONTENTS='["model","optimizer","extra","hf_model"]' MAX_CKPT_TO_KEEP=1 HF_PUSH_DELETE_LOCAL=false \
+        REMOTE_CHECKPOINT_ENABLE=true REMOTE_CHECKPOINT_S3_URI=s3://scale-ml/genai/rl-distill/gemma4-e4b-base-distill-ckpts-v1/<spec>-to-<student>-bs128-s1000-lr2e-6 \
+        ALLOW_UNDERSIZED_STUDENT_LAYOUT=true PROJECT_NAME=gemma4-e4b-base-distill-v1"   # the ST run-file sets exactly these
 env $COMMON TEACHER_SPEC=e4b-base-medium STUDENT=12b DISTILL_GPU_IDS=0,1,2,3 bash rl-distill-scripts/scale_train/run_gemma4_distill_one.sh
 env $COMMON TEACHER_SPEC=e4b-base-hard   STUDENT=12b DISTILL_GPU_IDS=4,5,6,7 bash rl-distill-scripts/scale_train/run_gemma4_distill_one.sh
 env $COMMON FSDP_OFFLOAD=true TEACHER_SPEC=e4b-base-medium STUDENT=26b DISTILL_GPU_IDS=0,1,2,3 bash rl-distill-scripts/scale_train/run_gemma4_distill_one.sh
@@ -546,15 +548,31 @@ global batch 128 on 4 GPUs = 32 micro-steps per rank per optimizer step. The MoE
 ordinary sharded linear layers (no expert parallelism); `FSDP_OFFLOAD=true` moves the sharded fp32 params +
 optimizer state to CPU between uses.
 
-**pass@k for every checkpoint (runs here, as checkpoints appear on the Hub):** `eval_student_checkpoints_passk.py`
-polls each student repo, evaluates every new `step_NNNNNN/` on the band's validation set with the ×32 protocol
-(materialize → identity SHA → `eval_math_passk.py`), and re-plots `figures/passk_<student>_val32.png` (all steps
-vs the E4B-base teacher curve). Results under `/tmp/gemma4_e4b_val32/students/<repo>__<step>/`.
+**pass@k for every checkpoint — ScaleTrain, 2 GPUs per student, no borrowing:** `eval_student_checkpoints_passk.py`
+polls the student repo, evaluates every new `step_NNNNNN/` on the band's validation set with the ×32 protocol
+(materialize → identity SHA → `eval_math_passk.py`, grader = the RL reward) and uploads each finished step
+(metrics, traces, log) to `s3://scale-ml/genai/rl-distill/gemma4-e4b-base-student-passk-v1/<tag>/`. GPU layout:
+**12B = dp 2** (one single-GPU vLLM per GPU on interleaved question shards; shard traces are merged and re-aggregated
+with `--resume_traces` — exact, because sampling seeds derive from (dataset, question id, sample index), not row
+order, and the shard manifests keep the fixed 32 samples/question), **26B-A4B = tp 2** (one vLLM tensor-parallel over
+both GPUs). The job exits after `step_001000` is evaluated (or 12 h without a new checkpoint). Run-file
+`scale_train/run_gemma4_student_ckpt_passk_st.sh` (builds the gemma-4 venv, prepares the ×32 data, runs the controller).
 ```bash
-python rl-distill-scripts/eval_student_checkpoints_passk.py --gpu 6 --poll-minutes 10 \
-  --repo JWei05/Distill-gemma4-e4b-base-medium-to-12b-base --repo JWei05/Distill-gemma4-e4b-base-hard-to-12b-base
-python rl-distill-scripts/eval_student_checkpoints_passk.py --gpu 7 --poll-minutes 10 \
-  --repo JWei05/Distill-gemma4-e4b-base-medium-to-26b-base --repo JWei05/Distill-gemma4-e4b-base-hard-to-26b-base
+cd rl-distill-scripts/scale_train      # launched 2026-09-08 (§9.1); priority high, borrowing OFF (evals must not restart)
+python3 launch_st_job.py --n-instances 1 --gpus-per-instance 2 --priority high --active-deadline-hours 72 \
+  --image <ECR uri> --code-s3-uri s3://scale-ml/genai/rl-distill/code/rl-distill-code-<sha>.tar.gz \
+  --run-file run_gemma4_student_ckpt_passk_st.sh --job-name gemma4-e4bbase-passk-12b --env-vars "STUDENT=12b"   # dp 2
+python3 launch_st_job.py ... --job-name gemma4-e4bbase-passk-26b --env-vars "STUDENT=26b"                          # tp 2
+# BANDS=medium,hard once the hard runs exist; FINAL_STEP / MAX_IDLE_HOURS / PASSK_S3_ROOT are overridable.
+```
+The figures need the E4B-base reference traces (`/tmp/gemma4_e4b_val32/id_<band>/traces/`), so plotting stays on this box
+(no GPU): the loop below syncs finished steps from S3 and re-plots `figures/passk_<student>_val32.png` (all steps vs the
+E4B-base teacher curve); results land under `/tmp/gemma4_e4b_val32/students/<tag>/`.
+```bash
+python rl-distill-scripts/eval_student_checkpoints_passk.py --plot-from-s3 --poll-minutes 10 \
+  --s3-root s3://scale-ml/genai/rl-distill/gemma4-e4b-base-student-passk-v1 \
+  --repo JWei05/Distill-gemma4-e4b-base-medium-to-12b-base --repo JWei05/Distill-gemma4-e4b-base-medium-to-26b-base
+# local GPU fallback: --gpus 6,7 --parallelism dp|tp instead of --plot-from-s3 (same protocol, same outputs)
 ```
 
 ### 9.1 Results
@@ -593,9 +611,17 @@ The remote image builds (`--build-env remote`) never produced an image, so the j
 image (`…/tmp:20260829-002920.cd13c11a…`) and refresh the code from a `git archive` tarball of commit 7469ba29
 (`--code-s3-uri s3://scale-ml/genai/rl-distill/code/rl-distill-code-75227184.tar.gz`, unpacked over the baked repo
 before the run-file starts). Students land at
-`JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base/step_000250…step_001000`; the local checkpoint watchers
-(GPUs 6/7) evaluate each step with the ×32 protocol and refresh `figures/passk_*_val32.png`. Hard-band jobs: not
-launched yet. Launch command pattern:
+`JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base/step_*`; the ScaleTrain pass@k jobs (§9, `gemma4-e4bbase-passk-{12b,26b}`)
+evaluate each step with the ×32 protocol and the plot loop on this box refreshes `figures/passk_*_val32.png`. Hard-band jobs: not
+launched yet.
+
+**Preemption (2026-09-08):** both jobs were evicted once under borrowing — the 26B pod had trained to step 20 (val loss
+0.147 → 0.141, 13:28–13:59Z) when the job went back to QUEUED; new pods started 14:08Z (12B) and 14:15Z (26B) and, because
+those jobs save only the HF export, training restarted from step 0. The run-file now saves a full resumable checkpoint
+(model, Adam, LR/RNG, dataloader position, HF export) every 125 steps, mirrors each to S3 and restores the newest complete
+one at startup; validated locally with an E2B smoke run (5 steps → checkpoint dir wiped → restored step 5 from S3, identical
+step-5 val loss, dataloader `samples_yielded` 20 → 24 with the same base seed, LR schedule continued, steps 6–8 trained).
+Jobs launched before this change keep running without resume until relaunched. Launch command pattern:
 ```bash
 cd rl-distill-scripts/scale_train
 python3 launch_st_job.py --cluster eks --build-env remote --n-instances 1 --gpus-per-instance 4 --job-name gemma4-e4bbase-med-12b \

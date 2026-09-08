@@ -928,10 +928,19 @@ def main(argv: Sequence[str] | None = None) -> None:
         llm_kwargs["revision"] = args.model_revision
     if args.kv_cache_memory_gib is not None:
         llm_kwargs["kv_cache_memory_bytes"] = int(args.kv_cache_memory_gib * 2**30)
-    llm = LLM(**llm_kwargs)
-    tokenizer = llm.get_tokenizer()
     chat_template = Path(args.chat_template).read_text()
-    tokenizer.chat_template = chat_template
+    llm = None
+    tokenizer = None
+
+    def get_llm():
+        # Deferred: a run whose every dataset is re-aggregated from finished traces (--resume_traces, e.g. merging the
+        # shards of a data-parallel eval) never touches the model or a GPU.
+        nonlocal llm, tokenizer
+        if llm is None:
+            llm = LLM(**llm_kwargs)
+            tokenizer = llm.get_tokenizer()
+            tokenizer.chat_template = chat_template
+        return llm, tokenizer
 
     Path(args.trace_dir).mkdir(parents=True, exist_ok=True)
     results = {}
@@ -998,6 +1007,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 def write_trace(trace: Mapping[str, Any]) -> None:
                     trace_handle.write(json.dumps(trace, ensure_ascii=False) + "\n")
 
+                llm, tokenizer = get_llm()
                 aggregation, _ = evaluate_questions(
                     llm=llm,
                     tokenizer=tokenizer,

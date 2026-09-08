@@ -2,7 +2,11 @@
 # ScaleTrain pod entry for the pre-training-control distillations (E4B *base* traces -> 12B / 26B-A4B students).
 # Launched by launch_st_job.py; the repo is baked into the image at /workspace/rl-distill. Builds the gemma-4
 # venv into /tmp once per pod (as the Gemma 4 RL run-file does), then runs run_gemma4_distill_one.sh with the
-# v2 recipe: batch 128, lr 2e-6 (100 warmup, linear -> 2e-7), 1000 steps, validate every 10, save + push every 250.
+# v2 recipe: batch 128, lr 2e-6 (100 warmup, linear -> 2e-7), 1000 steps, validate every 10, save + push every 125.
+# Borrowed pods get preempted (the job goes back to QUEUED and the run-file starts again), so every save is a full
+# FSDP checkpoint (model + optimizer + extra + hf export) mirrored to S3, and the trainer restores the newest complete
+# S3 checkpoint at startup and resumes. A relaunch of the same direction + recipe therefore continues the earlier
+# attempt; to start over, pass a fresh REMOTE_CHECKPOINT_S3_URI (or delete the prefix).
 #
 #   --env-vars "TEACHER_SPEC=e4b-base-medium,STUDENT=12b"   (4 GPUs)   /   "...,STUDENT=26b"   (8 GPUs)
 set -euo pipefail
@@ -63,11 +67,30 @@ case "${STUDENT}" in
   26b) (( n_gpus >= 8 )) || { echo "FATAL: 26B-A4B needs 8 GPUs (or FSDP_OFFLOAD=true), got ${n_gpus}" >&2; exit 2; } ;;
 esac
 echo "ST_DISTILL config spec=${TEACHER_SPEC} student=${STUDENT} gpus=${DISTILL_GPU_IDS} venv=${VENV}"
+echo "ST_DISTILL disk: $(df -h /tmp | tail -1)"
 unset CUDA_VISIBLE_DEVICES   # the runner sets it from DISTILL_GPU_IDS
 
 # --- v2 recipe (overridable) ---------------------------------------------------------------------------------
 export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-128}" LR="${LR:-2e-6}" TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-1000}"
-export LR_WARMUP_STEPS="${LR_WARMUP_STEPS:-100}" MIN_LR_RATIO="${MIN_LR_RATIO:-0.1}" TEST_FREQ="${TEST_FREQ:-10}" SAVE_FREQ="${SAVE_FREQ:-250}"
+export LR_WARMUP_STEPS="${LR_WARMUP_STEPS:-100}" MIN_LR_RATIO="${MIN_LR_RATIO:-0.1}" TEST_FREQ="${TEST_FREQ:-10}" SAVE_FREQ="${SAVE_FREQ:-125}"
+
+# --- preemption-safe checkpoints ---------------------------------------------------------------------------------
+# Full resumable checkpoint every SAVE_FREQ steps (also the HF push cadence), one kept on local disk, each mirrored to
+# S3 (permanent history, ~170 GB per 12B save / ~370 GB per 26B save). The pusher must not delete the local hf export:
+# the S3 upload enumerates the whole step directory after the (async) push starts.
+export CHECKPOINT_SAVE_CONTENTS="${CHECKPOINT_SAVE_CONTENTS:-[\"model\",\"optimizer\",\"extra\",\"hf_model\"]}"
+export MAX_CKPT_TO_KEEP="${MAX_CKPT_TO_KEEP:-1}" HF_PUSH_DELETE_LOCAL="${HF_PUSH_DELETE_LOCAL:-false}" HF_PUSH_MAX_TO_KEEP="${HF_PUSH_MAX_TO_KEEP:-16}"
+export REMOTE_CHECKPOINT_ENABLE="${REMOTE_CHECKPOINT_ENABLE:-true}"
+export REMOTE_CHECKPOINT_S3_URI="${REMOTE_CHECKPOINT_S3_URI:-s3://scale-ml/genai/rl-distill/gemma4-e4b-base-distill-ckpts-v1/${TEACHER_SPEC}-to-${STUDENT}-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}-lr${LR}}"
+# Local disk must hold two full checkpoints (the new one is written before the old one is pruned) plus the student
+# snapshot, venv and trace bundle. REQUIRE_CKPT_DISK_GB=0 disables the check.
+case "${STUDENT}" in 12b) ckpt_disk_default=450 ;; *) ckpt_disk_default=900 ;; esac
+REQUIRE_CKPT_DISK_GB="${REQUIRE_CKPT_DISK_GB:-${ckpt_disk_default}}"
+free_gb="$(df -BG --output=avail /tmp | tail -1 | tr -dc 0-9)"
+if (( REQUIRE_CKPT_DISK_GB > 0 && free_gb < REQUIRE_CKPT_DISK_GB )); then
+  echo "FATAL: /tmp has ${free_gb} GB free; full checkpoints for STUDENT=${STUDENT} need >= ${REQUIRE_CKPT_DISK_GB} GB (REQUIRE_CKPT_DISK_GB)" >&2; exit 2
+fi
+echo "ST_DISTILL checkpoints: save_freq=${SAVE_FREQ} contents=${CHECKPOINT_SAVE_CONTENTS} s3=${REMOTE_CHECKPOINT_S3_URI} free_disk_gb=${free_gb}"
 export PROJECT_NAME="${PROJECT_NAME:-gemma4-e4b-base-distill-v1}" ALLOW_UNDERSIZED_STUDENT_LAYOUT="${ALLOW_UNDERSIZED_STUDENT_LAYOUT:-true}"
 export TRACE_S3_MIRROR_ENABLE="${TRACE_S3_MIRROR_ENABLE:-false}"   # HF-only artifacts; the bundle itself is read from S3
 export TEACHER_SPEC STUDENT DISTILL_GPU_IDS
