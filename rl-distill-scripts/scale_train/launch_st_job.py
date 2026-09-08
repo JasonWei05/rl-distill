@@ -203,7 +203,7 @@ def main() -> None:
         aws_bin = f"{args.container_project_root}/.venv/bin/aws"
         bootstrap = (
             f"{aws_bin} s3 cp --only-show-errors {args.code_s3_uri} /tmp/rl-distill-code.tar.gz"
-            f" && /bin/tar -xzf /tmp/rl-distill-code.tar.gz -C {args.container_project_root}"
+            f" && /bin/tar -xzf /tmp/rl-distill-code.tar.gz --unlink-first --recursive-unlink -C {args.container_project_root}"
             f" && echo CODE_BOOTSTRAPPED"   # no '$(...)': the job config is rendered through string.Template
             f" && exec bash {run_file}"
         )

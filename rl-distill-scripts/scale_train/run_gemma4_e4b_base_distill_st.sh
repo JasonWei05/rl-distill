@@ -15,7 +15,7 @@ echo "ST_DISTILL_START $(date -u +%FT%TZ) host=$(hostname) commit=$(git rev-pars
 if [ -n "${CODE_S3_URI:-}" ]; then
   echo "### refreshing repo code from ${CODE_S3_URI}"
   aws s3 cp --only-show-errors "${CODE_S3_URI}" /tmp/rl-distill-code.tar.gz
-  tar -xzf /tmp/rl-distill-code.tar.gz -C "${PROJECT_ROOT}"
+  tar -xzf /tmp/rl-distill-code.tar.gz --unlink-first --recursive-unlink -C "${PROJECT_ROOT}"   # baked tree may have symlink/dir type clashes
   echo "CODE_REFRESHED $(sha256sum /tmp/rl-distill-code.tar.gz | cut -c1-16) files=$(tar -tzf /tmp/rl-distill-code.tar.gz | wc -l)"
 fi
 
