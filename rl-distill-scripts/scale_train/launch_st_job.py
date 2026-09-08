@@ -198,9 +198,12 @@ def main() -> None:
 
     if args.code_s3_uri:
         env.setdefault("CODE_S3_URI", args.code_s3_uri)
+        # The pod runs this in a login shell that drops the image PATH (no `aws` on PATH): use the image's
+        # FSDP2 venv binary (setup_env.sh installs awscli there) and /bin/tar by absolute path. No `$` anywhere.
+        aws_bin = f"{args.container_project_root}/.venv/bin/aws"
         bootstrap = (
-            f"aws s3 cp --only-show-errors {args.code_s3_uri} /tmp/rl-distill-code.tar.gz"
-            f" && tar -xzf /tmp/rl-distill-code.tar.gz -C {args.container_project_root}"
+            f"{aws_bin} s3 cp --only-show-errors {args.code_s3_uri} /tmp/rl-distill-code.tar.gz"
+            f" && /bin/tar -xzf /tmp/rl-distill-code.tar.gz -C {args.container_project_root}"
             f" && echo CODE_BOOTSTRAPPED"   # no '$(...)': the job config is rendered through string.Template
             f" && exec bash {run_file}"
         )

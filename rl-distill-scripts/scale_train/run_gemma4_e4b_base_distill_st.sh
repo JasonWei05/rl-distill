@@ -30,6 +30,9 @@ if [ -f .env ]; then set -a; source .env; set +a; fi
 : "${WANDB_API_KEY:?WANDB_API_KEY missing (forward it with --dotenv-keys)}"
 
 # --- gemma-4 venv on local disk (same recipe as run_gemma4_pt_deepscaler_4of4strict_rl.sh) -----------------
+# The pod's login shell drops the image PATH: put the baked FSDP2 venv back (it holds the aws CLI the distill
+# runner needs for the S3 trace bundle) plus the usual system dirs; the gemma-4 venv is prepended below.
+export PATH="${PROJECT_ROOT}/.venv/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 export PATH="${HOME}/.local/bin:/root/.local/bin:${PATH}"
 command -v uv >/dev/null 2>&1 || { curl -LsSf https://astral.sh/uv/install.sh | sh; export PATH="${HOME}/.local/bin:${PATH}"; }
 export VENV="${VENV:-/tmp/.venv-gemma4}"
