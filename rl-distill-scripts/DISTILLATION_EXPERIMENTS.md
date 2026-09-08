@@ -581,8 +581,9 @@ python rl-distill-scripts/eval_student_checkpoints_passk.py --gpu 7 --poll-minut
 **Distillation runs — ScaleTrain (launched 2026-09-07 ~17:30Z, mediums first):** `gemma4-e4bbase-med-12b`
 (p5.48xlarge:4, 4×H100) and `gemma4-e4bbase-med-26b` (p5.48xlarge, 8×H100), priority high, borrowing on, run-file
 `scale_train/run_gemma4_e4b_base_distill_st.sh` (v2 recipe: batch 128, lr 2e-6 → 2e-7, 1000 steps, validate every
-10, save + push every 250). Jobs `job_dafpkeqlrg1g07lkevn0` (12B) and `job_dafpkgpob6s008cpfgng` (26B), created
-2026-09-08 05:16Z. Three earlier pairs failed at pod start: 01:48Z (`tar: dapo/config: Cannot open: File exists` —
+10, save + push every 250). Jobs `job_dafr28qlrg1g089aq2h0` (12B) and `job_dafr29pob6s008cpfgpg` (26B), created
+2026-09-08 06:54Z. Four earlier pairs failed at pod start: 05:16Z (the run-file's own code-refresh block ran
+`aws` before the PATH restore — now the first thing the run-file does), 01:48Z (`tar: dapo/config: Cannot open: File exists` —
 `dapo/config` is a symlink in the archive but a directory in the baked tree; extraction now uses
 `--unlink-first --recursive-unlink`), 18:59Z (the 08-29 image predates the run-file →
 `launch_st_job.py --code-s3-uri` now unpacks the code tarball *before* invoking it) and 20:27Z (the pod's login
@@ -590,7 +591,7 @@ shell drops the image PATH → `aws: command not found`; the bootstrap now calls
 path and the run-file restores `/workspace/rl-distill/.venv/bin` + system dirs on PATH).
 The remote image builds (`--build-env remote`) never produced an image, so the jobs run the known-good 2026-08-29
 image (`…/tmp:20260829-002920.cd13c11a…`) and refresh the code from a `git archive` tarball of commit 7469ba29
-(`--code-s3-uri s3://scale-ml/genai/rl-distill/code/rl-distill-code-b025e1d5.tar.gz`, unpacked over the baked repo
+(`--code-s3-uri s3://scale-ml/genai/rl-distill/code/rl-distill-code-75227184.tar.gz`, unpacked over the baked repo
 before the run-file starts). Students land at
 `JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base/step_000250…step_001000`; the local checkpoint watchers
 (GPUs 6/7) evaluate each step with the ×32 protocol and refresh `figures/passk_*_val32.png`. Hard-band jobs: not
