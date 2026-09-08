@@ -211,6 +211,8 @@ def main() -> int:
     parser.add_argument("--plot-from-s3", action="store_true", help="no GPU: sync finished steps from --s3-root and re-plot")
     parser.add_argument("--no-plot", action="store_true", help="evaluate only (pods have no reference traces)")
     parser.add_argument("--keep-materialized", action="store_true", help="keep the materialized checkpoint weights after the eval")
+    parser.add_argument("--step", default=None, help="evaluate only this export (e.g. step_000250) of the single --repo; "
+                        "exit 1 if it is not on the Hub (one ScaleTrain job per checkpoint)")
     parser.add_argument("--final-step", type=int, default=None, help="exit once step_<N> is evaluated for every repo")
     parser.add_argument("--max-idle-hours", type=float, default=None, help="exit after this long without a new checkpoint")
     args = parser.parse_args()
@@ -222,6 +224,8 @@ def main() -> int:
         args.gpus = [g.strip() for g in args.gpus.split(",") if g.strip()]
         if args.parallelism == "dp" and len(args.gpus) < 2:
             parser.error("--parallelism dp needs at least two GPUs")
+    if args.step and (len(args.repo) != 1 or args.plot_from_s3):
+        parser.error("--step takes exactly one --repo and no --plot-from-s3")
     api = HfApi()
     last_progress = time.time()
     while True:
@@ -246,6 +250,10 @@ def main() -> int:
                 except RepositoryNotFoundError:
                     print(f"[{repo}] not on the Hub yet", flush=True)
                     steps = []
+                if args.step:
+                    if args.step not in steps:
+                        raise SystemExit(f"{repo}: {args.step} is not on the Hub (have {steps})")
+                    steps = [args.step]
                 new = [s for s in steps if not (args.out_root / step_tag(repo, s) / "metrics.json").exists()]
                 print(f"[{repo}] steps={steps} new={new} {time.strftime('%H:%M:%SZ', time.gmtime())}", flush=True)
                 for step in new:
@@ -260,6 +268,10 @@ def main() -> int:
         if reached_final:
             print(f"final step {args.final_step} evaluated for every repo; done", flush=True)
             return 0
+        if args.step:
+            done = (args.out_root / step_tag(args.repo[0], args.step) / "metrics.json").exists()
+            print(f"{args.step}: {'evaluated' if done else 'FAILED'}", flush=True)
+            return 0 if done else 1
         if args.poll_minutes <= 0:
             return 0
         if args.max_idle_hours and time.time() - last_progress > args.max_idle_hours * 3600:

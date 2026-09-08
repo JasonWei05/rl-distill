@@ -548,39 +548,35 @@ global batch 128 on 4 GPUs = 32 micro-steps per rank per optimizer step. The MoE
 ordinary sharded linear layers (no expert parallelism); `FSDP_OFFLOAD=true` moves the sharded fp32 params +
 optimizer state to CPU between uses.
 
-**pass@k for every checkpoint — ScaleTrain, 2 GPUs per student, no borrowing:** `eval_student_checkpoints_passk.py`
-polls the student repo, evaluates every new `step_NNNNNN/` on the band's validation set with the ×32 protocol
-(materialize → identity SHA → `eval_math_passk.py`, grader = the RL reward) and uploads each finished step
-(metrics, traces, log) to `s3://scale-ml/genai/rl-distill/gemma4-e4b-base-student-passk-v1/<tag>/`. GPU layout:
-**12B = dp 2** (one single-GPU vLLM per GPU on interleaved question shards; shard traces are merged and re-aggregated
-with `--resume_traces` — exact, because sampling seeds derive from (dataset, question id, sample index), not row
-order, and the shard manifests keep the fixed 32 samples/question), **26B-A4B = tp 2** (one vLLM tensor-parallel over
-both GPUs). The job exits after `step_001000` is evaluated (or 12 h without a new checkpoint). Run-file
-`scale_train/run_gemma4_student_ckpt_passk_st.sh` (builds the gemma-4 venv, prepares the ×32 data, runs the controller).
+**pass@k for every checkpoint — one short ScaleTrain job per checkpoint, 2 GPUs, no borrowing.** Two no-GPU loops run
+on this box (tmux `ckpt-passk-submit`, `ckpt-passk-plot`; logs under `/tmp/gemma4_e4b_val32/`):
+1. `scale_train/submit_student_ckpt_passk_jobs.py` polls the student repos every 10 min and, for each `step_NNNNNN/`
+   export with no result in S3 and no live job, submits `run_gemma4_student_ckpt_passk_st.sh` with
+   `STUDENT=<student>,STEP=<step>,BANDS=<band>` via `launch_st_with_code.sh` (HEAD tarball + known-good image; priority high,
+   borrowing off, 12 h deadline). Job names `g4e4b-pk-<band[:3]>-<student>-s<step>`; state in
+   `/tmp/gemma4_e4b_val32/passk_jobs_state.json`; a job that ends FAILED/CANCELLED without a result is resubmitted (≤3 attempts).
+2. The pod evaluates that one export with `eval_student_checkpoints_passk.py --step` (materialize → identity SHA →
+   `eval_math_passk.py`, ×32 protocol, grader = the RL reward) and uploads metrics + traces to
+   `s3://scale-ml/genai/rl-distill/gemma4-e4b-base-student-passk-v1/<tag>/`, then exits. GPU layout: **12B = dp 2** (one
+   single-GPU vLLM per GPU on interleaved question shards; shard traces merged and re-aggregated with `--resume_traces` —
+   exact, since sampling seeds derive from (dataset, question id, sample index), not row order, and the shard manifests
+   keep the fixed 32 samples/question), **26B-A4B = tp 2**.
+3. `eval_student_checkpoints_passk.py --plot-from-s3` syncs finished steps down and re-plots `figures/passk_<student>_val32.png`
+   (all steps vs the E4B-base teacher curve; the reference traces live here under `/tmp/gemma4_e4b_val32/id_<band>/traces/`).
 ```bash
-cd rl-distill-scripts/scale_train      # launched 2026-09-08 15:32Z: gemma4-e4bbase-passk-12b = job_dag2l12lrg1g07lkf0ng (dp 2),
-                                       # gemma4-e4bbase-passk-26b = job_dag2l3hob6s007k81ni0 (tp 2); priority high, borrowing OFF
-bash launch_st_with_code.sh --gpus-per-instance 2 --priority high --active-deadline-hours 72 \
-  --run-file run_gemma4_student_ckpt_passk_st.sh --job-name gemma4-e4bbase-passk-12b --env-vars "STUDENT=12b"   # dp 2
-bash launch_st_with_code.sh --gpus-per-instance 2 --priority high --active-deadline-hours 72 \
-  --run-file run_gemma4_student_ckpt_passk_st.sh --job-name gemma4-e4bbase-passk-26b --env-vars "STUDENT=26b"   # tp 2
-# launch_st_with_code.sh = git archive HEAD -> s3://scale-ml/genai/rl-distill/code/rl-distill-code-<sha>.tar.gz (ml-worker profile)
-# + launch_st_job.py --image <known-good 2026-08-29 image> --code-s3-uri ...; equivalent long form:
-python3 launch_st_job.py --n-instances 1 --gpus-per-instance 2 --priority high --active-deadline-hours 72 \
-  --image <ECR uri> --code-s3-uri s3://scale-ml/genai/rl-distill/code/rl-distill-code-<sha>.tar.gz \
-  --run-file run_gemma4_student_ckpt_passk_st.sh --job-name gemma4-e4bbase-passk-12b --env-vars "STUDENT=12b"   # dp 2
-python3 launch_st_job.py ... --job-name gemma4-e4bbase-passk-26b --env-vars "STUDENT=26b"                          # tp 2
-# BANDS=medium,hard once the hard runs exist; FINAL_STEP / MAX_IDLE_HOURS / PASSK_S3_ROOT are overridable.
-```
-The figures need the E4B-base reference traces (`/tmp/gemma4_e4b_val32/id_<band>/traces/`), so plotting stays on this box
-(no GPU; tmux `ckpt-passk-plot`, log `/tmp/gemma4_e4b_val32/plot_loop.log`): the loop below syncs finished steps from S3 and re-plots `figures/passk_<student>_val32.png` (all steps vs the
-E4B-base teacher curve); results land under `/tmp/gemma4_e4b_val32/students/<tag>/`.
-```bash
+python rl-distill-scripts/scale_train/submit_student_ckpt_passk_jobs.py --poll-minutes 10 \
+  --repo JWei05/Distill-gemma4-e4b-base-medium-to-12b-base --repo JWei05/Distill-gemma4-e4b-base-medium-to-26b-base
 python rl-distill-scripts/eval_student_checkpoints_passk.py --plot-from-s3 --poll-minutes 10 \
   --s3-root s3://scale-ml/genai/rl-distill/gemma4-e4b-base-student-passk-v1 \
   --repo JWei05/Distill-gemma4-e4b-base-medium-to-12b-base --repo JWei05/Distill-gemma4-e4b-base-medium-to-26b-base
-# local GPU fallback: --gpus 6,7 --parallelism dp|tp instead of --plot-from-s3 (same protocol, same outputs)
+# one checkpoint by hand:  cd rl-distill-scripts/scale_train && bash launch_st_with_code.sh --gpus-per-instance 2 --priority high \
+#   --active-deadline-hours 12 --run-file run_gemma4_student_ckpt_passk_st.sh --job-name g4e4b-pk-med-12b-s0250 \
+#   --env-vars "STUDENT=12b,STEP=step_000250,BANDS=medium"
+# local GPU fallback: eval_student_checkpoints_passk.py --gpus 6,7 --parallelism dp|tp --repo ... (same protocol/outputs)
 ```
+(An earlier variant — one long-lived 2-GPU pod per student polling the Hub — was submitted 15:32Z as jobs
+`job_dag2l12lrg1g07lkf0ng` / `job_dag2l3hob6s007k81ni0` and cancelled at 15:50Z before running: it would have held reserved
+GPUs while waiting for checkpoints.)
 
 ### 9.1 Results
 
@@ -618,8 +614,8 @@ The remote image builds (`--build-env remote`) never produced an image, so the j
 image (`…/tmp:20260829-002920.cd13c11a…`) and refresh the code from a `git archive` tarball of commit 7469ba29
 (`--code-s3-uri s3://scale-ml/genai/rl-distill/code/rl-distill-code-75227184.tar.gz`, unpacked over the baked repo
 before the run-file starts). Students land at
-`JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base/step_*`; the ScaleTrain pass@k jobs (§9, `gemma4-e4bbase-passk-{12b,26b}`)
-evaluate each step with the ×32 protocol and the plot loop on this box refreshes `figures/passk_*_val32.png`. Hard-band jobs: not
+`JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base/step_*`; the local submitter loop launches one 2-GPU ScaleTrain job per
+export (§9, jobs `g4e4b-pk-med-{12b,26b}-s<step>`) and the plot loop refreshes `figures/passk_*_val32.png` from S3. Hard-band jobs: not
 launched yet.
 
 **Preemption (2026-09-08):** both jobs were evicted once under borrowing — the 26B pod had trained to step 20 (val loss

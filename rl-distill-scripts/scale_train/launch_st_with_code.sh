@@ -18,8 +18,12 @@ if [ -n "$(git -C "${REPO_ROOT}" status --porcelain -- rl-distill-scripts/scale_
   echo "WARNING: uncommitted changes under rl-distill-scripts/scale_train are not in the tarball (git archive HEAD)" >&2
 fi
 tarball="/tmp/rl-distill-code-${sha}.tar.gz"
-git -C "${REPO_ROOT}" archive --format=tar.gz -o "${tarball}" HEAD
 uri="${CODE_S3_PREFIX}/rl-distill-code-${sha}.tar.gz"
-aws s3 cp --only-show-errors "${tarball}" "${uri}"
-echo "CODE_TARBALL ${uri} commit=${sha} size=$(du -h "${tarball}" | cut -f1)"
+if aws s3 ls "${uri}" >/dev/null 2>&1; then
+  echo "CODE_TARBALL ${uri} commit=${sha} (already uploaded)"
+else
+  git -C "${REPO_ROOT}" archive --format=tar.gz -o "${tarball}" HEAD
+  aws s3 cp --only-show-errors "${tarball}" "${uri}"
+  echo "CODE_TARBALL ${uri} commit=${sha} size=$(du -h "${tarball}" | cut -f1)"
+fi
 exec python3 launch_st_job.py --n-instances 1 --image "${IMAGE}" --code-s3-uri "${uri}" "$@"

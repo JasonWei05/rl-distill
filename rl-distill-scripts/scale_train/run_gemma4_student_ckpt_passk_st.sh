@@ -4,9 +4,10 @@
 # 300-question validation set with the x32 protocol and uploads each finished step to S3; the plots are drawn locally
 # from S3 (eval_student_checkpoints_passk.py --plot-from-s3).
 #
-#   --env-vars "STUDENT=12b"   -> dp 2 (one vLLM per GPU on question shards)
-#   --env-vars "STUDENT=26b"   -> tp 2 (one vLLM tensor-parallel over both GPUs)
-#   BANDS=medium (default) | medium,hard ; FINAL_STEP=1000 ; MAX_IDLE_HOURS=12
+#   --env-vars "STUDENT=12b,STEP=step_000250"   -> dp 2 (one vLLM per GPU on question shards), evaluates that one export, exits
+#   --env-vars "STUDENT=26b,STEP=step_000250"   -> tp 2 (one vLLM tensor-parallel over both GPUs)
+#   Without STEP the pod polls the repo itself (BANDS=medium|medium,hard ; FINAL_STEP=1000 ; MAX_IDLE_HOURS=12) -- the
+#   normal path is one job per checkpoint, submitted by submit_student_ckpt_passk_jobs.py polling the Hub from a CPU box.
 set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${PROJECT_ROOT}"
@@ -29,6 +30,7 @@ case "${STUDENT}" in
   *) echo "FATAL: STUDENT must be 12b or 26b" >&2; exit 2 ;;
 esac
 BANDS="${BANDS:-medium}"
+STEP="${STEP:-}"            # step_NNNNNN -> single-checkpoint job
 FINAL_STEP="${FINAL_STEP:-1000}"
 MAX_IDLE_HOURS="${MAX_IDLE_HOURS:-12}"
 POLL_MINUTES="${POLL_MINUTES:-10}"
@@ -57,7 +59,7 @@ export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/triton_cache}"
 n_gpus="$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)"
 (( n_gpus >= 2 )) || { echo "FATAL: need 2 GPUs, got ${n_gpus}" >&2; exit 2; }
 GPUS="$(seq -s, 0 $((n_gpus - 1)))"
-echo "ST_PASSK config student=${STUDENT} parallelism=${PARALLELISM} gpus=${GPUS} bands=${BANDS} final_step=${FINAL_STEP} s3=${PASSK_S3_ROOT}"
+echo "ST_PASSK config student=${STUDENT} parallelism=${PARALLELISM} gpus=${GPUS} bands=${BANDS} step=${STEP:-poll} final_step=${FINAL_STEP} s3=${PASSK_S3_ROOT}"
 echo "ST_PASSK disk: $(df -h /tmp | tail -1)"
 
 # x32 validation protocol data (id_medium / id_hard at 32 samples per question), same command as the E4B-base reference.
@@ -68,11 +70,16 @@ test -s "${DATA_ROOT}/math_eval_manifest.json"
 REPO_ARGS=()
 IFS=',' read -r -a band_list <<< "${BANDS}"
 for band in "${band_list[@]}"; do REPO_ARGS+=(--repo "JWei05/Distill-gemma4-e4b-base-${band}-to-${STUDENT}-base"); done
+if [ -n "${STEP}" ]; then
+  (( ${#band_list[@]} == 1 )) || { echo "FATAL: STEP needs a single band" >&2; exit 2; }
+  MODE_ARGS=(--step "${STEP}" --poll-minutes 0)
+else
+  MODE_ARGS=(--poll-minutes "${POLL_MINUTES}" --final-step "${FINAL_STEP}" --max-idle-hours "${MAX_IDLE_HOURS}")
+fi
 # Every eval is exactly the RL reward grader (strict last-\boxed{}, 30 s verify, 5 s SymPy); the controller pins these too.
 python rl-distill-scripts/eval_student_checkpoints_passk.py "${REPO_ARGS[@]}" \
-  --gpus "${GPUS}" --parallelism "${PARALLELISM}" --poll-minutes "${POLL_MINUTES}" \
-  --manifest "${DATA_ROOT}/math_eval_manifest.json" --out-root "${OUT_ROOT}" \
-  --s3-root "${PASSK_S3_ROOT}" --no-plot --final-step "${FINAL_STEP}" --max-idle-hours "${MAX_IDLE_HOURS}"
+  --gpus "${GPUS}" --parallelism "${PARALLELISM}" "${MODE_ARGS[@]}" \
+  --manifest "${DATA_ROOT}/math_eval_manifest.json" --out-root "${OUT_ROOT}" --s3-root "${PASSK_S3_ROOT}" --no-plot
 status=$?
-echo "ST_PASSK_DONE student=${STUDENT} exit=${status} $(date -u +%FT%TZ)"
+echo "ST_PASSK_DONE student=${STUDENT} step=${STEP:-poll} exit=${status} $(date -u +%FT%TZ)"
 exit "${status}"
