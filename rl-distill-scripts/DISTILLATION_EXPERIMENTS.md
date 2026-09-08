@@ -558,7 +558,14 @@ order, and the shard manifests keep the fixed 32 samples/question), **26B-A4B = 
 both GPUs). The job exits after `step_001000` is evaluated (or 12 h without a new checkpoint). Run-file
 `scale_train/run_gemma4_student_ckpt_passk_st.sh` (builds the gemma-4 venv, prepares the ×32 data, runs the controller).
 ```bash
-cd rl-distill-scripts/scale_train      # launched 2026-09-08 (§9.1); priority high, borrowing OFF (evals must not restart)
+cd rl-distill-scripts/scale_train      # launched 2026-09-08 15:32Z: gemma4-e4bbase-passk-12b = job_dag2l12lrg1g07lkf0ng (dp 2),
+                                       # gemma4-e4bbase-passk-26b = job_dag2l3hob6s007k81ni0 (tp 2); priority high, borrowing OFF
+bash launch_st_with_code.sh --gpus-per-instance 2 --priority high --active-deadline-hours 72 \
+  --run-file run_gemma4_student_ckpt_passk_st.sh --job-name gemma4-e4bbase-passk-12b --env-vars "STUDENT=12b"   # dp 2
+bash launch_st_with_code.sh --gpus-per-instance 2 --priority high --active-deadline-hours 72 \
+  --run-file run_gemma4_student_ckpt_passk_st.sh --job-name gemma4-e4bbase-passk-26b --env-vars "STUDENT=26b"   # tp 2
+# launch_st_with_code.sh = git archive HEAD -> s3://scale-ml/genai/rl-distill/code/rl-distill-code-<sha>.tar.gz (ml-worker profile)
+# + launch_st_job.py --image <known-good 2026-08-29 image> --code-s3-uri ...; equivalent long form:
 python3 launch_st_job.py --n-instances 1 --gpus-per-instance 2 --priority high --active-deadline-hours 72 \
   --image <ECR uri> --code-s3-uri s3://scale-ml/genai/rl-distill/code/rl-distill-code-<sha>.tar.gz \
   --run-file run_gemma4_student_ckpt_passk_st.sh --job-name gemma4-e4bbase-passk-12b --env-vars "STUDENT=12b"   # dp 2
@@ -566,7 +573,7 @@ python3 launch_st_job.py ... --job-name gemma4-e4bbase-passk-26b --env-vars "STU
 # BANDS=medium,hard once the hard runs exist; FINAL_STEP / MAX_IDLE_HOURS / PASSK_S3_ROOT are overridable.
 ```
 The figures need the E4B-base reference traces (`/tmp/gemma4_e4b_val32/id_<band>/traces/`), so plotting stays on this box
-(no GPU): the loop below syncs finished steps from S3 and re-plots `figures/passk_<student>_val32.png` (all steps vs the
+(no GPU; tmux `ckpt-passk-plot`, log `/tmp/gemma4_e4b_val32/plot_loop.log`): the loop below syncs finished steps from S3 and re-plots `figures/passk_<student>_val32.png` (all steps vs the
 E4B-base teacher curve); results land under `/tmp/gemma4_e4b_val32/students/<tag>/`.
 ```bash
 python rl-distill-scripts/eval_student_checkpoints_passk.py --plot-from-s3 --poll-minutes 10 \
