@@ -581,12 +581,14 @@ python rl-distill-scripts/eval_student_checkpoints_passk.py --gpu 7 --poll-minut
 **Distillation runs — ScaleTrain (launched 2026-09-07 ~17:30Z, mediums first):** `gemma4-e4bbase-med-12b`
 (p5.48xlarge:4, 4×H100) and `gemma4-e4bbase-med-26b` (p5.48xlarge, 8×H100), priority high, borrowing on, run-file
 `scale_train/run_gemma4_e4b_base_distill_st.sh` (v2 recipe: batch 128, lr 2e-6 → 2e-7, 1000 steps, validate every
-10, save + push every 250). Jobs `job_dafhsaalrg1g089aq1ig` (12B) and `job_dafhsaqlrg1g089aq1j0` (26B), created 20:27Z
-(the 18:59Z pair failed instantly: the 08-29 image predates the run-file, so `launch_st_job.py --code-s3-uri` now
-unpacks the code tarball *before* invoking it).
+10, save + push every 250). Jobs `job_dafmip2lrg1g07lkev50` (12B) and `job_dafmiq2lrg1g07lkev5g` (26B), created
+2026-09-08 01:48Z. Two earlier pairs failed at pod start: 18:59Z (the 08-29 image predates the run-file →
+`launch_st_job.py --code-s3-uri` now unpacks the code tarball *before* invoking it) and 20:27Z (the pod's login
+shell drops the image PATH → `aws: command not found`; the bootstrap now calls the FSDP2-venv `aws` by absolute
+path and the run-file restores `/workspace/rl-distill/.venv/bin` + system dirs on PATH).
 The remote image builds (`--build-env remote`) never produced an image, so the jobs run the known-good 2026-08-29
 image (`…/tmp:20260829-002920.cd13c11a…`) and refresh the code from a `git archive` tarball of commit 7469ba29
-(`--code-s3-uri s3://scale-ml/genai/rl-distill/code/rl-distill-code-d303b54f.tar.gz`, unpacked over the baked repo
+(`--code-s3-uri s3://scale-ml/genai/rl-distill/code/rl-distill-code-5e4d6c21.tar.gz`, unpacked over the baked repo
 before the run-file starts). Students land at
 `JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base/step_000250…step_001000`; the local checkpoint watchers
 (GPUs 6/7) evaluate each step with the ×32 protocol and refresh `figures/passk_*_val32.png`. Hard-band jobs: not
