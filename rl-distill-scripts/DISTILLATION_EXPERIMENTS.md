@@ -618,13 +618,29 @@ before the run-file starts). Students land at
 export (§9, jobs `g4e4b-pk-med-{12b,26b}-s<step>`) and the plot loop refreshes `figures/passk_*_val32.png` from S3. Hard-band jobs: not
 launched yet.
 
+**Per-checkpoint pass@k — id_medium validation, 32 samples/question (first results, 2026-09-08):** the 26B-A4B student's
+`step_000250` (pushed 16:06Z) was evaluated by ScaleTrain job `g4e4b-pk-med-26b-s0250` (job_dag3ah2lrg1g07lkf0p0; tp 2 on
+2 H100s; 35 min wall incl. venv build + 52 GB materialize) and is already within ~1.5 points of the E4B teacher at every k
+(figure `figures/passk_e4b-base-medium-to-26b-base_val32.png`):
+
+| pass@k (%) | 1 | 2 | 4 | 8 | 16 | 32 | mean@32 | maj@32 |
+|---|---|---|---|---|---|---|---|---|
+| E4B base teacher | 8.4 | 15.4 | 26.6 | 41.9 | 59.3 | 74.7 | 8.4 | 20.3 |
+| 26B-A4B ← E4B-base medium, step 250 | 8.1 | 14.8 | 25.5 | 40.4 | 57.7 | 73.3 | 8.1 | 18.3 |
+
+(Untrained 26B-A4B base on the same band, ×16: mean 23.8 / pass@16 86.3 — §8. The distilled student has moved onto the
+teacher's curve, i.e. well *below* its own pre-training ability, after 250 steps.) No 12B checkpoint exists yet (see below).
+
 **Preemption (2026-09-08):** both jobs were evicted once under borrowing — the 26B pod had trained to step 20 (val loss
 0.147 → 0.141, 13:28–13:59Z) when the job went back to QUEUED; new pods started 14:08Z (12B) and 14:15Z (26B) and, because
 those jobs save only the HF export, training restarted from step 0. The run-file now saves a full resumable checkpoint
 (model, Adam, LR/RNG, dataloader position, HF export) every 125 steps, mirrors each to S3 and restores the newest complete
 one at startup; validated locally with an E2B smoke run (5 steps → checkpoint dir wiped → restored step 5 from S3, identical
 step-5 val loss, dataloader `samples_yielded` 20 → 24 with the same base seed, LR schedule continued, steps 6–8 trained).
-Jobs launched before this change keep running without resume until relaunched. Launch command pattern:
+Jobs launched before this change keep running without resume until relaunched. **Second round of preemptions:** the 12B
+job went QUEUED at 17:07Z (at ~step 235, before its first push), ran 17:12–17:22Z, and restarted again at 18:44Z from step 0;
+the 26B job went QUEUED at 17:33Z (at ~step 450, after pushing step 250) and had no pod as of 19:25Z. Every preemption
+of these jobs discards all progress. Launch command pattern:
 ```bash
 cd rl-distill-scripts/scale_train
 python3 launch_st_job.py --cluster eks --build-env remote --n-instances 1 --gpus-per-instance 4 --job-name gemma4-e4bbase-med-12b \
