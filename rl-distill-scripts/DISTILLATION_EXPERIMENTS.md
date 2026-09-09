@@ -651,7 +651,11 @@ of these jobs discards all progress. Both pods were replaced yet again at 20:02Z
 `gemma4-e4bbase-med-12b` = job_dag6svilrg1g07lkf1a0 (p5:4), `gemma4-e4bbase-med-26b` = job_dag6t1hob6s007k81o80 (p5:8), borrowing on,
 priority high. They push to the same Hub repos; the submitter re-evaluates an export whose last Hub commit differs from the
 revision recorded in its S3 result (the old result is parked under `_superseded/`), so the step-250 point above will be replaced
-by the relaunched 26B run's own step 250. Launch command pattern:
+by the relaunched 26B run's own step 250. Those jobs reached step 50 (rolling checkpoints in S3 at 21:01Z/21:10Z), were
+preempted again before step 100 and sat QUEUED; at 00:58Z (09-09) they were cancelled once more and resubmitted on commit
+0d154688 so that every 50-step save also pushes an HF export (user: evaluate every 50 steps): `gemma4-e4bbase-med-12b` =
+job_dagau49ob6s008cpfhug, `gemma4-e4bbase-med-26b` = job_dagau6alrg1g07lkf1mg. Same S3 prefixes → they resume from rolling
+step 50, so the first Hub exports of these runs are `step_000100` (step 50 has no export). Launch command pattern:
 ```bash
 cd rl-distill-scripts/scale_train
 python3 launch_st_job.py --cluster eks --build-env remote --n-instances 1 --gpus-per-instance 4 --job-name gemma4-e4bbase-med-12b \
