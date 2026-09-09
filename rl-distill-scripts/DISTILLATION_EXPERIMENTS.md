@@ -548,8 +548,8 @@ global batch 128 on 4 GPUs = 32 micro-steps per rank per optimizer step. The MoE
 ordinary sharded linear layers (no expert parallelism); `FSDP_OFFLOAD=true` moves the sharded fp32 params +
 optimizer state to CPU between uses.
 
-**pass@k for every checkpoint (every 50 steps) — one short ScaleTrain job per checkpoint, 2 GPUs, no borrowing.** Two no-GPU loops run
-on this box (tmux `ckpt-passk-submit`, `ckpt-passk-plot`; logs under `/tmp/gemma4_e4b_val32/`):
+**pass@k every 100 steps — one short ScaleTrain job per evaluated checkpoint, 2 GPUs, no borrowing.** (Exports are pushed every
+50 steps; the submitter evaluates the multiples of 100, `--step-multiple`.) Two no-GPU loops run on this box (tmux `ckpt-passk-submit`, `ckpt-passk-plot`; logs under `/tmp/gemma4_e4b_val32/`):
 1. `scale_train/submit_student_ckpt_passk_jobs.py` polls the student repos every 10 min and, for each `step_NNNNNN/`
    export with no result in S3 and no live job, submits `run_gemma4_student_ckpt_passk_st.sh` with
    `STUDENT=<student>,STEP=<step>,BANDS=<band>` via `launch_st_with_code.sh` (HEAD tarball + known-good image; priority high,

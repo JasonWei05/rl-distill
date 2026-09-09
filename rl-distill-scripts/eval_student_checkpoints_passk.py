@@ -177,8 +177,9 @@ def evaluate_step(api: HfApi, repo: str, step: str, band: str, student: str, arg
 
 def sync_from_s3(args) -> None:
     args.out_root.mkdir(parents=True, exist_ok=True)
-    sh([AWS, "s3", "sync", args.s3_root.rstrip("/") + "/", str(args.out_root) + "/", "--only-show-errors",
-        "--exclude", "*/eval.log", "--exclude", "*/dp*/*"])
+    # --delete: a result the submitter parked under _superseded/ (export re-pushed by a relaunched run) disappears locally too
+    sh([AWS, "s3", "sync", args.s3_root.rstrip("/") + "/", str(args.out_root) + "/", "--only-show-errors", "--delete",
+        "--exclude", "*/eval.log", "--exclude", "*/dp*/*", "--exclude", "_superseded/*"])
 
 
 def plot_repo(repo: str, band: str, out_root: Path, reference_root: Path, figures: Path) -> None:

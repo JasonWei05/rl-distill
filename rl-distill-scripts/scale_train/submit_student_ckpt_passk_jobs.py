@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Poll the distilled-student Hub repos from a CPU box and submit one ScaleTrain eval job per new checkpoint.
 
-For every ``step_NNNNNN/`` export of each ``--repo`` that has no result under ``--s3-root`` yet and no live job, submit
+For every ``step_NNNNNN/`` export of each ``--repo`` whose step is a multiple of ``--step-multiple`` (default 100; the
+trainer may push exports more often) that has no result under ``--s3-root`` yet and no live job, submit
 ``run_gemma4_student_ckpt_passk_st.sh`` with ``STUDENT=<student>,STEP=<step>,BANDS=<band>`` on 2 GPUs (12B -> dp 2,
 26B -> tp 2; priority high, borrowing off by default) through ``launch_st_with_code.sh`` (current HEAD as the code
 tarball). Job names: ``g4e4b-pk-<band[:3]>-<student>-s<step>`` (+ ``-<user>``, 32-char platform limit). Submitted jobs
@@ -119,6 +120,8 @@ def main() -> int:
     parser.add_argument("--priority", choices=["normal", "high"], default="high")
     parser.add_argument("--deadline-hours", type=int, default=12)
     parser.add_argument("--allow-borrowing", action="store_true", help="preemptible capacity (off: reserved queue, no restarts)")
+    parser.add_argument("--step-multiple", type=int, default=100,
+                        help="evaluate only exports whose step is a multiple of this (exports may be pushed more often)")
     parser.add_argument("--max-attempts", type=int, default=3)
     parser.add_argument("--st-python", default=DEFAULT_ST_PYTHON, help="interpreter with the scaletrain_cli package (job status)")
     parser.add_argument("--dry-run", action="store_true")
@@ -144,7 +147,22 @@ def main() -> int:
                 print(f"[{now()}] {repo}: not on the Hub yet", flush=True)
                 continue
             summary = []
+            skipped = [st for st in sorted(commits) if int(st.split("_")[-1]) % args.step_multiple]
             for step in sorted(commits):
+                if step in skipped:
+                    # not evaluated at this cadence -- but if an older attempt's result exists and the export was re-pushed,
+                    # park that stale result so the plots only show the current run
+                    tag = step_tag(repo, step)
+                    stale = state.get(tag, {}).get("revision") or None
+                    if stale is None and not state.get(tag, {}).get("checked_stale"):
+                        stale = s3_result_revision(args.s3_root, tag)
+                        state.setdefault(tag, {"repo": repo, "step": step, "attempts": 0, "jobs": []}).update(checked_stale=True, revision=stale)
+                    if stale and stale != "unknown" and commits[step] and stale != commits[step]:
+                        print(f"[{now()}] {tag}: skipped step re-pushed ({stale[:8]} -> {commits[step][:8]}); parking the old result", flush=True)
+                        supersede_result(args.s3_root, tag, stale)
+                        state[tag].update(revision=None, done=False, superseded=state[tag].get("superseded", []) + [stale])
+                        save()
+                    continue
                 tag = step_tag(repo, step)
                 revision = commits[step]
                 entry = state.setdefault(tag, {"repo": repo, "step": step, "attempts": 0, "jobs": []})
@@ -182,6 +200,8 @@ def main() -> int:
                 else:
                     summary.append(f"{step}=submit_error")
                 save()
+            if skipped:
+                summary.append(f"(not a multiple of {args.step_multiple}, skipped: {','.join(st.split('_')[-1].lstrip('0') for st in skipped)})")
             print(f"[{now()}] {repo}: {' '.join(summary) if summary else 'no step exports yet'}", flush=True)
         save()
         if args.poll_minutes <= 0:
