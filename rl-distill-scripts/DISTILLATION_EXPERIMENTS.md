@@ -628,8 +628,9 @@ launched yet.
 |---|---|---|---|---|---|---|---|---|
 | E4B base teacher | 8.4 | 15.4 | 26.6 | 41.9 | 59.3 | 74.7 | 8.4 | 20.3 |
 | 26B-A4B ← E4B-base medium, step 250 | 8.1 | 14.8 | 25.5 | 40.4 | 57.7 | 73.3 | 8.1 | 18.3 |
+| 12B ← E4B-base medium, step 100 (resumed run, 2026-09-09) | 7.5 | 13.9 | 24.1 | 38.3 | 55.0 | 71.7 | 7.5 | 19.7 |
 
-(Untrained 26B-A4B base on the same band, ×16: mean 23.8 / pass@16 86.3 — §8. The distilled student has moved onto the
+(Untrained bases on the same band, ×16: 12B mean 14.1 / pass@16 72.0, 26B-A4B mean 23.8 / pass@16 86.3 — §8. The distilled student has moved onto the
 teacher's curve, i.e. well *below* its own pre-training ability, after 250 steps.) No 12B checkpoint exists yet (see below).
 
 **Preemption (2026-09-08):** both jobs were evicted once under borrowing — the 26B pod had trained to step 20 (val loss
