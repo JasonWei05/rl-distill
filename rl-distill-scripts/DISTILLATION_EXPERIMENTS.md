@@ -627,8 +627,10 @@ launched yet.
 | pass@k (%) | 1 | 2 | 4 | 8 | 16 | 32 | mean@32 | maj@32 |
 |---|---|---|---|---|---|---|---|---|
 | E4B base teacher | 8.4 | 15.4 | 26.6 | 41.9 | 59.3 | 74.7 | 8.4 | 20.3 |
-| 26B-A4B ← E4B-base medium, step 250 | 8.1 | 14.8 | 25.5 | 40.4 | 57.7 | 73.3 | 8.1 | 18.3 |
-| 12B ← E4B-base medium, step 100 (resumed run, 2026-09-09) | 7.5 | 13.9 | 24.1 | 38.3 | 55.0 | 71.7 | 7.5 | 19.7 |
+| 12B ← E4B-base medium, step 100 | 7.5 | 13.9 | 24.1 | 38.3 | 55.0 | 71.7 | 7.5 | 19.7 |
+| 12B ← E4B-base medium, step 150 | 6.7 | 12.4 | 21.9 | 35.7 | 52.8 | 70.0 | 6.7 | 15.3 |
+| 12B ← E4B-base medium, step 200 | 7.2 | 13.2 | 23.0 | 36.9 | 53.6 | 70.3 | 7.2 | 21.0 |
+| 26B-A4B ← E4B-base medium, step 250 (earlier attempt) | 8.1 | 14.8 | 25.5 | 40.4 | 57.7 | 73.3 | 8.1 | 18.3 |
 
 (Untrained bases on the same band, ×16: 12B mean 14.1 / pass@16 72.0, 26B-A4B mean 23.8 / pass@16 86.3 — §8. The distilled student has moved onto the
 teacher's curve, i.e. well *below* its own pre-training ability, after 250 steps.) No 12B checkpoint exists yet (see below).
