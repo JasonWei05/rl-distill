@@ -2,8 +2,9 @@
 # ScaleTrain pod entry for the pre-training-control distillations (E4B *base* traces -> 12B / 26B-A4B students).
 # Launched by launch_st_job.py; the repo is baked into the image at /workspace/rl-distill. Builds the gemma-4
 # venv into /tmp once per pod (as the Gemma 4 RL run-file does), then runs run_gemma4_distill_one.sh with the
-# v2 recipe: batch 128, lr 2e-6 (100 warmup, linear -> 2e-7), 1000 steps, validate every 10, save + push every 250,
-# resumable checkpoint (model + Adam + LR/RNG + dataloader position) every 50 steps.
+# v2 recipe: batch 128, lr 2e-6 (100 warmup, linear -> 2e-7), 1000 steps, validate every 10; every 50 steps a resumable
+# checkpoint (model + Adam + LR/RNG + dataloader position) AND an HF export pushed to the Hub (pass@k eval point);
+# every 250 steps the checkpoint is kept permanently in S3.
 # Borrowed pods get preempted (the job goes back to QUEUED and the run-file starts again): the permanent saves (every
 # SAVE_FREQ, with the HF export + push) and the rolling saves (every ROLLING_CHECKPOINT_FREQ, single S3 slot) are both full
 # FSDP checkpoints mirrored to S3, and the trainer restores the newest complete one at startup and resumes. A relaunch of the same direction + recipe therefore continues the earlier
@@ -76,13 +77,13 @@ export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-128}" LR="${LR:-2e-6}" TOTAL_TRAINI
 export LR_WARMUP_STEPS="${LR_WARMUP_STEPS:-100}" MIN_LR_RATIO="${MIN_LR_RATIO:-0.1}" TEST_FREQ="${TEST_FREQ:-10}" SAVE_FREQ="${SAVE_FREQ:-250}"
 
 # --- preemption-safe checkpoints ---------------------------------------------------------------------------------
-# Permanent checkpoint every SAVE_FREQ steps (also the HF push cadence; S3 history, ~170 GB per 12B save / ~370 GB per 26B
-# save) plus a rolling resumable checkpoint every ROLLING_CHECKPOINT_FREQ steps (no HF export; one S3 slot, uploaded in the
-# background, retired when the next permanent save lands). One checkpoint kept on local disk. The pusher must not delete
+# Permanent checkpoint every SAVE_FREQ steps (S3 history, ~170 GB per 12B save / ~370 GB per 26B save) plus a rolling
+# resumable checkpoint every ROLLING_CHECKPOINT_FREQ steps (one S3 slot, uploaded in the background, retired when the next
+# permanent save lands). Both write the HF export and push it to the Hub -> one evaluable step_* every 50 steps. One checkpoint kept on local disk. The pusher must not delete
 # the local hf export: the S3 upload enumerates the whole step directory after the (async) push starts.
 export CHECKPOINT_SAVE_CONTENTS="${CHECKPOINT_SAVE_CONTENTS:-[\"model\",\"optimizer\",\"extra\",\"hf_model\"]}"
-export MAX_CKPT_TO_KEEP="${MAX_CKPT_TO_KEEP:-1}" HF_PUSH_DELETE_LOCAL="${HF_PUSH_DELETE_LOCAL:-false}" HF_PUSH_MAX_TO_KEEP="${HF_PUSH_MAX_TO_KEEP:-16}"
-export REMOTE_CHECKPOINT_ENABLE="${REMOTE_CHECKPOINT_ENABLE:-true}" ROLLING_CHECKPOINT_FREQ="${ROLLING_CHECKPOINT_FREQ:-50}"
+export MAX_CKPT_TO_KEEP="${MAX_CKPT_TO_KEEP:-1}" HF_PUSH_DELETE_LOCAL="${HF_PUSH_DELETE_LOCAL:-false}" HF_PUSH_MAX_TO_KEEP="${HF_PUSH_MAX_TO_KEEP:-24}"   # keep all 20 step_* exports
+export REMOTE_CHECKPOINT_ENABLE="${REMOTE_CHECKPOINT_ENABLE:-true}" ROLLING_CHECKPOINT_FREQ="${ROLLING_CHECKPOINT_FREQ:-50}" ROLLING_HF_EXPORT="${ROLLING_HF_EXPORT:-true}"
 export REMOTE_CHECKPOINT_S3_URI="${REMOTE_CHECKPOINT_S3_URI:-s3://scale-ml/genai/rl-distill/gemma4-e4b-base-distill-ckpts-v1/${TEACHER_SPEC}-to-${STUDENT}-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}-lr${LR}}"
 # Local disk must hold two full checkpoints (the new one is written before the old one is pruned) plus the student
 # snapshot, venv and trace bundle. REQUIRE_CKPT_DISK_GB=0 disables the check.

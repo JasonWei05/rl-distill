@@ -232,11 +232,13 @@ class FullVocabDistillTrainer(SFTTrainer):
 
         With ``trainer.remote_checkpoint.rolling_freq = R`` the fit loop saves every R steps. Steps that are a
         multiple of the configured ``trainer.save_freq`` (and the last step) take the permanent path -- local save
-        with the HF export, HF push, permanent S3 upload. Every other multiple of R is a local save *without* the
-        HF export (model + optimizer + LR/RNG + dataloader position) whose upload replaces the single rolling S3
-        slot from a background thread (best effort: a failed rolling upload is logged, the run continues). The
-        startup restore already picks the newest of permanent/rolling, so a preempted run resumes from the last
-        rolling step, not the last pushed one.
+        with the HF export, HF push, permanent S3 upload. Every other multiple of R is a local save (model +
+        optimizer + LR/RNG + dataloader position) whose upload replaces the single rolling S3 slot from a background
+        thread (best effort: a failed rolling upload is logged, the run continues). With
+        ``remote_checkpoint.rolling_hf_export`` (default true) the rolling save also writes the HF export and pushes
+        it to the Hub, so every R steps yields an evaluable ``step_NNNNNN`` export; with it off the rolling save
+        skips the export. The startup restore already picks the newest of permanent/rolling, so a preempted run
+        resumes from the last rolling step, not the last pushed one.
         """
         import threading
 
@@ -253,6 +255,7 @@ class FullVocabDistillTrainer(SFTTrainer):
             )
         from full_checkpoint_s3 import upload_rolling_checkpoint
 
+        rolling_hf_export = bool(cfg.get("rolling_hf_export", True))
         permanent_freq = self.save_freq
         self.save_freq = rolling_freq                      # the fit loop now saves every rolling_freq steps
         permanent_save = self.ckpt_handler.save_checkpoint  # local save + HF push + permanent S3 upload
@@ -284,15 +287,19 @@ class FullVocabDistillTrainer(SFTTrainer):
             if step % permanent_freq == 0 or step >= int(trainer.total_training_steps):
                 permanent_save(step=step)
                 return
-            engine = trainer.ckpt_handler.engine
-            original_engine_save = engine.save_checkpoint
-            engine.save_checkpoint = lambda *args, **kwargs: original_engine_save(
-                *args, **{**kwargs, "save_hf_model": False}
-            )
-            try:
+            if rolling_hf_export:
                 raw_save(step=step)
-            finally:
-                engine.save_checkpoint = original_engine_save
+                trainer._maybe_push_hf(step)   # rank 0 only (the pusher exists only there); async upload
+            else:
+                engine = trainer.ckpt_handler.engine
+                original_engine_save = engine.save_checkpoint
+                engine.save_checkpoint = lambda *args, **kwargs: original_engine_save(
+                    *args, **{**kwargs, "save_hf_model": False}
+                )
+                try:
+                    raw_save(step=step)
+                finally:
+                    engine.save_checkpoint = original_engine_save
             if dist.get_rank() == 0:
                 trainer._rolling_thread = threading.Thread(
                     target=upload_rolling, args=(step,), name=f"rolling-upload-{step}", daemon=True
@@ -303,7 +310,7 @@ class FullVocabDistillTrainer(SFTTrainer):
         if dist.get_rank() == 0:
             print(
                 f"[RollingCheckpointS3] enabled: resumable checkpoint every {rolling_freq} steps -> {s3_uri}/rolling "
-                f"(permanent checkpoint + HF push every {permanent_freq})",
+                f"({'with' if rolling_hf_export else 'without'} HF export + push; permanent checkpoint every {permanent_freq})",
                 flush=True,
             )
 

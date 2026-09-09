@@ -523,12 +523,12 @@ Evaluate each student checkpoint with the same ×32 protocol and add its trace t
 | micro-batching | 1 seq / micro-batch, 4096 padded-token ceiling, KL chunk 4096 (e4b) / 2048 (e2b) | same; KL chunk 2048 (12B) / 1024 (26B) |
 | precision / FSDP | fp32 master + Adam, bf16 param views, grad ckpt, max_length 12288 | same; 12B fits on 4×H100 (67–77 GB); 26B-A4B on 4 GPUs needs `FSDP_OFFLOAD=true` (8 GPUs preferred) |
 | validation | top-128 KL on 128 teacher val generations every 10 steps | same (`TEST_FREQ=10`); plus pass@k×32 on every saved checkpoint |
-| checkpoints | final only (`SAVE_FREQ=0`), HF export only | `SAVE_FREQ=250` → `step_000250/500/750/1000` pushed (pass@k over training) as **permanent** full checkpoints (fp32 model + Adam + LR/RNG `extra` + dataloader position `data_<rank>.pt` + HF export) in S3; plus a **rolling** resumable checkpoint every 50 steps (`ROLLING_CHECKPOINT_FREQ=50`: same contents minus the HF export, single S3 slot `…/rolling/`, uploaded in a background thread, retired by the next permanent save). Startup restores the newest of permanent/rolling — borrowed ScaleTrain pods get preempted and restart the run-file, losing ≤50 steps |
+| checkpoints | final only (`SAVE_FREQ=0`), HF export only | **every 50 steps** (`ROLLING_CHECKPOINT_FREQ=50`): full resumable checkpoint (fp32 model + Adam + LR/RNG `extra` + dataloader position `data_<rank>.pt`) + HF export pushed to the Hub as `step_000050 … step_001000` (20 pass@k points); the checkpoint goes to a single rolling S3 slot `…/rolling/` (background upload) except every 250 steps (`SAVE_FREQ=250`), when it is kept **permanently** in S3 and retires the rolling slot. Startup restores the newest of permanent/rolling — borrowed ScaleTrain pods get preempted and restart the run-file, losing ≤50 steps |
 | wrap class | `Gemma4TextDecoderLayer` | 12B `Gemma4UnifiedTextDecoderLayer`, 26B-A4B `Gemma4TextDecoderLayer` (set by `STUDENT`) |
 
 ```bash
 # on a node with the repo + .venv-gemma4 + .env (HF_TOKEN, WANDB_API_KEY); bundles are fetched from S3 (or copy the local dirs)
-COMMON="TRAIN_BATCH_SIZE=128 LR=2e-6 TOTAL_TRAINING_STEPS=1000 LR_WARMUP_STEPS=100 MIN_LR_RATIO=0.1 TEST_FREQ=10 SAVE_FREQ=250 ROLLING_CHECKPOINT_FREQ=50 \
+COMMON="TRAIN_BATCH_SIZE=128 LR=2e-6 TOTAL_TRAINING_STEPS=1000 LR_WARMUP_STEPS=100 MIN_LR_RATIO=0.1 TEST_FREQ=10 SAVE_FREQ=250 ROLLING_CHECKPOINT_FREQ=50 ROLLING_HF_EXPORT=true HF_PUSH_MAX_TO_KEEP=24 \
         CHECKPOINT_SAVE_CONTENTS='["model","optimizer","extra","hf_model"]' MAX_CKPT_TO_KEEP=1 HF_PUSH_DELETE_LOCAL=false \
         REMOTE_CHECKPOINT_ENABLE=true REMOTE_CHECKPOINT_S3_URI=s3://scale-ml/genai/rl-distill/gemma4-e4b-base-distill-ckpts-v1/<spec>-to-<student>-bs128-s1000-lr2e-6 \
         ALLOW_UNDERSIZED_STUDENT_LAYOUT=true PROJECT_NAME=gemma4-e4b-base-distill-v1"   # the ST run-file sets exactly these
@@ -548,7 +548,7 @@ global batch 128 on 4 GPUs = 32 micro-steps per rank per optimizer step. The MoE
 ordinary sharded linear layers (no expert parallelism); `FSDP_OFFLOAD=true` moves the sharded fp32 params +
 optimizer state to CPU between uses.
 
-**pass@k for every checkpoint — one short ScaleTrain job per checkpoint, 2 GPUs, no borrowing.** Two no-GPU loops run
+**pass@k for every checkpoint (every 50 steps) — one short ScaleTrain job per checkpoint, 2 GPUs, no borrowing.** Two no-GPU loops run
 on this box (tmux `ckpt-passk-submit`, `ckpt-passk-plot`; logs under `/tmp/gemma4_e4b_val32/`):
 1. `scale_train/submit_student_ckpt_passk_jobs.py` polls the student repos every 10 min and, for each `step_NNNNNN/`
    export with no result in S3 and no live job, submits `run_gemma4_student_ckpt_passk_st.sh` with
@@ -634,9 +634,9 @@ teacher's curve, i.e. well *below* its own pre-training ability, after 250 steps
 
 **Preemption (2026-09-08):** both jobs were evicted once under borrowing — the 26B pod had trained to step 20 (val loss
 0.147 → 0.141, 13:28–13:59Z) when the job went back to QUEUED; new pods started 14:08Z (12B) and 14:15Z (26B) and, because
-those jobs save only the HF export, training restarted from step 0. The run-file now saves a permanent full checkpoint
-(model, Adam, LR/RNG, dataloader position, HF export) every 250 steps and a rolling one (no HF export) every 50 steps, mirrors
-both to S3 and restores the newest complete one at startup (`main_full_vocab_distill_fsdp2.py` `_init_rolling_checkpoints`,
+those jobs save only the HF export, training restarted from step 0. The run-file now saves a full checkpoint (model, Adam, LR/RNG,
+dataloader position) plus an HF export (pushed to the Hub) every 50 steps — kept permanently in S3 every 250 steps, otherwise in
+a rolling S3 slot — and restores the newest complete one at startup (`main_full_vocab_distill_fsdp2.py` `_init_rolling_checkpoints`,
 yaml `trainer.remote_checkpoint.rolling_freq`, env `ROLLING_CHECKPOINT_FREQ`). Validated locally with E2B smoke runs:
 (a) permanent-only: 5 steps → checkpoint dir wiped → restored step 5 from S3, identical step-5 val loss, dataloader
 `samples_yielded` 20 → 24 with the same base seed, LR schedule continued, steps 6–8 trained; (b) rolling: `SAVE_FREQ=4`,

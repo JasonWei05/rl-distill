@@ -590,6 +590,8 @@ if (( ROLLING_CHECKPOINT_FREQ > 0 )); then
     (( SAVE_FREQ > 0 && SAVE_FREQ % ROLLING_CHECKPOINT_FREQ == 0 )) || { echo "SAVE_FREQ (${SAVE_FREQ}) must be a positive multiple of ROLLING_CHECKPOINT_FREQ (${ROLLING_CHECKPOINT_FREQ})" >&2; exit 2; }
     [[ "${CHECKPOINT_SAVE_CONTENTS}" == *'"optimizer"'* ]] || { echo "ROLLING_CHECKPOINT_FREQ needs resumable CHECKPOINT_SAVE_CONTENTS (model, optimizer, extra)" >&2; exit 2; }
 fi
+export ROLLING_HF_EXPORT=${ROLLING_HF_EXPORT:-true}   # rolling saves also write + push the HF export (one evaluable step_* per rolling save)
+case "${ROLLING_HF_EXPORT,,}" in true|false) ;; *) echo "ROLLING_HF_EXPORT must be true or false" >&2; exit 2 ;; esac
 
 export NNODES=${NNODES:-1}
 export NPROC_PER_NODE
@@ -660,6 +662,7 @@ COMMON_OVERRIDES=(
     trainer.remote_checkpoint.enable="${REMOTE_CHECKPOINT_ENABLE}"
     trainer.remote_checkpoint.s3_uri="${REMOTE_CHECKPOINT_S3_URI}"
     trainer.remote_checkpoint.rolling_freq="${ROLLING_CHECKPOINT_FREQ}"
+    trainer.remote_checkpoint.rolling_hf_export="${ROLLING_HF_EXPORT}"
     "checkpoint.save_contents=${CHECKPOINT_SAVE_CONTENTS}"
     'checkpoint.load_contents=["model","optimizer","extra"]'
 )
