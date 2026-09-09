@@ -630,6 +630,9 @@ launched yet.
 | 12B ← E4B-base medium, step 100 | 7.5 | 13.9 | 24.1 | 38.3 | 55.0 | 71.7 | 7.5 | 19.7 |
 | 12B ← E4B-base medium, step 150 | 6.7 | 12.4 | 21.9 | 35.7 | 52.8 | 70.0 | 6.7 | 15.3 |
 | 12B ← E4B-base medium, step 200 | 7.2 | 13.2 | 23.0 | 36.9 | 53.6 | 70.3 | 7.2 | 21.0 |
+| 12B ← E4B-base medium, step 300 | 7.3 | 13.3 | 23.1 | 36.7 | 53.1 | 68.7 | 7.3 | 17.0 |
+| 12B ← E4B-base medium, step 400 | 7.4 | 13.6 | 23.7 | 38.1 | 55.3 | 71.3 | 7.3 | 19.0 |
+| 26B-A4B ← E4B-base medium, step 100 | 7.4 | 13.6 | 23.8 | 38.3 | 55.1 | 70.3 | 7.4 | 16.7 |
 | 26B-A4B ← E4B-base medium, step 250 (earlier attempt) | 8.1 | 14.8 | 25.5 | 40.4 | 57.7 | 73.3 | 8.1 | 18.3 |
 
 (Untrained bases on the same band, ×16: 12B mean 14.1 / pass@16 72.0, 26B-A4B mean 23.8 / pass@16 86.3 — §8. The distilled student has moved onto the
