@@ -122,6 +122,10 @@ def evaluate_step(api: HfApi, repo: str, step: str, band: str, student: str, arg
                             "source": {"type": "hf_subfolder", "repo_id": repo, "revision": commit, "subfolder": step,
                                        "metadata_repo": meta_repo, "metadata_revision": meta_rev}}]}
     (step_root / "source_registry.json").write_text(json.dumps(registry, indent=2))
+    return _evaluate_tag(tag, band, args, step_root)
+
+
+def _evaluate_tag(tag: str, band: str, args, step_root: Path) -> bool:
     log = step_root / "eval.log"
     if sh([sys.executable, str(SCRIPTS / "data/materialize_gemma4_eval_models.py"), "--source-registry", str(step_root / "source_registry.json"),
            "--output-root", str(step_root / "models"), "--models", tag, "--execute"], log=log) != 0:
@@ -175,6 +179,26 @@ def evaluate_step(api: HfApi, repo: str, step: str, band: str, student: str, arg
     return True
 
 
+def base_tag(student: str, band: str) -> str:
+    return f"base_{student}__x32_{band}"
+
+
+def evaluate_base(student: str, band: str, args, out_root: Path) -> bool:
+    """Evaluate the untrained student base (pinned snapshot) with the same x32 protocol -> reference curve."""
+    tag = base_tag(student, band)
+    step_root = out_root / tag
+    if (step_root / "metrics.json").exists():
+        return True
+    step_root.mkdir(parents=True, exist_ok=True)
+    architecture, repo, revision = ARCH[student]
+    registry = {"schema_version": 1, "protocol": "gemma4_rl_distill_eval_sources_v1", "study": "gemma4-e4b-base-control",
+                "models": [{"tag": tag, "display_name": f"{architecture} base (no distillation)", "category": "base", "architecture": architecture,
+                            "trained_on": None, "math_datasets": ["id_easy", "id_medium", "id_hard", "math500", "gsm8k"],
+                            "source": {"type": "hf_snapshot", "repo_id": repo, "revision": revision}}]}
+    (step_root / "source_registry.json").write_text(json.dumps(registry, indent=2))
+    return _evaluate_tag(tag, band, args, step_root)
+
+
 def sync_from_s3(args) -> None:
     args.out_root.mkdir(parents=True, exist_ok=True)
     # --delete: a result the submitter parked under _superseded/ (export re-pushed by a relaunched run) disappears locally too
@@ -185,6 +209,10 @@ def sync_from_s3(args) -> None:
 def plot_repo(repo: str, band: str, out_root: Path, reference_root: Path, figures: Path) -> None:
     short = repo.split("/")[-1]
     traces = [f"E4B base (teacher)={reference_root / f'id_{band}' / 'traces' / f'base_e4b__id_{band}.jsonl'}"]
+    student = REPO_NAME.match(repo)["student"]
+    base_trace = out_root / base_tag(student, band) / "traces" / f"{base_tag(student, band)}__id_{band}.jsonl"
+    if base_trace.exists():
+        traces.append(f"{student.upper()} base (no distillation)={base_trace}")
     for step_dir in sorted(out_root.glob(step_tag(repo, "step_*"))):
         trace = step_dir / "traces" / f"{step_dir.name}__id_{band}.jsonl"
         if trace.exists() and (step_dir / "metrics.json").exists():
@@ -212,6 +240,8 @@ def main() -> int:
     parser.add_argument("--plot-from-s3", action="store_true", help="no GPU: sync finished steps from --s3-root and re-plot")
     parser.add_argument("--no-plot", action="store_true", help="evaluate only (pods have no reference traces)")
     parser.add_argument("--keep-materialized", action="store_true", help="keep the materialized checkpoint weights after the eval")
+    parser.add_argument("--base", choices=list(ARCH), default=None,
+                        help="instead of Hub exports, evaluate this untrained base with the same protocol (band from the single --repo)")
     parser.add_argument("--step", default=None, help="evaluate only this export (e.g. step_000250) of the single --repo; "
                         "exit 1 if it is not on the Hub (one ScaleTrain job per checkpoint)")
     parser.add_argument("--final-step", type=int, default=None, help="exit once step_<N> is evaluated for every repo")
@@ -227,6 +257,13 @@ def main() -> int:
             parser.error("--parallelism dp needs at least two GPUs")
     if args.step and (len(args.repo) != 1 or args.plot_from_s3):
         parser.error("--step takes exactly one --repo and no --plot-from-s3")
+    if args.base:
+        m = REPO_NAME.match(args.repo[0])
+        if len(args.repo) != 1 or not m or args.plot_from_s3:
+            parser.error("--base takes exactly one --repo (for the band) and no --plot-from-s3")
+        ok = evaluate_base(args.base, m["band"], args, args.out_root)
+        print(f"base {args.base}: {'evaluated' if ok else 'FAILED'}", flush=True)
+        return 0 if ok else 1
     api = HfApi()
     last_progress = time.time()
     while True:

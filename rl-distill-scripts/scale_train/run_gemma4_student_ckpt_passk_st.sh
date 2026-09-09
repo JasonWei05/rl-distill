@@ -6,6 +6,7 @@
 #
 #   --env-vars "STUDENT=12b,STEP=step_000250"   -> dp 2 (one vLLM per GPU on question shards), evaluates that one export, exits
 #   --env-vars "STUDENT=26b,STEP=step_000250"   -> tp 2 (one vLLM tensor-parallel over both GPUs)
+#   --env-vars "BASE_MODEL=12b"                  -> the untrained base, same protocol (reference curve for the plots)
 #   Without STEP the pod polls the repo itself (BANDS=medium|medium,hard ; FINAL_STEP=1000 ; MAX_IDLE_HOURS=12) -- the
 #   normal path is one job per checkpoint, submitted by submit_student_ckpt_passk_jobs.py polling the Hub from a CPU box.
 set -euo pipefail
@@ -23,7 +24,8 @@ if [ -n "${CODE_S3_URI:-}" ]; then   # pre-built image: unpack the git-archive t
   echo "CODE_REFRESHED $(sha256sum /tmp/rl-distill-code.tar.gz | cut -c1-16) files=$(tar -tzf /tmp/rl-distill-code.tar.gz | wc -l)"
 fi
 
-STUDENT="${STUDENT:?12b or 26b}"
+BASE_MODEL="${BASE_MODEL:-}"   # 12b|26b -> evaluate the untrained base instead of Hub exports (reference curve)
+STUDENT="${STUDENT:-${BASE_MODEL}}"; STUDENT="${STUDENT:?12b or 26b}"
 case "${STUDENT}" in
   12b) PARALLELISM="${PARALLELISM:-dp}" ;;
   26b) PARALLELISM="${PARALLELISM:-tp}" ;;
@@ -70,7 +72,10 @@ test -s "${DATA_ROOT}/math_eval_manifest.json"
 REPO_ARGS=()
 IFS=',' read -r -a band_list <<< "${BANDS}"
 for band in "${band_list[@]}"; do REPO_ARGS+=(--repo "JWei05/Distill-gemma4-e4b-base-${band}-to-${STUDENT}-base"); done
-if [ -n "${STEP}" ]; then
+if [ -n "${BASE_MODEL}" ]; then
+  (( ${#band_list[@]} == 1 )) || { echo "FATAL: BASE_MODEL needs a single band" >&2; exit 2; }
+  MODE_ARGS=(--base "${BASE_MODEL}" --poll-minutes 0)
+elif [ -n "${STEP}" ]; then
   (( ${#band_list[@]} == 1 )) || { echo "FATAL: STEP needs a single band" >&2; exit 2; }
   MODE_ARGS=(--step "${STEP}" --poll-minutes 0)
 else
@@ -81,5 +86,5 @@ python rl-distill-scripts/eval_student_checkpoints_passk.py "${REPO_ARGS[@]}" \
   --gpus "${GPUS}" --parallelism "${PARALLELISM}" "${MODE_ARGS[@]}" \
   --manifest "${DATA_ROOT}/math_eval_manifest.json" --out-root "${OUT_ROOT}" --s3-root "${PASSK_S3_ROOT}" --no-plot
 status=$?
-echo "ST_PASSK_DONE student=${STUDENT} step=${STEP:-poll} exit=${status} $(date -u +%FT%TZ)"
+echo "ST_PASSK_DONE student=${STUDENT} step=${BASE_MODEL:+base}${STEP:-poll} exit=${status} $(date -u +%FT%TZ)"
 exit "${status}"

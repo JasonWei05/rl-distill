@@ -562,7 +562,8 @@ optimizer state to CPU between uses.
    single-GPU vLLM per GPU on interleaved question shards; shard traces merged and re-aggregated with `--resume_traces` —
    exact, since sampling seeds derive from (dataset, question id, sample index), not row order, and the shard manifests
    keep the fixed 32 samples/question), **26B-A4B = tp 2**.
-3. `eval_student_checkpoints_passk.py --plot-from-s3` syncs finished steps down and re-plots `figures/passk_<student>_val32.png`
+3. `eval_student_checkpoints_passk.py --plot-from-s3` syncs finished steps down and re-plots (plus the untrained-base reference
+   curve when `base_<student>__x32_<band>/` exists — produced by a one-off job with `--env-vars "BASE_MODEL=12b"`) `figures/passk_<student>_val32.png`
    (all steps vs the E4B-base teacher curve; the reference traces live here under `/tmp/gemma4_e4b_val32/id_<band>/traces/`).
 ```bash
 python rl-distill-scripts/scale_train/submit_student_ckpt_passk_jobs.py --poll-minutes 10 \
@@ -635,7 +636,10 @@ launched yet.
 | 26B-A4B ← E4B-base medium, step 100 | 7.4 | 13.6 | 23.8 | 38.3 | 55.1 | 70.3 | 7.4 | 16.7 |
 | 26B-A4B ← E4B-base medium, step 250 (earlier attempt) | 8.1 | 14.8 | 25.5 | 40.4 | 57.7 | 73.3 | 8.1 | 18.3 |
 
-(Untrained bases on the same band, ×16: 12B mean 14.1 / pass@16 72.0, 26B-A4B mean 23.8 / pass@16 86.3 — §8. The distilled student has moved onto the
+Untrained bases on the same band from §8 (16 samples/q, so the curve stops at k=16): 12B pass@1/2/4/8/16 =
+14.1 / 24.7 / 39.5 / 56.3 / 72.0 (mean 14.1, maj@16 29.3); 26B-A4B mean 23.8 / pass@16 86.3. Both bases are being re-run with the
+×32 protocol as ScaleTrain jobs (`BASE_MODEL=12b|26b`, run-file mode; results `base_<student>__x32_medium/` in the same S3 root) and
+the plot loop adds them as a "no distillation" reference line. ( The distilled student has moved onto the
 teacher's curve, i.e. well *below* its own pre-training ability, after 250 steps.) No 12B checkpoint exists yet (see below).
 
 **Preemption (2026-09-08):** both jobs were evicted once under borrowing — the 26B pod had trained to step 20 (val loss
