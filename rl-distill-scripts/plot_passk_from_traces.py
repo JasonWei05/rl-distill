@@ -62,8 +62,10 @@ def main() -> int:
         ax.set_xscale("log", base=2)
         ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
         ax.set_xlabel("k"); ax.set_ylabel("pass@k (%)"); ax.set_title(dataset); ax.grid(alpha=0.3); ax.legend(fontsize=8)
-    fig.suptitle(args.title, fontsize=10)
-    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    import textwrap
+    title = textwrap.fill(args.title, width=max(60, 72 * len(panels)))   # keep the suptitle inside the figure width
+    fig.suptitle(title, fontsize=10)
+    fig.tight_layout(rect=(0, 0, 1, 0.94 - 0.03 * (title.count("\n"))))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out, dpi=140)
     print(f"wrote {args.out}")
