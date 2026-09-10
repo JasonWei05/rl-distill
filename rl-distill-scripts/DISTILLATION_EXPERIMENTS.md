@@ -603,6 +603,25 @@ cd rl-distill-scripts/scale_train && bash launch_gemma4_12b_distilled_rl_medium.
 #   --completion-best-hf-s3-uri <artifact uri> -- bash launch_gemma4_12b_distilled_rl_medium.sh
 ```
 
+### 9.0b Seed-43 replicates of the small RL teachers (E2B, E4B × easy/medium/hard) — launched 2026-09-10 07:4xZ
+
+Same sweep recipe as the seed-42 runs (§9.0 table, minus the 12B memory knobs: `FSDP_CPU_OFFLOAD_POLICY=False`, default
+micro-batching), `DATA_SEED=43`, **4 borrowed GPUs per job** (p5.48xlarge:4, priority high), rolling resumable checkpoint every
+5 steps + permanent/HF push every 10, one `supervise_borrowing_job.py` per job (tmux `rl-g4-<size>-s43-<band>`, state under
+`.scale_train_supervisors/g4-<size>-s43-<band>-20260910/`). Scripts: `scale_train/launch_gemma4_rl_band_seed.sh`
+(`SIZE= BAND= SEED= GPUS=`) and `scale_train/start_gemma4_rl_seed_supervisors.sh`. HF repos
+`JWei05/DAPO-gemma4-<size>-PT-DeepScaleR-gemma26b-<band>-seed43-26b-bands-es5`; S3
+`s3://scale-ml/genai/rl-distill/gemma4-difficulty-s43-20260910{,-full-checkpoints}/<size>-<band>`; W&B `g4ds26b-<size>-<band>-s43-v1`.
+
+| job | id |
+|---|---|
+| g4-e2b-s43-easy | job_dah5pqg0masg08eubo2g |
+| g4-e2b-s43-medi | job_dah5psgqi7bg07hm8r0g |
+| g4-e2b-s43-hard | job_dah5q2o0masg07kbc50g |
+| g4-e4b-s43-easy | job_dah5q70qi7bg07hm8r10 |
+| g4-e4b-s43-medi | job_dah5qc80masg07kbc510 |
+| g4-e4b-s43-hard | job_dah5qg80masg07kbc51g |
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
