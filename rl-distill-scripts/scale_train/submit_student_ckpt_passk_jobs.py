@@ -87,6 +87,22 @@ def export_commits(api: HfApi, repo: str) -> dict[str, str]:
     return out
 
 
+def commit_dates(api: HfApi, repo: str) -> dict[str, object]:
+    """oid -> commit datetime for the repo's history (small: one commit per push)."""
+    return {c.commit_id: c.created_at for c in api.list_repo_commits(repo)}
+
+
+def is_stale(result_revision: str, export_revision: str, dates: dict[str, object]) -> bool:
+    """The export was re-pushed after the result's pinned revision. Older results pinned the repo HEAD at eval time (which
+    may be a later push of another step), so equality is not required: stale only if the export's last commit is newer."""
+    if not export_revision or result_revision in (None, "unknown") or result_revision == export_revision:
+        return False
+    d_export, d_result = dates.get(export_revision), dates.get(result_revision)
+    if d_export is None or d_result is None:
+        return False
+    return d_export > d_result
+
+
 def job_name(band: str, student: str, step: str) -> str:
     return f"g4e4b-pk-{band[:3]}-{student}-s{int(step.split('_')[-1]):04d}"
 
@@ -143,6 +159,7 @@ def main() -> int:
             band, student = m["band"], m["student"]
             try:
                 commits = export_commits(api, repo)
+                dates = commit_dates(api, repo)
             except RepositoryNotFoundError:
                 print(f"[{now()}] {repo}: not on the Hub yet", flush=True)
                 continue
@@ -157,7 +174,7 @@ def main() -> int:
                     if stale is None and not state.get(tag, {}).get("checked_stale"):
                         stale = s3_result_revision(args.s3_root, tag)
                         state.setdefault(tag, {"repo": repo, "step": step, "attempts": 0, "jobs": []}).update(checked_stale=True, revision=stale)
-                    if stale and stale != "unknown" and commits[step] and stale != commits[step]:
+                    if is_stale(stale, commits[step], dates):
                         print(f"[{now()}] {tag}: skipped step re-pushed ({stale[:8]} -> {commits[step][:8]}); parking the old result", flush=True)
                         supersede_result(args.s3_root, tag, stale)
                         state[tag].update(revision=None, done=False, superseded=state[tag].get("superseded", []) + [stale])
@@ -171,13 +188,13 @@ def main() -> int:
                     continue
                 result_revision = s3_result_revision(args.s3_root, tag)
                 if result_revision is not None:
-                    if revision and result_revision != revision:
+                    if is_stale(result_revision, revision, dates):
                         print(f"[{now()}] {tag}: export re-pushed ({result_revision[:8]} -> {revision[:8]}); superseding the old result and re-evaluating", flush=True)
                         supersede_result(args.s3_root, tag, result_revision)
                         entry.update(done=False, attempts=0, jobs=[], superseded=entry.get("superseded", []) + [result_revision])
                         save()
                     else:
-                        entry.update(done=True, revision=result_revision)
+                        entry.update(done=True, revision=revision)   # the export's last commit this result covers
                         summary.append(f"{step}=done")
                         continue
                 name = job_name(band, student, step)

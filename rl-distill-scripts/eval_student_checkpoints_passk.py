@@ -113,7 +113,10 @@ def evaluate_step(api: HfApi, repo: str, step: str, band: str, student: str, arg
     if (step_root / "metrics.json").exists():
         return True
     step_root.mkdir(parents=True, exist_ok=True)
-    commit = api.list_repo_commits(repo)[0].commit_id
+    # Pin the last commit that touched this export (not the repo HEAD: later pushes of other steps move HEAD while an eval
+    # job waits in the queue, and the submitter compares this revision with the export's last commit to detect re-pushes).
+    entries = {e.path: e for e in api.list_repo_tree(repo, revision="main", expand=True) if e.path == step}
+    commit = entries[step].last_commit.oid if step in entries and getattr(entries[step], "last_commit", None) else api.list_repo_commits(repo)[0].commit_id
     architecture, meta_repo, meta_rev = ARCH[student]
     registry = {"schema_version": 1, "protocol": "gemma4_rl_distill_eval_sources_v1", "study": "gemma4-e4b-base-control",
                 "models": [{"tag": tag, "display_name": f"{repo} {step}", "category": "distilled", "architecture": architecture,
