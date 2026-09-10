@@ -620,15 +620,15 @@ before the run-file starts). Students land at
 export (§9, jobs `g4e4b-pk-med-{12b,26b}-s<step>`) and the plot loop refreshes `figures/passk_*_val32.png` from S3. Hard-band jobs: not
 launched yet.
 
-**Per-checkpoint pass@k — id_medium validation, 32 samples/question (first results, 2026-09-08):** the 26B-A4B student's
+**Per-checkpoint pass@k — id_medium validation, 32 samples/question (all rows ×32; updated 2026-09-10 06:50Z):** the 26B-A4B student's
 `step_000250` (pushed 16:06Z) was evaluated by ScaleTrain job `g4e4b-pk-med-26b-s0250` (job_dag3ah2lrg1g07lkf0p0; tp 2 on
 2 H100s; 35 min wall incl. venv build + 52 GB materialize) and is already within ~1.5 points of the E4B teacher at every k
 (figure `figures/passk_e4b-base-medium-to-26b-base_val32.png`):
 
 | pass@k (%) | 1 | 2 | 4 | 8 | 16 | 32 | mean@32 | maj@32 |
 |---|---|---|---|---|---|---|---|---|
-| 12B base, no distillation (16 samples/q) | 14.1 | 24.7 | 39.5 | 56.3 | 72.0 | – | 14.1 | 29.3 |
-| 26B-A4B base, no distillation (16 samples/q) | 23.8 | 39.4 | 57.8 | 74.2 | 86.3 | – | 23.8 | 50.7 |
+| 12B base, no distillation | 14.1 | 24.7 | 39.6 | 57.0 | 73.4 | 86.3 | 14.1 | 38.7 |
+| 26B-A4B base, no distillation | 23.7 | 38.9 | 57.1 | 74.1 | 86.5 | 93.3 | 23.7 | 56.7 |
 | E4B base teacher | 8.4 | 15.4 | 26.6 | 41.9 | 59.3 | 74.7 | 8.4 | 20.3 |
 | 12B ← E4B-base medium, step 100 | 7.5 | 13.9 | 24.1 | 38.3 | 55.0 | 71.7 | 7.5 | 19.7 |
 | 12B ← E4B-base medium, step 150 | 6.7 | 12.4 | 21.9 | 35.7 | 52.8 | 70.0 | 6.7 | 15.3 |
@@ -637,8 +637,15 @@ launched yet.
 | 12B ← E4B-base medium, step 400 | 7.4 | 13.6 | 23.7 | 38.1 | 55.3 | 71.3 | 7.3 | 19.0 |
 | 12B ← E4B-base medium, step 500 | 7.5 | 13.8 | 23.8 | 37.5 | 53.0 | 67.0 | 7.5 | 21.0 |
 | 12B ← E4B-base medium, step 600 | 7.7 | 14.2 | 24.5 | 38.7 | 55.2 | 70.3 | 7.7 | 18.7 |
+| 12B ← E4B-base medium, step 700 | 7.6 | 14.0 | 24.3 | 38.7 | 55.3 | 70.7 | 7.6 | 19.0 |
+| 12B ← E4B-base medium, step 800 | 8.0 | 14.7 | 25.4 | 40.3 | 57.6 | 73.7 | 8.0 | 18.7 |
+| 12B ← E4B-base medium, step 900 | 8.0 | 14.7 | 25.4 | 40.1 | 57.4 | 74.0 | 8.0 | 17.7 |
+| 12B ← E4B-base medium, step 1000 | 8.1 | 14.9 | 25.8 | 40.7 | 57.6 | 73.0 | 8.1 | 21.7 |
 | 26B-A4B ← E4B-base medium, step 100 | 7.4 | 13.6 | 23.8 | 38.3 | 55.1 | 70.3 | 7.4 | 16.7 |
-| 26B-A4B ← E4B-base medium, step 250 (earlier attempt) | 8.1 | 14.8 | 25.5 | 40.4 | 57.7 | 73.3 | 8.1 | 18.3 |
+| 26B-A4B ← E4B-base medium, step 200 | 8.1 | 14.9 | 25.7 | 40.6 | 57.9 | 72.7 | 8.1 | 20.3 |
+| 26B-A4B ← E4B-base medium, step 300 | 7.6 | 13.9 | 24.1 | 38.1 | 54.1 | 70.0 | 7.6 | 19.3 |
+| 26B-A4B ← E4B-base medium, step 400 | 7.7 | 14.2 | 25.0 | 40.2 | 58.1 | 74.0 | 7.7 | 20.7 |
+| 26B-A4B ← E4B-base medium, step 500 | 7.8 | 14.5 | 25.1 | 40.0 | 57.2 | 73.7 | 7.8 | 17.7 |
 
 Untrained bases on the same band from §8 (16 samples/q, so the curve stops at k=16): 12B pass@1/2/4/8/16 =
 14.1 / 24.7 / 39.5 / 56.3 / 72.0 (mean 14.1, maj@16 29.3); 26B-A4B mean 23.8 / pass@16 86.3. Both bases are being re-run with the
