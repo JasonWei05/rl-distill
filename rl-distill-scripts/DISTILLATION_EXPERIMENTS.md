@@ -647,7 +647,7 @@ launched yet.
 | 26B-A4B ← E4B-base medium, step 400 | 7.7 | 14.2 | 25.0 | 40.2 | 58.1 | 74.0 | 7.7 | 20.7 |
 | 26B-A4B ← E4B-base medium, step 500 | 7.8 | 14.5 | 25.1 | 40.0 | 57.2 | 73.7 | 7.8 | 17.7 |
 
-Two-curve overlay of the final 12B student vs the teacher: `figures/passk_12b_final_vs_e4b_teacher.png`.
+Overlay of the untrained 12B base, the E4B teacher and the 12B student at steps 500 and 1000: `figures/passk_12b_final_vs_e4b_teacher.png`.
 
 Untrained bases on the same band from §8 (16 samples/q, so the curve stops at k=16): 12B pass@1/2/4/8/16 =
 14.1 / 24.7 / 39.5 / 56.3 / 72.0 (mean 14.1, maj@16 29.3); 26B-A4B mean 23.8 / pass@16 86.3. Both bases are being re-run with the
