@@ -615,12 +615,19 @@ micro-batching), `DATA_SEED=43`, **4 borrowed GPUs per job** (p5.48xlarge:4, pri
 
 | job | id |
 |---|---|
-| g4-e2b-s43-easy | job_dah5pqg0masg08eubo2g |
-| g4-e2b-s43-medi | job_dah5psgqi7bg07hm8r0g |
+| g4-e2b-s43-easy | job_dah5pqg0masg08eubo2g → preempted at step ~24 (reported COMPLETED), supervisor relaunched job_dah7nr80masg08eubo7g (resumes from permanent step 20) |
+| g4-e2b-s43-medi | job_dah5psgqi7bg07hm8r0g → preempted at step 2, relaunched job_dah7cigqi7bg07hm8r60 |
 | g4-e2b-s43-hard | job_dah5q2o0masg07kbc50g |
-| g4-e4b-s43-easy | job_dah5q70qi7bg07hm8r10 |
-| g4-e4b-s43-medi | job_dah5qc80masg07kbc510 |
-| g4-e4b-s43-hard | job_dah5qg80masg07kbc51g |
+| g4-e4b-s43-easy | ~~job_dah5q70qi7bg07hm8r10~~ (FAILED: 0.5 GiB KV cache too small) → job_dah9km8qi7bg08a9s6t0 |
+| g4-e4b-s43-medi | ~~job_dah5qc80masg07kbc510~~ (cancelled before it could fail) → job_dah9km8qi7bg07hm8rag |
+| g4-e4b-s43-hard | ~~job_dah5qg80masg07kbc51g~~ (cancelled) → job_dah9ko80masg07kbc590 |
+
+**2026-09-10 11:49Z incident:** the first E4B pod died at vLLM start — `0.66 GiB KV cache is needed … available 0.5 GiB` — because the
+launch script used the run-file's default rollout memory settings; the seed-42 sweep set per-model values inside its packing script
+(E2B: micro-batch 8 / 12288 padded tokens / util 0.25 / 0.5 GiB KV; E4B: 1 / 4096 / 0.25 / 1 GiB). `launch_gemma4_rl_band_seed.sh`
+now carries them (commit 04d413a1); the three E4B jobs were relaunched (state dirs `…-r2`). The E2B jobs keep the run-file defaults
+(micro-batch 1, no packing, util 0.65): numerically the same optimization (gradient accumulation), only slower per step.
+
 
 ### 9.1 Results
 
