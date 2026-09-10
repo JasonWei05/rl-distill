@@ -617,10 +617,10 @@ micro-batching), `DATA_SEED=43`, **4 borrowed GPUs per job** (p5.48xlarge:4, pri
 |---|---|
 | g4-e2b-s43-easy | job_dah5pqg0masg08eubo2g → preempted at step ~24 (reported COMPLETED), supervisor relaunched job_dah7nr80masg08eubo7g (resumes from permanent step 20) |
 | g4-e2b-s43-medi | job_dah5psgqi7bg07hm8r0g → preempted at step 2, relaunched job_dah7cigqi7bg07hm8r60 |
-| g4-e2b-s43-hard | job_dah5q2o0masg07kbc50g → FAILED at step 15 (see 12:30Z incident) → job_daha8foqi7bg08a9s720 (resumes from permanent step 10) |
+| g4-e2b-s43-hard | job_dah5q2o0masg07kbc50g → FAILED at step 15 (12:30Z janitor incident) → job_daha8foqi7bg08a9s720 → container `StartError` on node i-06b9a96a5ad99d11c (runc hook, 15:58Z) → job_dahelqoqi7bg08a9s7bg (resumes from permanent step 10) |
 | g4-e4b-s43-easy | ~~job_dah5q70qi7bg07hm8r10~~ (FAILED: 0.5 GiB KV cache too small) → job_dah9km8qi7bg08a9s6t0 |
 | g4-e4b-s43-medi | ~~job_dah5qc80masg07kbc510~~ (cancelled before it could fail) → job_dah9km8qi7bg07hm8rag |
-| g4-e4b-s43-hard | ~~job_dah5qg80masg07kbc51g~~ (cancelled) → job_dah9ko80masg07kbc590 |
+| g4-e4b-s43-hard | ~~job_dah5qg80masg07kbc51g~~ (cancelled) → job_dah9ko80masg07kbc590 → container `StartError` on the same node (15:58Z) → job_dahelqoqi7bg07hm8rp0 |
 
 **2026-09-10 11:49Z incident:** the first E4B pod died at vLLM start — `0.66 GiB KV cache is needed … available 0.5 GiB` — because the
 launch script used the run-file's default rollout memory settings; the seed-42 sweep set per-model values inside its packing script
