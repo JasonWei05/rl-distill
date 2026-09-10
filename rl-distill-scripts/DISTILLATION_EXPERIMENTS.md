@@ -677,7 +677,7 @@ before the run-file starts). Students land at
 export (§9, jobs `g4e4b-pk-med-{12b,26b}-s<step>`) and the plot loop refreshes `figures/passk_*_val32.png` from S3. Hard-band jobs: not
 launched yet.
 
-**Per-checkpoint pass@k — id_medium validation, 32 samples/question (all rows ×32; updated 2026-09-10 06:50Z):** the 26B-A4B student's
+**Per-checkpoint pass@k — id_medium validation, 32 samples/question (all rows ×32; both runs complete; updated 2026-09-10 15:15Z):** the 26B-A4B student's
 `step_000250` (pushed 16:06Z) was evaluated by ScaleTrain job `g4e4b-pk-med-26b-s0250` (job_dag3ah2lrg1g07lkf0p0; tp 2 on
 2 H100s; 35 min wall incl. venv build + 52 GB materialize) and is already within ~1.5 points of the E4B teacher at every k
 (figure `figures/passk_e4b-base-medium-to-26b-base_val32.png`):
@@ -703,6 +703,11 @@ launched yet.
 | 26B-A4B ← E4B-base medium, step 300 | 7.6 | 13.9 | 24.1 | 38.1 | 54.1 | 70.0 | 7.6 | 19.3 |
 | 26B-A4B ← E4B-base medium, step 400 | 7.7 | 14.2 | 25.0 | 40.2 | 58.1 | 74.0 | 7.7 | 20.7 |
 | 26B-A4B ← E4B-base medium, step 500 | 7.8 | 14.5 | 25.1 | 40.0 | 57.2 | 73.7 | 7.8 | 17.7 |
+| 26B-A4B ← E4B-base medium, step 600 | 8.2 | 15.1 | 25.9 | 40.6 | 57.2 | 72.7 | 8.2 | 20.0 |
+| 26B-A4B ← E4B-base medium, step 700 | 8.2 | 15.0 | 26.0 | 41.1 | 58.4 | 74.0 | 8.2 | 21.7 |
+| 26B-A4B ← E4B-base medium, step 800 | 8.2 | 15.1 | 26.2 | 41.7 | 59.5 | 75.0 | 8.2 | 18.3 |
+| 26B-A4B ← E4B-base medium, step 900 | 8.1 | 14.9 | 25.7 | 40.6 | 57.8 | 74.7 | 8.1 | 18.3 |
+| 26B-A4B ← E4B-base medium, step 1000 | 8.6 | 15.7 | 26.9 | 42.3 | 59.8 | 75.3 | 8.6 | 22.3 |
 
 Overlay of the untrained 12B base, the E4B teacher and the 12B student at steps 500 and 1000: `figures/passk_12b_final_vs_e4b_teacher.png`.
 
