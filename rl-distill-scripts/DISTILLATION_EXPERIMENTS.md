@@ -637,6 +637,17 @@ only if it is older than the rolling tracker or ≤ the permanent tracker AND ha
 trackers and in-flight uploads are never touched. The run was relaunched under a fresh supervisor.
 
 
+### 9.0c Reverse KL of the distilled students vs the E4B base (launched 2026-09-10 16:4xZ)
+
+`reverse_kl_topk.py` (run-file `scale_train/run_gemma4_reverse_kl_st.sh`, 1 GPU, borrowing off): sample the *student* on 128
+medium-train and 128 medium-validation questions (4 samples/q, study sampler + 12-shot prompt, seed 0) recording its top-128
+(token, logprob) per position, then score the same sequences with the E4B base (HF, bf16, soft-capped logits) and report per
+token: `rkl_mc` = log p_s(x) − log p_t(x) on the sampled token (unbiased full-vocab KL(student‖teacher)), `rkl_topk` =
+Σ_{top-128 of the student} p_s (log p_s − log p_t) (training convention, unnormalised), `rkl_topk_renorm`, and the student's
+top-128 mass. Students: the distilled 12B and 26B-A4B `step_001000` exports, each with its untrained base as reference.
+Jobs: `g4-rkl-12b-vs-e4b` = job_dahdrsg0masg07kbc5ng, `g4-rkl-26b-vs-e4b` = job_dahdt3g0masg08euboh0; results
+`s3://scale-ml/genai/rl-distill/gemma4-e4b-base-reverse-kl-v1/<size>_<distilled|base>__vs_e4b_base__medium_q128_s4_top128/`.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
@@ -709,7 +720,8 @@ launched yet.
 | 26B-A4B ← E4B-base medium, step 900 | 8.1 | 14.9 | 25.7 | 40.6 | 57.8 | 74.7 | 8.1 | 18.3 |
 | 26B-A4B ← E4B-base medium, step 1000 | 8.6 | 15.7 | 26.9 | 42.3 | 59.8 | 75.3 | 8.6 | 22.3 |
 
-Overlay of the untrained 12B base, the E4B teacher and the 12B student at steps 500 and 1000: `figures/passk_12b_final_vs_e4b_teacher.png`.
+Overlays of the untrained base, the E4B teacher and the student at steps 500 and 1000: `figures/passk_12b_final_vs_e4b_teacher.png`
+and `figures/passk_26b_final_vs_e4b_teacher.png`.
 
 Untrained bases on the same band from §8 (16 samples/q, so the curve stops at k=16): 12B pass@1/2/4/8/16 =
 14.1 / 24.7 / 39.5 / 56.3 / 72.0 (mean 14.1, maj@16 29.3); 26B-A4B mean 23.8 / pass@16 86.3. Both bases are being re-run with the
