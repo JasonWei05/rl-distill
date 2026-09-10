@@ -290,6 +290,20 @@ fi
 export GEMMA4_INIT_MODEL_REPO="${GEMMA4_INIT_MODEL_REPO:-${GEMMA4_MODEL}}"
 export GEMMA4_INIT_MODEL_REVISION="${GEMMA4_INIT_MODEL_REVISION:-${GEMMA4_MODEL_REVISION:-}}"
 export GEMMA4_INIT_MODEL_SUBFOLDER="${GEMMA4_INIT_MODEL_SUBFOLDER:-}"
+if [ -n "${GEMMA4_INIT_MODEL_SUBFOLDER}" ] && [ "${GEMMA4_INIT_MODEL_REPO}" != "${GEMMA4_MODEL}" ]; then
+  # Initialize from a pushed HF export (e.g. a distilled student's step_NNNNNN/). Those exports hold only
+  # config/weights/tokenizer; the Gemma 4 unified (VLM-class) rollout also needs the base model's processor
+  # config, so materialize the subfolder the way the eval pipeline does: download + patch the missing metadata
+  # files from GEMMA4_MODEL@GEMMA4_MODEL_REVISION (never load the export as a bare causal LM).
+  INIT_EXPORT_DIR="/tmp/gemma4_init_model/$(echo "${GEMMA4_INIT_MODEL_REPO}" | tr '/' '_')__${GEMMA4_INIT_MODEL_SUBFOLDER}"
+  "${VENV}/bin/python" rl-distill-scripts/data/download_hf_subfolder.py \
+    --repo-id "${GEMMA4_INIT_MODEL_REPO}" ${GEMMA4_INIT_MODEL_REVISION:+--revision "${GEMMA4_INIT_MODEL_REVISION}"} \
+    --subfolder "${GEMMA4_INIT_MODEL_SUBFOLDER}" --output-dir "${INIT_EXPORT_DIR}" --overwrite \
+    --metadata-repo "${GEMMA4_MODEL}" ${GEMMA4_MODEL_REVISION:+--metadata-revision "${GEMMA4_MODEL_REVISION}"}
+  test -s "${INIT_EXPORT_DIR}/config.json" && ls "${INIT_EXPORT_DIR}"/*.safetensors >/dev/null
+  echo "INIT_MODEL export=${GEMMA4_INIT_MODEL_REPO}@${GEMMA4_INIT_MODEL_REVISION:-main}/${GEMMA4_INIT_MODEL_SUBFOLDER} -> ${INIT_EXPORT_DIR} files=$(ls "${INIT_EXPORT_DIR}" | tr '\n' ' ')"
+  MODEL_LOCAL_PATH="${INIT_EXPORT_DIR}"
+else
 MODEL_LOCAL_PATH="$(${VENV}/bin/python - <<'PY'
 import os
 from pathlib import Path
@@ -314,6 +328,7 @@ if not any(model_path.glob("*.safetensors")):
 print(model_path)
 PY
 )"
+fi
 
 if [ "${DIFFICULTY_DATASET_SOURCE}" = gemma4_26b_bands ]; then
   "${VENV}/bin/python" rl-distill-scripts/data/prepare_deepscaler_gemma4_26b_difficulty_rl_data.py \
