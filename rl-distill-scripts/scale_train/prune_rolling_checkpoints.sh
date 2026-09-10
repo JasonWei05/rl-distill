@@ -5,15 +5,17 @@
 # Rule per run prefix: read rolling/latest_checkpointed_iteration.txt = N; delete rolling/global_step_M/ for every M < N
 # (never the current step, never a higher step that may be mid-upload); if the permanent tracker P >= N the rolling slot is
 # superseded: delete its tracker, then all its steps. Permanent global_step_*/ dirs are never touched.
-#   bash prune_rolling_checkpoints.sh            # one pass
+#   bash prune_rolling_checkpoints.sh            # one pass over CKPT_S3_ROOTS (distill + RL checkpoint roots)
 #   PRUNE_INTERVAL_MIN=30 bash prune_rolling_checkpoints.sh loop
 set -euo pipefail
 export AWS_PROFILE="${AWS_PROFILE:-ml-worker}"
-ROOT="${CKPT_S3_ROOT:-s3://scale-ml/genai/rl-distill/gemma4-e4b-base-distill-ckpts-v1}"
+# One or more checkpoint roots (space-separated); each holds <run>/{global_step_*, rolling/, latest_checkpointed_iteration.txt}.
+ROOTS="${CKPT_S3_ROOTS:-s3://scale-ml/genai/rl-distill/gemma4-e4b-base-distill-ckpts-v1 s3://scale-ml/genai/rl-distill/gemma4-12b-from-e4bbase-distill-rl-full-checkpoints s3://scale-ml/genai/rl-distill/gemma4-difficulty-s43-20260910-full-checkpoints}"
 DRY_RUN="${DRY_RUN:-false}"
 rm_prefix() { if [[ "${DRY_RUN}" == "true" ]]; then echo "  (dry-run) rm -r $1"; else aws s3 rm --recursive --only-show-errors "$1" && echo "  removed $1"; fi; }
 pass() {
-  for run in $(aws s3 ls "${ROOT}/" | awk '/PRE/ {print $2}' | grep -v '^_'); do
+  for ROOT in ${ROOTS}; do
+  for run in $(aws s3 ls "${ROOT}/" 2>/dev/null | awk '/PRE/ {print $2}' | grep -v '^_'); do
     prefix="${ROOT}/${run%/}"
     N="$(aws s3 cp --only-show-errors "${prefix}/rolling/latest_checkpointed_iteration.txt" - 2>/dev/null | tr -dc 0-9 || true)"
     P="$(aws s3 cp --only-show-errors "${prefix}/latest_checkpointed_iteration.txt" - 2>/dev/null | tr -dc 0-9 || true)"
@@ -29,6 +31,7 @@ pass() {
     for M in ${steps}; do
       if [[ -n "${N}" && "${M}" -lt "${N}" ]]; then rm_prefix "${prefix}/rolling/global_step_${M}/"; fi
     done
+  done
   done
 }
 if [[ "${1:-once}" == "loop" ]]; then
