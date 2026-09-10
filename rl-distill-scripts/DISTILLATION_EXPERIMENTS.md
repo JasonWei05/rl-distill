@@ -645,8 +645,10 @@ medium-train and 128 medium-validation questions (4 samples/q, study sampler + 1
 token: `rkl_mc` = log p_s(x) − log p_t(x) on the sampled token (unbiased full-vocab KL(student‖teacher)), `rkl_topk` =
 Σ_{top-128 of the student} p_s (log p_s − log p_t) (training convention, unnormalised), `rkl_topk_renorm`, and the student's
 top-128 mass. Students: the distilled 12B and 26B-A4B `step_001000` exports, each with its untrained base as reference.
-Jobs: `g4-rkl-12b-vs-e4b` = job_dahdrsg0masg07kbc5ng, `g4-rkl-26b-vs-e4b` = job_dahdt3g0masg08euboh0; results
+Jobs (borrowing off): `g4-rkl-12b-vs-e4b` = job_dahdrsg0masg07kbc5ng, `g4-rkl-26b-vs-e4b` = job_dahdt3g0masg08euboh0; results
 `s3://scale-ml/genai/rl-distill/gemma4-e4b-base-reverse-kl-v1/<size>_<distilled|base>__vs_e4b_base__medium_q128_s4_top128/`.
+Borrowing-on duplicates (18:57Z, to see which pool schedules first; separate root `…-reverse-kl-v1-brw`): `g4-rkl-12b-e4b-brw` =
+job_dahfr28qi7bg07hm8rug, `g4-rkl-26b-e4b-brw` = job_dahfrh8qi7bg07hm8rv0.
 
 ### 9.1 Results
 
