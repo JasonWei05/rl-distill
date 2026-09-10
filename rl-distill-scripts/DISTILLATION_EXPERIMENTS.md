@@ -637,6 +637,13 @@ only if it is older than the rolling tracker or ≤ the permanent tracker AND ha
 trackers and in-flight uploads are never touched. The run was relaunched under a fresh supervisor.
 
 
+**2026-09-10 21:55Z — seed-43 runs PAUSED (user: prioritize the 12B distilled RL).** All six seed-43 jobs were cancelled and
+their supervisors stopped; the 12B distilled RL job and the reverse-KL jobs were left alone. Resume points in S3
+(`gemma4-difficulty-s43-20260910-full-checkpoints/<size>-<band>`): e2b-easy permanent 160 (best val 0.396@160), e2b-medium
+rolling 135 (best 0.145@130), e2b-hard permanent 10, e4b-easy rolling 25 (best 0.596@20), e4b-medium permanent 30 (best 0.231@30),
+e4b-hard nothing yet. To resume later: `SEED=43 SIZES="e2b e4b" BANDS="easy medium hard" bash start_gemma4_rl_seed_supervisors.sh`
+(same S3 prefixes → each run restores its newest checkpoint).
+
 ### 9.0c Reverse KL of the distilled students vs the E4B base (launched 2026-09-10 16:4xZ)
 
 `reverse_kl_topk.py` (run-file `scale_train/run_gemma4_reverse_kl_st.sh`, 1 GPU, borrowing off): sample the *student* on 128
