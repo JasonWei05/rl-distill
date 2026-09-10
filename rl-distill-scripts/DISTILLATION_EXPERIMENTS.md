@@ -580,6 +580,29 @@ python rl-distill-scripts/eval_student_checkpoints_passk.py --plot-from-s3 --pol
 `job_dag2l12lrg1g07lkf0ng` / `job_dag2l3hob6s007k81ni0` and cancelled at 15:50Z before running: it would have held reserved
 GPUs while waiting for checkpoints.)
 
+### 9.0 RL on top of the distilled 12B (medium) — launched 2026-09-10
+
+**Goal (user):** take the 12B student distilled from the E4B base (`JWei05/Distill-gemma4-e4b-base-medium-to-12b-base/step_001000`,
+commit 92368d1f) and run the *same* DAPO medium recipe the E4B and 12B RL teachers were trained with, on a whole borrowed node,
+with resumable checkpoints every 5 steps so preemption costs ≤5 steps and the relaunch is automatic.
+
+| | value (identical to the difficulty-sweep E4B/12B medium launches unless noted) |
+|---|---|
+| init policy | the distilled export above, materialized with `download_hf_subfolder.py` (adds the base's `processor_config.json`; the export alone lacks it) — `GEMMA4_INIT_MODEL_{REPO,REVISION,SUBFOLDER}`; architecture/metadata from `google/gemma-4-12B@023679ed` |
+| data | `gemma4_26b_bands` medium (`JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k@a0ba3c3d`), seed 42; in-distribution val 300 q ×16 |
+| recipe | GRPO n=16, prompt bsz 64 / mini 32, lr 1e-6 (20 warmup), 4k prompt / 8k response (+2k overlong buffer, penalty 1.0), val every 10, early stopping on `val-core/math/acc/mean@16` patience 5 (incl. initial val), 400 steps max, token TIS correction (run-file default) |
+| 12B layout | 8×H100, FSDP2 DP8 (`ACTOR_FSDP_SIZE=-1`, `SP_SIZE=1`), `FSDP_CPU_OFFLOAD_POLICY=True`, micro-batch 1 / 4096 padded tokens, rollout TP1 util 0.45 with a fixed 5 GiB KV cache, compiled rollout (`ROLLOUT_ENFORCE_EAGER=False`) |
+| checkpoints | **rolling resumable checkpoint every 5 steps** (`ROLLING_CHECKPOINT_FREQ=5`: sharded model + Adam + LR/RNG + dataloader cursor → `…-full-checkpoints/12b-medium-from-e4bbase-distill-es5/rolling/`), permanent + HF push every 10 (`SAVE_FREQ=10` → `JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-medium-seed42-from-e4bbase-distill-es5`), best-HF marker under `…/gemma4-12b-medium-from-e4bbase-distill-es5/` |
+| resume | the run-file restores the newest complete S3 checkpoint at start (`full_checkpoint_s3.py restore-latest` → `RESUME_MODE=auto`); ScaleTrain re-queues a preempted borrowing job on its own, and `supervise_borrowing_job.py` (tmux `rl-12b-distill-med`, state under `.scale_train_supervisors/g4-12b-distill-rl-med-20260910/`) relaunches it if the platform reports FAILED/ERROR instead, until the durable completion markers exist |
+| job | `g4-12b-distill-rl-med`, p5.48xlarge (8 GPUs), priority high, borrowing on, 240 h deadline; W&B run `g4ds26b-12b-medium-from-e4bbase-distill-es5-s42-v1` |
+
+```bash
+cd rl-distill-scripts/scale_train && bash launch_gemma4_12b_distilled_rl_medium.sh        # one job; env baked in the script
+# or under the supervisor (what is running): python3 supervise_borrowing_job.py --name g4-12b-distill-rl-med ... \
+#   --completion-s3-uri <full-checkpoints uri> --max-completion-step 400 --expected-completion-world-size 8 \
+#   --completion-best-hf-s3-uri <artifact uri> -- bash launch_gemma4_12b_distilled_rl_medium.sh
+```
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
