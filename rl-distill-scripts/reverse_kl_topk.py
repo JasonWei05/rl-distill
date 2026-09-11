@@ -50,6 +50,13 @@ def generate(args) -> None:
               dtype="bfloat16", trust_remote_code=True, seed=args.seed, enforce_eager=False)
     tokenizer = llm.get_tokenizer()
     tokenizer.chat_template = chat_template
+    # Same stopping rule as the RL rollout (VERL_ROLLOUT_EXTRA_STOP) and eval_math_passk (STOP_STRINGS): a *base* model does not
+    # treat <end_of_turn> as EOS and otherwise keeps writing new few-shot rounds until the length cap. String stops need
+    # detokenization, so use the (atomic special) token ids instead.
+    stop_ids = [tokenizer.convert_tokens_to_ids(t) for t in ("<end_of_turn>", "<start_of_turn>")]
+    if any(i is None or i == tokenizer.unk_token_id for i in stop_ids):
+        raise SystemExit(f"stop tokens not found in the tokenizer: {stop_ids}")
+    print(f"[generate] stop_token_ids={stop_ids} (<end_of_turn>, <start_of_turn>) + eos", flush=True)
     out_dir = Path(args.trace_dir); out_dir.mkdir(parents=True, exist_ok=True)
     for split, parquet in (("train", args.train_parquet), ("validation", args.val_parquet)):
         questions = select_questions(Path(parquet), args.questions_per_split, args.seed, f"medium_{split}")
@@ -63,7 +70,7 @@ def generate(args) -> None:
                 # detokenize=False: we only need token ids and logprobs; skipping text/decoded-token work removes the CPU
                 # bottleneck of top-128 logprob output processing and most of its memory.
                 params.append(SamplingParams(temperature=1.0, top_p=1.0, top_k=-1, max_tokens=args.max_tokens, logprobs=args.topk, detokenize=False,
-                                             seed=derive_sampling_seed(args.seed, f"medium_{split}", q.question_id, s)))
+                                             stop_token_ids=stop_ids, seed=derive_sampling_seed(args.seed, f"medium_{split}", q.question_id, s)))
         path = out_dir / f"{split}.jsonl"
         if path.exists() and sum(1 for _ in path.open()) == len(requests):
             print(f"[generate] {split}: {len(requests)} responses already present at {path}; skipping (resumed)", flush=True)
