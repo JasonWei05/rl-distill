@@ -58,6 +58,7 @@ for m in ${MODELS//,/ }; do
   echo "### ${TAG}: student=${STUDENT_PATHS[$m]}"
   python rl-distill-scripts/reverse_kl_topk.py generate --student "${STUDENT_PATHS[$m]}" --train_parquet "${WORK}/data/medium/train.parquet" \
     --val_parquet "${WORK}/data/medium/validation.parquet" --questions_per_split "${QUESTIONS}" --samples_per_question "${SAMPLES}" --topk "${TOPK}" --trace_dir "${OUT}/traces"
+  aws s3 sync "${OUT}/traces" "${S3_ROOT}/${TAG}/traces/" --only-show-errors && echo "TRACES_UPLOADED ${TAG}"   # protect ~1 h of generation before scoring
   python rl-distill-scripts/reverse_kl_topk.py score --student "${STUDENT_PATHS[$m]}" --teacher "${TEACHER}" --train_parquet "${WORK}/data/medium/train.parquet" \
     --val_parquet "${WORK}/data/medium/validation.parquet" --questions_per_split "${QUESTIONS}" --samples_per_question "${SAMPLES}" --topk "${TOPK}" \
     --trace_dir "${OUT}/traces" --out "${OUT}/metrics.json"
