@@ -330,6 +330,84 @@ PY
 )"
 fi
 
+# ---------------------------------------------------------------------------------------------------
+# Optional on-policy distillation (ONPOLICY_DISTILL_ENABLE=True). A colocated vLLM teacher scores every
+# student-sampled response (teacher top-k logprobs via prompt_logprobs) and the actor minimises verl's
+# top-k distillation loss (default reverse_kl_topk: sum over the teacher's top-k of q_s (log q_s - log p_t))
+# as a supervised loss instead of the DAPO policy loss (use_task_rewards=False zeroes the PG term; the math
+# reward is still computed for the train/val accuracy metrics). Same trainer, rollout, validation, checkpoint
+# and HF-push paths as RL. Pair with N_RESP_PER_PROMPT=1 and TRAIN_PROMPT_BSZ=TRAIN_PROMPT_MINI_BSZ for a pure
+# on-policy update. See DISTILLATION_EXPERIMENTS.md §9.0d and rl-distill-scripts/distill_onpolicy.sh (Gemma 3).
+ONPOLICY_DISTILL_ENABLE="${ONPOLICY_DISTILL_ENABLE:-False}"
+DISTILL_OVERRIDES=()
+case "${ONPOLICY_DISTILL_ENABLE,,}" in
+  1|true|yes|on)
+    : "${ONPOLICY_DISTILL_TEACHER_REPO:?ONPOLICY_DISTILL_TEACHER_REPO is required when ONPOLICY_DISTILL_ENABLE=True}"
+    export ONPOLICY_DISTILL_TEACHER_REPO
+    export ONPOLICY_DISTILL_TEACHER_REVISION="${ONPOLICY_DISTILL_TEACHER_REVISION:-}"
+    ONPOLICY_DISTILL_LOSS_MODE="${ONPOLICY_DISTILL_LOSS_MODE:-reverse_kl_topk}"
+    ONPOLICY_DISTILL_TOPK="${ONPOLICY_DISTILL_TOPK:-128}"
+    ONPOLICY_DISTILL_TEACHER_TP="${ONPOLICY_DISTILL_TEACHER_TP:-2}"
+    ONPOLICY_DISTILL_TEACHER_GPU_MEM_UTIL="${ONPOLICY_DISTILL_TEACHER_GPU_MEM_UTIL:-0.20}"
+    # Level-1 vLLM sleep parks the teacher's weights + KV in host RAM between scoring calls, so the actor
+    # update sees the same free memory as a plain RL run. Set False if cumem sleep misbehaves (then lower
+    # ROLLOUT_GPU_MEMORY_UTILIZATION / raise ONPOLICY_DISTILL_TEACHER_TP to make room).
+    ONPOLICY_DISTILL_TEACHER_SLEEP="${ONPOLICY_DISTILL_TEACHER_SLEEP:-True}"
+    ONPOLICY_DISTILL_USE_TASK_REWARDS="${ONPOLICY_DISTILL_USE_TASK_REWARDS:-False}"
+    ONPOLICY_DISTILL_USE_POLICY_GRADIENT="${ONPOLICY_DISTILL_USE_POLICY_GRADIENT:-False}"
+    ONPOLICY_DISTILL_LOSS_COEF="${ONPOLICY_DISTILL_LOSS_COEF:-1.0}"
+    ONPOLICY_DISTILL_LOSS_MAX_CLAMP="${ONPOLICY_DISTILL_LOSS_MAX_CLAMP:-null}"
+    ONPOLICY_DISTILL_LOG_PROB_MIN_CLAMP="${ONPOLICY_DISTILL_LOG_PROB_MIN_CLAMP:-null}"
+    if [ "$((n_gpus % ONPOLICY_DISTILL_TEACHER_TP))" -ne 0 ]; then
+      echo "FATAL: ONPOLICY_DISTILL_TEACHER_TP=${ONPOLICY_DISTILL_TEACHER_TP} must divide n_gpus=${n_gpus}" >&2
+      exit 2
+    fi
+    # Pin and materialise the teacher. The Gemma 4 teacher must load through the unified (VLM-class) vLLM
+    # path, which needs the repo's processor config next to the weights (never a bare causal-LM override).
+    TEACHER_LOCAL_PATH="$(${VENV}/bin/python - <<'PY'
+import os
+from pathlib import Path
+from huggingface_hub import snapshot_download
+kwargs = {"repo_id": os.environ["ONPOLICY_DISTILL_TEACHER_REPO"]}
+if os.environ.get("ONPOLICY_DISTILL_TEACHER_REVISION"):
+    kwargs["revision"] = os.environ["ONPOLICY_DISTILL_TEACHER_REVISION"]
+path = Path(snapshot_download(**kwargs))
+for required in ("config.json", "processor_config.json", "tokenizer_config.json"):
+    if not (path / required).is_file():
+        raise FileNotFoundError(f"teacher snapshot {path} lacks {required}")
+if not any(path.glob("*.safetensors")):
+    raise FileNotFoundError(f"teacher snapshot {path} has no safetensors weights")
+print(path)
+PY
+)"
+    DISTILL_OVERRIDES=(
+      ++distillation.enabled=True
+      ++distillation.num_workers=8
+      ++distillation.distillation_loss.loss_mode="${ONPOLICY_DISTILL_LOSS_MODE}"
+      ++distillation.distillation_loss.topk="${ONPOLICY_DISTILL_TOPK}"
+      ++distillation.distillation_loss.use_task_rewards="${ONPOLICY_DISTILL_USE_TASK_REWARDS}"
+      ++distillation.distillation_loss.use_policy_gradient="${ONPOLICY_DISTILL_USE_POLICY_GRADIENT}"
+      ++distillation.distillation_loss.distillation_loss_coef="${ONPOLICY_DISTILL_LOSS_COEF}"
+      ++distillation.distillation_loss.loss_max_clamp="${ONPOLICY_DISTILL_LOSS_MAX_CLAMP}"
+      ++distillation.distillation_loss.log_prob_min_clamp="${ONPOLICY_DISTILL_LOG_PROB_MIN_CLAMP}"
+      ++distillation.teacher_model.model_path="${TEACHER_LOCAL_PATH}"
+      ++distillation.teacher_model.enable_resource_pool=False
+      ++distillation.teacher_model.n_gpus_per_node="${n_gpus}"
+      ++distillation.teacher_model.nnodes=0
+      ++distillation.teacher_model.inference.tensor_model_parallel_size="${ONPOLICY_DISTILL_TEACHER_TP}"
+      ++distillation.teacher_model.inference.gpu_memory_utilization="${ONPOLICY_DISTILL_TEACHER_GPU_MEM_UTIL}"
+      ++distillation.teacher_model.inference.enforce_eager=True
+      ++distillation.teacher_model.inference.prompt_length="${MAX_PROMPT_LENGTH}"
+      ++distillation.teacher_model.inference.response_length="${MAX_RESPONSE_LENGTH}"
+      ++distillation.teacher_model.inference.max_model_len="$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH + 1))"
+      ++distillation.teacher_model.inference.temperature=1.0
+      ++distillation.teacher_model.inference.free_cache_engine="${ONPOLICY_DISTILL_TEACHER_SLEEP}"
+      ++distillation.teacher_model.inference.enable_sleep_mode="${ONPOLICY_DISTILL_TEACHER_SLEEP}"
+      ++distillation.teacher_model.inference.engine_kwargs.vllm.max_logprobs="${ONPOLICY_DISTILL_TOPK}"
+    )
+    echo "ONPOLICY_DISTILL teacher=${ONPOLICY_DISTILL_TEACHER_REPO}@${ONPOLICY_DISTILL_TEACHER_REVISION:-main} path=${TEACHER_LOCAL_PATH} loss=${ONPOLICY_DISTILL_LOSS_MODE} topk=${ONPOLICY_DISTILL_TOPK} teacher_tp=${ONPOLICY_DISTILL_TEACHER_TP} teacher_util=${ONPOLICY_DISTILL_TEACHER_GPU_MEM_UTIL} sleep=${ONPOLICY_DISTILL_TEACHER_SLEEP} task_rewards=${ONPOLICY_DISTILL_USE_TASK_REWARDS} policy_gradient=${ONPOLICY_DISTILL_USE_POLICY_GRADIENT}"
+    ;;
+esac
 if [ "${DIFFICULTY_DATASET_SOURCE}" = gemma4_26b_bands ]; then
   "${VENV}/bin/python" rl-distill-scripts/data/prepare_deepscaler_gemma4_26b_difficulty_rl_data.py \
     --data-dir "${DATA_DIR}" --band "${DIFFICULTY_DATASET}" --validation-repeats 16
@@ -434,6 +512,7 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       ++trainer.early_stopping.include_initial_validation="${EARLY_STOPPING_INCLUDE_INITIAL_VALIDATION:-True}" \
       `# Forward ordinary experiment overrides first. The rollout-correction settings below are` \
       `# deliberately last so every Gemma 4 run uses the same always-on token TIS contract.` \
+      "${DISTILL_OVERRIDES[@]}" \
       "$@" \
       actor_rollout_ref.rollout.calculate_log_probs=True \
       algorithm.rollout_correction.rollout_is=token \

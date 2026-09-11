@@ -718,6 +718,42 @@ because the untrained bases start much further away in the forward direction (te
 to) than in the reverse one (the bases' own samples are already format-pinned by the prompt). Train-batch forward KL over steps
 901–1000 averages 0.064 (12B) / 0.069 (26B) (sd ≈ 0.012 across steps).
 
+### 9.0d On-policy distillation of the distilled 12B toward the E4B base (setup 2026-09-11; not launched)
+
+**What already existed.** verl in this fork ships on-policy distillation end to end: `distillation.*` config group
+(`verl/trainer/config/distillation/distillation.yaml`), a colocated vLLM teacher that returns top-k `prompt_logprobs` for every
+student-sampled token (`verl/experimental/teacher_loop/`), and the losses in `verl/trainer/distillation/losses.py` — `reverse_kl_topk`
+(Σ over the *teacher's* top-k of q_s (log q_s − log p_t), partial sum, backpropagated through the student logits), `forward_kl_topk`,
+and the sampled-token estimators k1/k2/k3 (optionally as a policy-gradient advantage, the Thinking-Machines recipe). The DAPO trainer
+calls the teacher right after rollout (`dapo/dapo_ray_trainer.py`, `_compute_teacher_colocate`). The Gemma 3 launcher
+`rl-distill-scripts/distill_onpolicy.sh` (April 2026; k1 + PG by default, `LOSS_MODE`/`TOPK` knobs) produced six finished runs in W&B
+project `distill_onpolicy` (1B/4B/12B PT students ← DAPO 4B/12B/27B teachers, 200 steps × 128 prompts × 1 response, lr 1e-5) and the
+`JWei05/gemma3-*-onpolicy-distill-from-dapo*` repos. Nothing had been run for Gemma 4.
+
+**Gemma 4 setup (this commit).** The RL run-file `scale_train/run_gemma4_pt_deepscaler_4of4strict_rl.sh` gained an opt-in block
+(`ONPOLICY_DISTILL_ENABLE=True`): it pins/downloads the teacher (requires `processor_config.json` so vLLM loads the unified Gemma 4
+class), and appends the `++distillation.*` overrides (loss mode/top-k, `use_task_rewards=False`, `use_policy_gradient=False`, colocated
+teacher with TP/util knobs, level-1 sleep between scoring calls, `max_logprobs=topk`, teacher context = prompt + response + 1).
+Everything else — rollout, 12-shot prompt, stop tokens, validation, rolling S3 checkpoints, HF pushes, borrowing supervisor — is the RL
+contract. Launcher: `scale_train/launch_gemma4_12b_distilled_onpolicy_medium.sh`.
+
+| | off-policy (§9, done) | on-policy (this launcher) |
+|---|---|---|
+| student / teacher | 12B base ← E4B base traces | distilled 12B (`step_001000`) ← E4B base (`411aa17b`), colocated vLLM TP=2 ×4, util 0.20, sleep |
+| samples | 128 teacher traces / step (pre-generated) | 128 medium prompts × 1 student sample / step, T=1, top_p=1, 8k max |
+| loss | teacher top-128 forward KL Σ p_t (log p_t − log q_s) | teacher top-128 reverse KL Σ q_s (log q_s − log p_t) (`reverse_kl_topk`), token-mean, one update / step |
+| optimiser | lr 2e-6, warmup 20, 1000 steps | lr 2e-6, warmup 20, 1000 steps (`ACTOR_LR`, `TOTAL_TRAINING_STEPS`) |
+| memory (8×H100) | — | 12B FSDP2 DP8, CPU-offload policy, 4096-token micro-batches; student vLLM util 0.35 / 4 GiB KV (n=1) |
+| checkpoints | S3 permanent 250 / rolling 50 | S3 permanent + HF push 50 / rolling 10 (`…-onpolicy-full-checkpoints/`) |
+| validation | pass@k ×32 offline | val-core/math/acc/mean@16 every 10 steps (medium val300 ×16), early stopping off |
+
+Notes: (i) the on-policy `reverse_kl_topk` is truncated to the *teacher's* top-128 (verl's convention; the §9.0c measurement used the
+student's top-128 — same direction, different support; both carry ≥ 99.5 % of the mass here). (ii) With `use_task_rewards=False` the
+PG term is zeroed and GRPO with n=1 only feeds the (unused) advantage; the math reward still runs so train/val accuracy keep logging.
+(iii) Composed Hydra config validated locally (`DRY_RUN=1` + `omega_conf_to_dataclass`): teacher context 12288+1, `max_logprobs=128`.
+(iv) Open risk: level-1 cumem sleep on the E4B teacher (the RL run-file records a cumem failure on E4B in weight-sync); fallback
+`ONPOLICY_DISTILL_TEACHER_SLEEP=False` with a lower student util. A 2-GPU local smoke (E2B student ← E4B teacher) is the first gate.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
