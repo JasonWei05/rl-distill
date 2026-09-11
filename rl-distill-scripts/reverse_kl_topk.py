@@ -170,7 +170,7 @@ def main() -> int:
     p.add_argument("--topk", type=int, default=128); p.add_argument("--seed", type=int, default=0)
     p.add_argument("--max_tokens", type=int, default=8192); p.add_argument("--max_prompt_tokens", type=int, default=4096); p.add_argument("--max_model_len", type=int, default=12288)
     p.add_argument("--gpu_memory_utilization", type=float, default=0.85); p.add_argument("--chunk", type=int, default=256)
-    p.add_argument("--gen_batch", type=int, default=32, help="requests per vLLM generate call (bounds host memory for top-k logprobs)")
+    p.add_argument("--gen_batch", type=int, default=128, help="requests per vLLM generate call (bounds host memory for top-k logprobs)")
     p.add_argument("--trace_dir", required=True); p.add_argument("--out", default=None)
     args = p.parse_args()
     if args.phase == "generate":
