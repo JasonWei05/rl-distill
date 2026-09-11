@@ -667,21 +667,13 @@ a628946b): generate in batches of 32 requests, convert to floats immediately, `d
 in flight was GPU-bound at ~500 tok/s. Relaunched 01:58Z with `--gen_batch 128` (commit 9ddd778b): `g4-rkl-12b-e4b-b3` =
 job_dahm0au0m2tg08d16q9g, `g4-rkl-26b-e4b-b3` = job_dahm0c6r1t2007nga4kg (results under the main `…-reverse-kl-v1/` root). 12B sampling was not bit-reproducible across pods (train split 3.54M vs 3.67M tokens); 26B was.
 
-**Reverse-KL results so far (2026-09-11; per response token, 128 q × 4 samples per split):**
-
-| student (medium, step 1000) | split | mean len | hit 8k cap | rKL Monte-Carlo (full vocab) | rKL top-128 | top-128 renorm. | top-128 mass | log p(sampled) student / teacher |
-|---|---|---|---|---|---|---|---|---|
-| 12B distilled ← E4B base | train | 7,233 | — | 0.0685 ± 0.0008 | 0.0687 | 0.0639 | 0.997 | — |
-| 26B-A4B distilled ← E4B base | train | 6,389 | 296/512 | 0.0684 ± 0.0008 | 0.0691 | 0.0643 | 0.997 | −1.093 / −1.162 |
-| 26B-A4B distilled ← E4B base | validation | 6,315 | 299/512 | 0.0693 ± 0.0013 | 0.0701 | 0.0652 | 0.997 | −1.108 / −1.178 |
-
-(± = SE over the 512 per-sequence means. The per-token median rKL is 0.000: the divergence is concentrated in a minority of tokens;
-≈437 nats per response summed over ~6.3k tokens. 58 % of the distilled 26B's responses run to the 8,192-token cap, vs a teacher that
-answers in a few hundred tokens — the student matches the teacher's next-token distribution closely but not its stopping.)
-
-Validation-split numbers and the untrained-base references follow. The 12B b3 pod was preempted right after scoring its train
-split (03:18Z); relaunched as `g4-rkl-12b-e4b-b4` = job_dahn856r1t2007nga4t0 (commit 48f5290a: traces are uploaded before scoring
-and a restarted pod resumes from them).
+**Reverse-KL runs before 03:40Z on 2026-09-11 were INVALID (superseded):** the sampler had no `<end_of_turn>` / `<start_of_turn>`
+stop tokens (the RL rollout's `VERL_ROLLOUT_EXTRA_STOP` and `eval_math_passk.STOP_STRINGS`), so a base-style student kept writing new
+few-shot rounds until the 8,192-token cap (mean length 6–7k tokens, 58 % capped; the RL runs show ~200 tokens at step 0). The numbers
+they produced (rKL ≈ 0.068–0.069 nats/token for both students, train and validation) describe the whole rambling continuation, not the
+teacher-style answer; their outputs are parked under `s3://…/gemma4-e4b-base-reverse-kl-v1/_invalid_no_stop_tokens/`. Fixed in commit
+c3a0230f (`stop_token_ids` for the two turn tokens, matching the RL rollout); corrected jobs `g4-rkl-12b-e4b-b5` = job_dahnfh6r1t2007nga50g
+and `g4-rkl-26b-e4b-b5` = job_dahnfr60m2tg08d16qjg write to `s3://scale-ml/genai/rl-distill/gemma4-e4b-base-reverse-kl-v2/`.
 
 ### 9.1 Results
 
