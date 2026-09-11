@@ -663,8 +663,9 @@ and vLLM's top-128 logprob output processing capped generation at ~780 tok/s. Th
 limit) at ~56 % of the validation split: the script held a whole split of vLLM outputs (Logprob objects with decoded strings) in
 memory. The reserved pair and the 12B RL job were **cancelled externally at 00:48Z** (not by the supervisors). Fix (commit
 a628946b): generate in batches of 32 requests, convert to floats immediately, `detokenize=False`. Relaunched on borrowing at 01:41Z:
-`g4-rkl-12b-e4b-b2` = job_dahlokm0m2tg08d16q8g, `g4-rkl-26b-e4b-b2` = job_dahlommr1t20089l75ug (results under the main
-`…-reverse-kl-v1/` root). 12B sampling was not bit-reproducible across pods (train split 3.54M vs 3.67M tokens); 26B was.
+`g4-rkl-12b-e4b-b2` = job_dahlokm0m2tg08d16q8g, `g4-rkl-26b-e4b-b2` = job_dahlommr1t20089l75ug — cancelled after 15 min: 32 requests
+in flight was GPU-bound at ~500 tok/s. Relaunched 01:58Z with `--gen_batch 128` (commit 9ddd778b): `g4-rkl-12b-e4b-b3` =
+job_dahm0au0m2tg08d16q9g, `g4-rkl-26b-e4b-b3` = job_dahm0c6r1t2007nga4kg (results under the main `…-reverse-kl-v1/` root). 12B sampling was not bit-reproducible across pods (train split 3.54M vs 3.67M tokens); 26B was.
 
 ### 9.1 Results
 
