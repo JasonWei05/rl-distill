@@ -718,7 +718,7 @@ because the untrained bases start much further away in the forward direction (te
 to) than in the reverse one (the bases' own samples are already format-pinned by the prompt). Train-batch forward KL over steps
 901–1000 averages 0.064 (12B) / 0.069 (26B) (sd ≈ 0.012 across steps).
 
-### 9.0d On-policy distillation of the distilled 12B toward the E4B base (setup + smoke 2026-09-11; not launched)
+### 9.0d On-policy distillation of the distilled 12B toward the E4B base (setup + smoke 2026-09-11; launched 21:44Z)
 
 **What already existed.** verl in this fork ships on-policy distillation end to end: `distillation.*` config group
 (`verl/trainer/config/distillation/distillation.yaml`), a colocated vLLM teacher that returns top-k `prompt_logprobs` for every
@@ -760,6 +760,18 @@ sample, 2 steps, medium band, FSDP CPU-offload policy. Teacher top-128 scoring 4
 the teacher's top-128) 0.341 → 0.197, student top-128 mass 0.995, teacher mass 0.997, pg_loss 0 (no PG term), grad-norm 24 → 14,
 step 320 s / 168 s (gen 127 s incl. warm-up → 17 s; update 126 s → 101 s on 2 GPUs with offload). Teacher sleep/wake worked across
 both steps (`RUN_DONE rc=0`). The 12B launcher is ready to submit.
+
+**Launched 2026-09-11 21:44Z** — `g4-12b-onpolicy-med` = job_dai7cbe0m2tg07j7jm8g (p5.48xlarge, 8 GPUs, borrowing on, priority high),
+under `supervise_borrowing_job.py` (tmux `onpolicy-12b-med`, relaunch on cancel/failure, ≤ 30 relaunches, logs
+`.scale_train_supervisors/g4-12b-onpolicy-med-20260911/`). Run settings differ from the launcher defaults per the user: **200 steps,
+warmup 20, lr 5e-7 constant, SAVE_FREQ 10** (permanent S3 checkpoint with model + Adam + LR/RNG + dataloader cursor, and an HF push,
+every 10 steps; rolling every 10 as well). A preempted pod restarts the run-file, which restores the newest S3 checkpoint and resumes;
+ScaleTrain re-queues the same job, and the supervisor resubmits if the job is marked finished without the durable completion marker.
+Student `JWei05/Distill-gemma4-e4b-base-medium-to-12b-base/step_001000` @ 92368d1f, teacher `google/gemma-4-E4B` @ 411aa17b (TP 2,
+util 0.20, sleep). Outputs: HF `JWei05/OnPolicyDistill-gemma4-e4b-base-medium-to-12b-onpolicy-rkl128-from-e4bbase-distill`, S3
+`s3://scale-ml/genai/rl-distill/gemma4-12b-from-e4bbase-distill-onpolicy-full-checkpoints/12b-medium-onpolicy-rkl128-from-e4bbase-distill/`,
+W&B `g4-onpolicy-12b-medium-onpolicy-rkl128-from-e4bbase-distill-s42-v1`. Metrics to watch: `actor/distillation/loss` (should start ≈ 0.09,
+the §9.0c reverse KL of this student) and `val-core/math/acc/mean@16` every 10 steps.
 
 ### 9.1 Results
 
