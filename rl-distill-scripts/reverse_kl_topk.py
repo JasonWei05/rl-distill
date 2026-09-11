@@ -53,10 +53,13 @@ def generate(args) -> None:
     # Same stopping rule as the RL rollout (VERL_ROLLOUT_EXTRA_STOP) and eval_math_passk (STOP_STRINGS): a *base* model does not
     # treat <end_of_turn> as EOS and otherwise keeps writing new few-shot rounds until the length cap. String stops need
     # detokenization, so use the (atomic special) token ids instead.
-    stop_ids = [tokenizer.convert_tokens_to_ids(t) for t in ("<end_of_turn>", "<start_of_turn>")]
-    if any(i is None or i == tokenizer.unk_token_id for i in stop_ids):
-        raise SystemExit(f"stop tokens not found in the tokenizer: {stop_ids}")
-    print(f"[generate] stop_token_ids={stop_ids} (<end_of_turn>, <start_of_turn>) + eos", flush=True)
+    stops = ["<end_of_turn>", "<start_of_turn>"]
+    stop_ids = []
+    for t in stops:   # vLLM's tokenizer wrapper does not resolve these via convert_tokens_to_ids (returned unk=3); encode() does
+        enc = tokenizer.encode(t, add_special_tokens=False)
+        if len(enc) == 1 and enc[0] != getattr(tokenizer, "unk_token_id", None):
+            stop_ids.append(int(enc[0]))
+    print(f"[generate] stop strings={stops} stop_token_ids={stop_ids} (+ eos); detokenize=True so string stops work", flush=True)
     out_dir = Path(args.trace_dir); out_dir.mkdir(parents=True, exist_ok=True)
     for split, parquet in (("train", args.train_parquet), ("validation", args.val_parquet)):
         questions = select_questions(Path(parquet), args.questions_per_split, args.seed, f"medium_{split}")
@@ -67,10 +70,9 @@ def generate(args) -> None:
                 raise SystemExit(f"{q.question_id}: prompt has {len(prompt_ids)} tokens > {args.max_prompt_tokens}")
             for s in range(args.samples_per_question):
                 requests.append((q, s, prompt_ids))
-                # detokenize=False: we only need token ids and logprobs; skipping text/decoded-token work removes the CPU
-                # bottleneck of top-128 logprob output processing and most of its memory.
-                params.append(SamplingParams(temperature=1.0, top_p=1.0, top_k=-1, max_tokens=args.max_tokens, logprobs=args.topk, detokenize=False,
-                                             stop_token_ids=stop_ids, seed=derive_sampling_seed(args.seed, f"medium_{split}", q.question_id, s)))
+                params.append(SamplingParams(temperature=1.0, top_p=1.0, top_k=-1, max_tokens=args.max_tokens, logprobs=args.topk,
+                                             stop=stops, stop_token_ids=stop_ids or None,
+                                             seed=derive_sampling_seed(args.seed, f"medium_{split}", q.question_id, s)))
         path = out_dir / f"{split}.jsonl"
         if path.exists() and sum(1 for _ in path.open()) == len(requests):
             print(f"[generate] {split}: {len(requests)} responses already present at {path}; skipping (resumed)", flush=True)
