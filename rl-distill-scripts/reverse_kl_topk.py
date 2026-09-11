@@ -60,25 +60,34 @@ def generate(args) -> None:
                 raise SystemExit(f"{q.question_id}: prompt has {len(prompt_ids)} tokens > {args.max_prompt_tokens}")
             for s in range(args.samples_per_question):
                 requests.append((q, s, prompt_ids))
-                params.append(SamplingParams(temperature=1.0, top_p=1.0, top_k=-1, max_tokens=args.max_tokens, logprobs=args.topk,
+                # detokenize=False: we only need token ids and logprobs; skipping text/decoded-token work removes the CPU
+                # bottleneck of top-128 logprob output processing and most of its memory.
+                params.append(SamplingParams(temperature=1.0, top_p=1.0, top_k=-1, max_tokens=args.max_tokens, logprobs=args.topk, detokenize=False,
                                              seed=derive_sampling_seed(args.seed, f"medium_{split}", q.question_id, s)))
-        outputs = llm.generate([{"prompt_token_ids": p} for _, _, p in requests], params, use_tqdm=True)
         path = out_dir / f"{split}.jsonl"
         n_tokens = 0
+        # Generate in small batches and convert each batch's Logprob objects to plain floats at once: a whole split held as
+        # vLLM output objects (~7k tokens x 129 logprobs x 512 responses, with decoded strings) blew a 192 GiB pod (OOMKilled).
         with path.open("w") as fh:
-            for (q, s, prompt_ids), output in zip(requests, outputs, strict=True):
-                comp = output.outputs[0]
-                resp_ids = [int(t) for t in comp.token_ids]
-                sampled_lp, topk_ids, topk_lps = [], [], []
-                for pos, (lp_map, tok) in enumerate(zip(comp.logprobs, resp_ids, strict=True)):
-                    items = sorted(((int(i), float(v.logprob)) for i, v in lp_map.items()), key=lambda x: -x[1])
-                    sampled = next(v for i, v in items if i == tok)
-                    top = [(i, v) for i, v in items][: args.topk]      # includes the sampled token only if it is in the top-k
-                    sampled_lp.append(sampled); topk_ids.append([i for i, _ in top]); topk_lps.append([v for _, v in top])
-                n_tokens += len(resp_ids)
-                fh.write(json.dumps({"split": split, "question_id": q.question_id, "sample_index": s, "prompt_token_ids": prompt_ids,
-                                     "response_token_ids": resp_ids, "finish_reason": comp.finish_reason, "student_sampled_logprob": sampled_lp,
-                                     "student_topk_ids": topk_ids, "student_topk_logprobs": topk_lps}) + "\n")
+            for start in range(0, len(requests), args.gen_batch):
+                batch = requests[start : start + args.gen_batch]
+                outputs = llm.generate([{"prompt_token_ids": p} for _, _, p in batch], params[start : start + args.gen_batch], use_tqdm=False)
+                for (q, s, prompt_ids), output in zip(batch, outputs, strict=True):
+                    comp = output.outputs[0]
+                    resp_ids = [int(t) for t in comp.token_ids]
+                    sampled_lp, topk_ids, topk_lps = [], [], []
+                    for lp_map, tok in zip(comp.logprobs, resp_ids, strict=True):
+                        items = sorted(((int(i), float(v.logprob)) for i, v in lp_map.items()), key=lambda x: -x[1])
+                        sampled = next(v for i, v in items if i == tok)
+                        top = items[: args.topk]      # includes the sampled token only if it is in the top-k
+                        sampled_lp.append(sampled); topk_ids.append([i for i, _ in top]); topk_lps.append([v for _, v in top])
+                    n_tokens += len(resp_ids)
+                    fh.write(json.dumps({"split": split, "question_id": q.question_id, "sample_index": s, "prompt_token_ids": prompt_ids,
+                                         "response_token_ids": resp_ids, "finish_reason": comp.finish_reason, "student_sampled_logprob": sampled_lp,
+                                         "student_topk_ids": topk_ids, "student_topk_logprobs": topk_lps}) + "\n")
+                del outputs
+                fh.flush()
+                print(f"[generate] {split}: {min(start + args.gen_batch, len(requests))}/{len(requests)} responses, {n_tokens} tokens so far", flush=True)
         print(f"[generate] {split}: {len(questions)} questions x {args.samples_per_question} samples -> {len(requests)} responses, {n_tokens} tokens -> {path}", flush=True)
 
 
@@ -161,6 +170,7 @@ def main() -> int:
     p.add_argument("--topk", type=int, default=128); p.add_argument("--seed", type=int, default=0)
     p.add_argument("--max_tokens", type=int, default=8192); p.add_argument("--max_prompt_tokens", type=int, default=4096); p.add_argument("--max_model_len", type=int, default=12288)
     p.add_argument("--gpu_memory_utilization", type=float, default=0.85); p.add_argument("--chunk", type=int, default=256)
+    p.add_argument("--gen_batch", type=int, default=32, help="requests per vLLM generate call (bounds host memory for top-k logprobs)")
     p.add_argument("--trace_dir", required=True); p.add_argument("--out", default=None)
     args = p.parse_args()
     if args.phase == "generate":
