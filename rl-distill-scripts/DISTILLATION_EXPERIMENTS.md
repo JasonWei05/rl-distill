@@ -700,6 +700,24 @@ questions (no memorisation of the 128 train prompts). Jobs: `g4-rkl-12b-e4b-b6` 
 `g4-rkl-26b-e4b-b6` = job_dahpajm0m2tg08d16qrg (COMPLETED 07:02Z); both 1 GPU, borrowing. The b5 pair was preempted before scoring;
 b6 resumed from the uploaded traces (same seeds, so the samples are identical). Wall time per student incl. base ≈ 70 min.
 
+**Forward vs reverse KL (2026-09-11).** The training objective is the *forward* KL(teacher‖student) on teacher-sampled traces
+(teacher top-128, unnormalised, per response token; W&B `train/loss`, `val/loss` = the same loss on the fixed held-out teacher traces
+of the validation questions; runs `h90nnxbg` 12B and `72sb8zdl` 26B in `rl-distill/gemma4-e4b-base-distill-v1`). The reverse KL above
+is KL(student‖teacher) on *student* samples (exact, Monte-Carlo). Same 12-shot prompt and medium band on both sides; different sample
+sets by construction.
+
+| student | forward KL, val traces (step 10 → 1000) | forward KL, train batches (step 10 → mean of steps 901–1000) | reverse KL, val q (untrained → step 1000) | reverse KL, train q (untrained → step 1000) |
+|---|---|---|---|---|
+| 12B | 0.175 → **0.075** | 0.191 → 0.064 (sd 0.012) | 0.141 → **0.089** | 0.143 → 0.089 |
+| 26B-A4B | 0.147 → **0.076** | 0.159 → 0.069 (sd 0.013) | 0.159 → **0.092** | 0.161 → 0.092 |
+
+Reading: at the end of training the two directions are within ~20 % of each other (forward 0.075–0.076 vs reverse 0.089–0.092 nats/token),
+so the students are not collapsing onto teacher modes; the residual reverse > forward gap is consistent with the students being slightly
+sharper than the teacher on their own samples (student log p(sampled) −0.93 vs teacher −1.02, table above). The forward KL fell more
+(12B −57 %, 26B −48 %) than the reverse (−38 %, −42 %) because the untrained bases start further away in the forward direction (teacher
+samples contain tokens the bases assign little mass to) than in the reverse one (the bases' own samples are format-pinned by the prompt).
+Train-batch forward KL is a noisy moving average under training (sd ≈ 0.012 across steps); the validation-trace number is the clean one.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
