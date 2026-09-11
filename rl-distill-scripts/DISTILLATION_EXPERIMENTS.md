@@ -718,7 +718,7 @@ because the untrained bases start much further away in the forward direction (te
 to) than in the reverse one (the bases' own samples are already format-pinned by the prompt). Train-batch forward KL over steps
 901–1000 averages 0.064 (12B) / 0.069 (26B) (sd ≈ 0.012 across steps).
 
-### 9.0d On-policy distillation of the distilled 12B toward the E4B base (setup 2026-09-11; not launched)
+### 9.0d On-policy distillation of the distilled 12B toward the E4B base (setup + smoke 2026-09-11; not launched)
 
 **What already existed.** verl in this fork ships on-policy distillation end to end: `distillation.*` config group
 (`verl/trainer/config/distillation/distillation.yaml`), a colocated vLLM teacher that returns top-k `prompt_logprobs` for every
@@ -751,8 +751,15 @@ Notes: (i) the on-policy `reverse_kl_topk` is truncated to the *teacher's* top-1
 student's top-128 — same direction, different support; both carry ≥ 99.5 % of the mass here). (ii) With `use_task_rewards=False` the
 PG term is zeroed and GRPO with n=1 only feeds the (unused) advantage; the math reward still runs so train/val accuracy keep logging.
 (iii) Composed Hydra config validated locally (`DRY_RUN=1` + `omega_conf_to_dataclass`): teacher context 12288+1, `max_logprobs=128`.
-(iv) Open risk: level-1 cumem sleep on the E4B teacher (the RL run-file records a cumem failure on E4B in weight-sync); fallback
-`ONPOLICY_DISTILL_TEACHER_SLEEP=False` with a lower student util. A 2-GPU local smoke (E2B student ← E4B teacher) is the first gate.
+(iv) **Engine fix (this commit):** verl's FSDP engine ran the top-k distillation logits processor only under `use_remove_padding`;
+Gemma 4 trains padded, so the update died with `KeyError: 'distillation_losses'`. `verl/workers/engine/fsdp/transformer_impl.py`
+(padded `NO_PADDING` branch) now packs each sample's real-length logits into the rmpad layout the loss expects, applies the deferred
+final-logit softcap, runs the processor and re-nests the outputs (one extra bf16 copy of the logits per micro-batch).
+(v) **2-GPU local smoke passed (2026-09-11 21:2xZ):** E2B base student ← E4B base teacher (TP 2, util 0.15, level-1 sleep), 16 prompts × 1
+sample, 2 steps, medium band, FSDP CPU-offload policy. Teacher top-128 scoring 44 s / 32 s per step, reverse-KL loss (token-mean over
+the teacher's top-128) 0.341 → 0.197, student top-128 mass 0.995, teacher mass 0.997, pg_loss 0 (no PG term), grad-norm 24 → 14,
+step 320 s / 168 s (gen 127 s incl. warm-up → 17 s; update 126 s → 101 s on 2 GPUs with offload). Teacher sleep/wake worked across
+both steps (`RUN_DONE rc=0`). The 12B launcher is ready to submit.
 
 ### 9.1 Results
 
