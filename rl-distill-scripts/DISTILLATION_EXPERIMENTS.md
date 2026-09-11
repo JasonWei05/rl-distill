@@ -675,6 +675,17 @@ teacher-style answer; their outputs are parked under `s3://…/gemma4-e4b-base-r
 c3a0230f (`stop_token_ids` for the two turn tokens, matching the RL rollout); corrected jobs `g4-rkl-12b-e4b-b5` = job_dahnfh6r1t2007nga50g
 and `g4-rkl-26b-e4b-b5` = job_dahnfr60m2tg08d16qjg write to `s3://scale-ml/genai/rl-distill/gemma4-e4b-base-reverse-kl-v2/`.
 
+**Reverse-KL results (corrected sampler, 2026-09-11 06:4xZ; per response token, 128 q × 4 samples per split, stop on turn tokens):**
+
+| student | split | mean len | finish | rKL Monte-Carlo (full vocab) | rKL top-128 | top-128 renorm. | top-128 mass | nats / response | log p(sampled): student / teacher |
+|---|---|---|---|---|---|---|---|---|---|
+| 12B distilled ← E4B base (step 1000) | train | 231 | 512 stop | 0.0890 ± 0.0026 | 0.0892 | 0.0866 | 0.998 | 20.5 | −0.932 / −1.021 |
+| 12B distilled ← E4B base (step 1000) | validation | 260 | 510 stop / 2 length | 0.0885 ± 0.0024 | 0.0883 | 0.0841 | 0.999 | 23.0 | −0.998 / −1.086 |
+
+(± = SE over the 512 per-sequence means; the per-token median is 0, so the divergence sits in a minority of positions. For scale,
+the run's own validation loss — the *forward* KL(teacher‖student) on teacher samples — ended near 0.08–0.09 nats/token, so the two
+directions agree.) Untrained 12B base and the 26B rows follow as the jobs finish.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
