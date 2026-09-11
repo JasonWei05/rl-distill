@@ -65,6 +65,9 @@ def generate(args) -> None:
                 params.append(SamplingParams(temperature=1.0, top_p=1.0, top_k=-1, max_tokens=args.max_tokens, logprobs=args.topk, detokenize=False,
                                              seed=derive_sampling_seed(args.seed, f"medium_{split}", q.question_id, s)))
         path = out_dir / f"{split}.jsonl"
+        if path.exists() and sum(1 for _ in path.open()) == len(requests):
+            print(f"[generate] {split}: {len(requests)} responses already present at {path}; skipping (resumed)", flush=True)
+            continue
         n_tokens = 0
         # Generate in small batches and convert each batch's Logprob objects to plain floats at once: a whole split held as
         # vLLM output objects (~7k tokens x 129 logprobs x 512 responses, with decoded strings) blew a 192 GiB pod (OOMKilled).
