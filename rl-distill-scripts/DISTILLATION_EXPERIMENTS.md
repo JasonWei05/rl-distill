@@ -594,7 +594,7 @@ with resumable checkpoints every 5 steps so preemption costs ≤5 steps and the 
 | 12B layout | 8×H100, FSDP2 DP8 (`ACTOR_FSDP_SIZE=-1`, `SP_SIZE=1`), `FSDP_CPU_OFFLOAD_POLICY=True`, micro-batch 1 / 4096 padded tokens, rollout TP1 util 0.45 with a fixed 5 GiB KV cache, compiled rollout (`ROLLOUT_ENFORCE_EAGER=False`) |
 | checkpoints | **rolling resumable checkpoint every 5 steps** (`ROLLING_CHECKPOINT_FREQ=5`: sharded model + Adam + LR/RNG + dataloader cursor → `…-full-checkpoints/12b-medium-from-e4bbase-distill-es5/rolling/`), permanent + HF push every 10 (`SAVE_FREQ=10` → `JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-medium-seed42-from-e4bbase-distill-es5`), best-HF marker under `…/gemma4-12b-medium-from-e4bbase-distill-es5/` |
 | resume | the run-file restores the newest complete S3 checkpoint at start (`full_checkpoint_s3.py restore-latest` → `RESUME_MODE=auto`); ScaleTrain re-queues a preempted borrowing job on its own, and `supervise_borrowing_job.py` (tmux `rl-12b-distill-med`, state under `.scale_train_supervisors/g4-12b-distill-rl-med-20260910/`) relaunches it if the platform reports FAILED/ERROR instead, until the durable completion markers exist |
-| job | `g4-12b-distill-rl-med` = job_dah5igo0masg08eubo1g (submitted 2026-09-10 07:16Z; pods 13:24Z → evicted 13:50Z at step 1, 15:03Z → evicted 21:21Z after rolling step 25) → supervisor relaunch job_dahhve00masg08euboo0 (21:23Z, resumes from rolling 25), p5.48xlarge (8 GPUs), priority high, borrowing on, 240 h deadline; W&B run `g4ds26b-12b-medium-from-e4bbase-distill-es5-s42-v1` |
+| job | `g4-12b-distill-rl-med` = job_dah5igo0masg08eubo1g (submitted 2026-09-10 07:16Z; pods 13:24Z → evicted 13:50Z at step 1, 15:03Z → evicted 21:21Z after rolling step 25) → supervisor relaunch job_dahhve00masg08euboo0 (21:23Z, resumes from rolling 25; pod 3 started 00:44Z 09-11, **job CANCELED externally at 00:48Z** — not relaunched pending the user), p5.48xlarge (8 GPUs), priority high, borrowing on, 240 h deadline; W&B run `g4ds26b-12b-medium-from-e4bbase-distill-es5-s42-v1` |
 
 ```bash
 cd rl-distill-scripts/scale_train && bash launch_gemma4_12b_distilled_rl_medium.sh        # one job; env baked in the script
@@ -656,6 +656,15 @@ Jobs (borrowing off): `g4-rkl-12b-vs-e4b` = job_dahdrsg0masg07kbc5ng, `g4-rkl-26
 `s3://scale-ml/genai/rl-distill/gemma4-e4b-base-reverse-kl-v1/<size>_<distilled|base>__vs_e4b_base__medium_q128_s4_top128/`.
 Borrowing-on duplicates (18:57Z, to see which pool schedules first; separate root `…-reverse-kl-v1-brw`): `g4-rkl-12b-e4b-brw` =
 job_dahfr28qi7bg07hm8rug, `g4-rkl-26b-e4b-brw` = job_dahfrh8qi7bg07hm8rv0.
+
+**2026-09-10/11 outcome of the first attempts:** the borrowing pair got pods at 21:56Z (right after the seed-43 jobs were paused) and
+the reserved pair at 22:42Z. Both distilled students write ~6.5–7k tokens per response (3.3–3.7M tokens per 512-response split),
+and vLLM's top-128 logprob output processing capped generation at ~780 tok/s. The borrowing pods were **OOMKilled** (192 GiB pod
+limit) at ~56 % of the validation split: the script held a whole split of vLLM outputs (Logprob objects with decoded strings) in
+memory. The reserved pair and the 12B RL job were **cancelled externally at 00:48Z** (not by the supervisors). Fix (commit
+a628946b): generate in batches of 32 requests, convert to floats immediately, `detokenize=False`. Relaunched on borrowing at 01:41Z:
+`g4-rkl-12b-e4b-b2` = job_dahlokm0m2tg08d16q8g, `g4-rkl-26b-e4b-b2` = job_dahlommr1t20089l75ug (results under the main
+`…-reverse-kl-v1/` root). 12B sampling was not bit-reproducible across pods (train split 3.54M vs 3.67M tokens); 26B was.
 
 ### 9.1 Results
 
