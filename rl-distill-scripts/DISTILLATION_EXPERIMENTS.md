@@ -644,7 +644,7 @@ rolling 135 (best 0.145@130), e2b-hard permanent 10, e4b-easy rolling 25 (best 0
 e4b-hard nothing yet. To resume later: `SEED=43 SIZES="e2b e4b" BANDS="easy medium hard" bash start_gemma4_rl_seed_supervisors.sh`
 (same S3 prefixes → each run restores its newest checkpoint).
 
-### 9.0c Reverse KL of the distilled students vs the E4B base (launched 2026-09-10 16:4xZ)
+### 9.0c Reverse KL of the distilled students vs the E4B base (launched 2026-09-10 16:4xZ; final results 2026-09-11 07:02Z)
 
 `reverse_kl_topk.py` (run-file `scale_train/run_gemma4_reverse_kl_st.sh`, 1 GPU, borrowing off): sample the *student* on 128
 medium-train and 128 medium-validation questions (4 samples/q, study sampler + 12-shot prompt, seed 0) recording its top-128
@@ -685,15 +685,20 @@ and `g4-rkl-26b-e4b-b5` = job_dahnfr60m2tg08d16qjg write to `s3://scale-ml/genai
 | 12B base (untrained, reference) | validation | 218 | 511 stop / 1 length | 0.1407 ± 0.0037 | 0.1362 | 0.1356 | 0.992 | 30.6 | −0.847 / −0.987 |
 | 26B-A4B distilled ← E4B base (step 1000) | train | 207 | 512 stop | 0.0916 ± 0.0025 | 0.0939 | 0.0916 | 0.998 | 19.0 | −0.927 / −1.019 |
 | 26B-A4B distilled ← E4B base (step 1000) | validation | 212 | 511 stop / 1 length | 0.0924 ± 0.0026 | 0.0917 | 0.0893 | 0.998 | 19.6 | −0.890 / −0.982 |
+| 26B-A4B base (untrained, reference) | train | 215 | 512 stop | 0.1606 ± 0.0036 | 0.1568 | 0.1554 | 0.996 | 34.5 | −0.739 / −0.900 |
+| 26B-A4B base (untrained, reference) | validation | 209 | 512 stop | 0.1590 ± 0.0037 | 0.1596 | 0.1574 | 0.998 | 33.2 | −0.692 / −0.851 |
 
 (± = SE over the 512 per-sequence means; the per-token median is 0, so the divergence sits in a minority of positions. For scale,
 the run's own validation loss — the *forward* KL(teacher‖student) on teacher samples — ended near 0.08–0.09 nats/token, so the two
 directions agree.) Distillation cut the reverse KL to the E4B base by ~38 % for 12B (0.143 → 0.089 nats/token) — the untrained 12B
 base already sits at 0.14 on these prompts because the 12-shot prompt pins the answer format, and its slightly *higher* log p(sampled)
 means it is more peaked than the teacher rather than closer to it. The distilled 26B-A4B lands at 0.092, within noise of the 12B
-student; both are ~19–23 nats per response. Untrained 26B-A4B base row follows (job `g4-rkl-26b-e4b-b6` = job_dahpajm0m2tg08d16qrg;
-12B job `g4-rkl-12b-e4b-b6` = job_dahpai6r1t2007nga58g COMPLETED 06:52Z). The b5 pair was preempted before scoring; b6 resumed from
-the uploaded traces (same seeds, so the samples are identical).
+student; both are ~19–23 nats per response. The untrained 26B-A4B base is the furthest from the teacher (0.160 / 0.159; it is also
+the most peaked sampler, log p(sampled) −0.74 vs the teacher's −0.90 on its own tokens), so distillation cut its reverse KL by ~42 %.
+Ordering: 12B distilled 0.089 ≈ 26B distilled 0.092 < 12B base 0.142 < 26B base 0.160 nats/token, identical on train and validation
+questions (no memorisation of the 128 train prompts). Jobs: `g4-rkl-12b-e4b-b6` = job_dahpai6r1t2007nga58g (COMPLETED 06:52Z),
+`g4-rkl-26b-e4b-b6` = job_dahpajm0m2tg08d16qrg (COMPLETED 07:02Z); both 1 GPU, borrowing. The b5 pair was preempted before scoring;
+b6 resumed from the uploaded traces (same seeds, so the samples are identical). Wall time per student incl. base ≈ 70 min.
 
 ### 9.1 Results
 
