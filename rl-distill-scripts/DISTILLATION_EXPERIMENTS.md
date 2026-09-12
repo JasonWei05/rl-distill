@@ -773,6 +773,21 @@ util 0.20, sleep). Outputs: HF `JWei05/OnPolicyDistill-gemma4-e4b-base-medium-to
 W&B `g4-onpolicy-12b-medium-onpolicy-rkl128-from-e4bbase-distill-s42-v1`. Metrics to watch: `actor/distillation/loss` (should start ≈ 0.09,
 the §9.0c reverse KL of this student) and `val-core/math/acc/mean@16` every 10 steps.
 
+**2026-09-12 21:52Z — relaunched S3-only.** The first job (job_dai7cbe0m2tg07j7jm8g) queued 22 h, was admitted at 20:09Z and Kueue-reclaimed
+30 s later before running anything; cancelled at 21:50Z on the user's request to stop pushing to Hugging Face. Relaunched as
+`g4-12b-onpolicy-med` = job_daisj1u0m2tg07j7jn60 with `HF_PUSH_ENABLE=False HF_PUSH_REQUIRED=False` (now the launcher default, commit
+23272d0f); same recipe (200 steps, warmup 20, lr 5e-7, SAVE_FREQ 10). Checkpoints go to S3 only — each permanent checkpoint carries the
+weight-only HF snapshot under `actor/huggingface/`, and `publish-best-hf` copies the best step's snapshot to `RUN_ARTIFACT_S3_URI/best_hf/`.
+Supervisor dir `.scale_train_supervisors/g4-12b-onpolicy-med-20260912/`.
+
+**Hub cleanup (2026-09-12).** Both distilled-student repos (`JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base`) were pruned to
+`step_001000` (commits 71254c99 / 3dbd12c5) and the intermediate steps' LFS blobs permanently purged (0.47 TB + 1.01 TB; Hub storage
+counts every blob in git history, so a delete commit alone frees nothing). Old revisions still resolve for `step_001000` but no longer
+serve the removed steps. The final exports were also copied to S3:
+`s3://scale-ml/genai/rl-distill/gemma4-e4b-base-distill-final-exports/Distill-gemma4-e4b-base-medium-to-12b-base/step_001000/` (26.0 GB,
+verified) and `…/Distill-gemma4-e4b-base-medium-to-26b-base/step_001000/` (53 GB). The full training checkpoints (weights + Adam) at
+steps 250/500/750/1000 remain under `s3://scale-ml/genai/rl-distill/gemma4-e4b-base-distill-ckpts-v1/`.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
