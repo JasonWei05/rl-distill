@@ -11,7 +11,7 @@
 #
 # Runtime = the Gemma 4 RL run-file (run_gemma4_pt_deepscaler_4of4strict_rl.sh) with ONPOLICY_DISTILL_ENABLE=True,
 # so validation (val-core/math/acc/mean@16 on the medium val300 ×16), rolling S3 checkpoints, HF pushes and the
-# borrowing supervisor all work unchanged. 8 GPUs: 12B student FSDP2 DP8 (CPU-offload policy, 4096-token
+# borrowing supervisor all work unchanged (HF pushes off by default -- S3 checkpoints only). 8 GPUs: 12B student FSDP2 DP8 (CPU-offload policy, 4096-token
 # micro-batches) + student vLLM (util 0.35 — n=1 needs far less KV than the RL n=16) + E4B teacher vLLM
 # (TP=2 → 4 replicas, util 0.20, level-1 sleep between scoring calls).
 #
@@ -34,7 +34,10 @@ ENV_VARS="GEMMA4_MODEL=google/gemma-4-12B,GEMMA4_MODEL_REVISION=023679ed352de9bb
 ENV_VARS+=",GEMMA4_INIT_MODEL_REPO=${INIT_REPO},GEMMA4_INIT_MODEL_REVISION=${INIT_REVISION},GEMMA4_INIT_MODEL_SUBFOLDER=${INIT_SUBFOLDER}"
 ENV_VARS+=",DIFFICULTY_DATASET_SOURCE=gemma4_26b_bands,DIFFICULTY_DATASET=medium,DIFFICULTY_DATASET_REPO=JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k,DIFFICULTY_DATASET_REVISION=a0ba3c3dc07c7bc27e901670ceb1a0b0ceeaa8db"
 ENV_VARS+=",DATA_SEED=42,RUN_NAME_SUFFIX=${RUN_TAG},RUN_SLOT=gemma4-12b-medium-${RUN_TAG},VERL_VLLM_PORT_BASE=55000"
-ENV_VARS+=",EXP_NAME=OnPolicyDistill-gemma4-12b-from-e4b-base-medium-${RUN_TAG},HF_PUSH_REPO=JWei05/OnPolicyDistill-gemma4-e4b-base-medium-to-12b-${RUN_TAG}"
+# S3 only: no Hugging Face pushes (HF_PUSH_ENABLE=False). Every permanent S3 checkpoint already carries the weight-only
+# HF snapshot under actor/huggingface/ (ACTOR_CKPT_SAVE_CONTENTS includes hf_model), and publish-best-hf copies the best
+# step's snapshot to RUN_ARTIFACT_S3_URI/best_hf/. HF_PUSH_REPO is only recorded in the S3 manifests.
+ENV_VARS+=",EXP_NAME=OnPolicyDistill-gemma4-12b-from-e4b-base-medium-${RUN_TAG},HF_PUSH_ENABLE=${HF_PUSH_ENABLE:-False},HF_PUSH_REQUIRED=${HF_PUSH_REQUIRED:-False},HF_PUSH_REPO=JWei05/OnPolicyDistill-gemma4-e4b-base-medium-to-12b-${RUN_TAG}"
 # on-policy distillation objective (teacher + loss); everything else stays the RL contract
 ENV_VARS+=",ONPOLICY_DISTILL_ENABLE=True,ONPOLICY_DISTILL_TEACHER_REPO=${TEACHER_REPO},ONPOLICY_DISTILL_TEACHER_REVISION=${TEACHER_REVISION}"
 ENV_VARS+=",ONPOLICY_DISTILL_LOSS_MODE=${ONPOLICY_DISTILL_LOSS_MODE:-reverse_kl_topk},ONPOLICY_DISTILL_TOPK=128,ONPOLICY_DISTILL_TEACHER_TP=${ONPOLICY_DISTILL_TEACHER_TP:-2}"
