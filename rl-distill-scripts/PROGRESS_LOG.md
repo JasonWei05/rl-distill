@@ -9,6 +9,305 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-08-06 — Borrowing-enabled extra runs have durable full-checkpoint recovery
+
+Three high-priority borrowing jobs were submitted: 12B Medium
+`job_d9qhmp5cufhjo4csicv0`, E4B Medium `job_d9qhmp55herl6oiqnf6g`, and the
+four-GPU E2B Easy continuation `job_d9qhpj55herl6oiqnf70`. All three were
+accepted and initially `QUEUED` with no worker pod. Dedicated tmux supervisors
+monitor pod phases and relaunch a failed/preempted attempt.
+
+Every new step-20 checkpoint is uploaded to a run-specific S3 prefix with
+model, Adam, scheduler/RNG extras, and `data.pt`; a completion marker is written
+last and only manifest-complete checkpoints are restored. The old E2B Easy
+step-200 full checkpoint was lost with its pod's `/tmp`, and the HF export is
+weights-only, so its first extra-100-step attempt necessarily uses fresh Adam
+plus a deterministic 200-batch dataloader fast-forward. Subsequent resumes are
+exact after the first new full checkpoint. Focused checkpoint/recovery tests
+pass (`4 passed`) and Ruff passes.
+
+---
+
+## 2026-08-05 — Repaired 12B production startup and step 1 passed
+
+Replacement 12B production job `job_d9pibql5heri67n90crg` waited on its pinned
+guaranteed-quota H100 node until 15:48 UTC, then started with zero pod restarts.
+All eight vLLM servers initialized and the repaired text-only FSDP-to-vLLM sync
+passed the exact point where the predecessor failed on
+`embed_vision.pos_embedding`. W&B run `8t55mm42` started and the full initial
+validation completed at 18.7375% in-distribution, 46.7887% GSM8K, and 16.7500%
+MATH500.
+
+The first real 12B optimizer update then completed in 824.7 seconds. Gradient
+norm was finite at 12.94; token-TIS truncation was `9.9419e-06`; PPO ratio
+metrics were present; and reward groups were 40/64 mixed, 24/64 all zero, and
+0/64 all one. Generation took 90.8 seconds, old-log-probability computation
+87.0 seconds, actor update 640.3 seconds, and weight synchronization 3.2
+seconds. The repaired 12B verl path is therefore proven through step 1; its
+required step-20 checkpoint/export remains under continuous monitoring.
+
+Step 2 subsequently completed in 793.1 seconds and included an actual
+8,192-token response. Gradient norm remained finite at 13.42, TIS truncation
+was `8.3494e-06`, PPO ratio clipping was nonzero, and the pod still had zero
+restarts. Reward groups were 35/64 mixed, 29/64 all zero, and 0/64 all one.
+
+---
+
+## 2026-08-05 — E4B production passed step-20 checkpoint/export
+
+Replacement E4B production job `job_d9pht75cufhik662291g` completed step 20,
+saved `global_step_20`, uploaded a new full HF export, completed the scheduled
+in-distribution/GSM8K/MATH500 validation, and continued through step 21 with
+zero pod restarts. The new HF commit is
+`f5993c209242fca83cf42d271c9122763f18da78`; its `step_000020` tree contains
+seven files totaling 17,366,959,359 bytes, including the 17,334,775,284-byte
+`model.safetensors`. Step-20 validation reached 22.425% in-distribution,
+50.634% GSM8K, and 20.425% MATH500. Token TIS, PPO ratio, and reward-group
+metrics remained present; step 20 reported 37/64 mixed groups, 24/64 all zero,
+and 3/64 all one.
+
+---
+
+## 2026-08-05 — Packed E2B production passed step-20 checkpoint/export
+
+Both four-GPU children of `job_d9phvft5herivi4ihheg` completed the scheduled
+step-10 in-distribution/GSM8K/MATH500 sweep and continued training. Easy changed
+from 5.4125% to 5.7625% in-distribution, 7.7765% to 8.0797% on GSM8K, and
+4.5625% to 5.0125% on MATH500. Medium changed from 3.2125% to 3.4000%
+in-distribution and 8.1014% to 8.5888% on GSM8K; MATH500 was effectively flat
+at 4.6875% versus 4.6500%.
+
+Medium step 8 logged a non-finite pre-clip gradient norm while every loss,
+rollout-correction, PPO-ratio, and reward metric remained finite. The active
+FSDP engine's anomaly guard zeroed the gradients and skipped that optimizer
+update, so weights were not corrupted. Steps 9 and 10 then completed with
+finite gradient norms 5.19 and 5.29, respectively, including an 8,192-token
+response at step 9. Easy continued through step 11 with finite metrics.
+
+Both children later completed step 20, ran the second scheduled validation,
+saved the local checkpoint, and uploaded a new full HF export. Easy's new commit
+is `9ce950247f3e9e56df942f397b668a87a8dccb60`; Medium's is
+`f329ac40b18154b4f46171145e31cb19eed008f4`. Each `step_000020` export has seven
+files totaling 11,084,114,210 bytes, including the 11,051,930,326-byte
+`model.safetensors` plus tokenizer, processor, config, generation config, and
+chat template. Easy step-20 validation reached 6.3375% in-distribution, 10.0292%
+GSM8K, and 5.8750% MATH500. Medium reached 3.7625%, 8.9028%, and 5.2125%,
+respectively. Easy continued through step 21 after the save.
+
+Both packed children subsequently reached step 40 and produced another full
+HF export. Easy commit `a87df6d5c09abca1795fbbaf9089748b317b59f3`
+landed at 15:34 UTC and Medium commit
+`be22f986c8f7197521bb32177a599a77690da879` at 15:41 UTC. Each
+`step_000040` tree contains seven files totaling 11,084,114,210 bytes, including
+the 11,051,930,326-byte `model.safetensors`.
+
+---
+
+## 2026-08-05 — 12B text-only vLLM weight sync skips unused vision branch
+
+The first replacement 12B job reached vLLM initialization but failed its
+initial FSDP-to-vLLM synchronization because the training model emitted
+`embed_vision.pos_embedding`, which vLLM's Gemma 4 Unified model intentionally
+does not expose. The rollout is text-only, so the existing optional multimodal
+reload filter now recognizes Gemma 4's `embed_vision` naming, and the 12B matrix
+profile enables that filter explicitly. Language-model weights remain synced.
+The failed job was `job_d9phq3t5herivi4ihhe0`; it was canceled successfully and
+the tested replacement is `job_d9pibql5heri67n90crg` (borrowing disabled, high
+priority). The focused vLLM-filter and matrix suite passes 22/22.
+
+At 2026-08-05 13:46 UTC the replacement created worker pod
+`g4-12b-easy-med-full-jasonwei-2026080-bsyyl-workers-0-0-vldn4`. The pod is
+still `Pending` with zero restarts and no container startup: it is pinned to a
+currently occupied H100 node, while the autoscaler reports max node-group size.
+This is a capacity wait, not a recurrence of the weight-sync failure.
+
+---
+
+## 2026-08-05 — Replacement E4B step 1 confirms throughput improvement
+
+E4B production job `job_d9pht75cufhik662291g` completed step 1 in 559.3
+seconds, down from roughly 830–850 seconds/step on the preceding production
+run. Generation took 26.2 seconds, old-log-probability computation 69.6 seconds,
+and the actor update 454.8 seconds. The step processed 1,024 responses with
+finite loss and gradient norm. TIS truncation was `1.51798e-05`, PPO ratio
+metrics were present, and the reward-group split was 35/64 mixed, 29/64 all
+zero, and 0/64 all one. After three completed steps, the new run's median is
+562.9 seconds/step versus 837.9 seconds over 38 completed steps in its exact-name
+predecessor W&B run `xlc5hevs`, a 32.8% step-time reduction.
+
+---
+
+## 2026-08-05 — Packed E2B microbatch-8 production step 1 passed
+
+The Easy child of packed production job `job_d9phvft5herivi4ihheg` completed a
+real four-GPU step 1 in 311.9 seconds with microbatch 8 and the 12,288-token
+adaptive ceiling. It included an 8,192-token response, finite gradient norm
+`4.90`, zero TIS truncation, and PPO clip fraction `2.96e-06`. Generation took
+34.7 seconds, old-log-probability computation 37.1 seconds, and actor update
+232.0 seconds. Reward groups were 18/64 mixed, 46/64 all zero, and 0/64 all
+one. This is the production-scale confirmation of the local throughput canary.
+The Medium child independently passed step 1 in 310.6 seconds with an 8,192-
+token response, finite gradient norm `13.32`, zero TIS truncation, and a group
+split of 10/64 mixed, 54/64 all zero, and 0/64 all one. The matched production
+comparisons now establish the throughput gain beyond the one-step canary: Easy
+has a 293.5-second median over its first six steps versus 893.3 seconds over 38
+steps in exact-name predecessor `zcuagr1z` (67.1% lower), while Medium has a
+299.6-second median over its first five steps versus 842.6 seconds over 38 steps
+in exact-name predecessor `bsfow2oe` (64.4% lower).
+
+---
+
+## 2026-08-05 — E2B microbatch-8 / 12,288-token adaptive canary passed
+
+A four-GPU Gemma 4 E2B canary completed a full optimizer update with compiled
+vLLM rollout, an 8,192-token response limit, microbatch 8, and a 12,288 padded-
+token adaptive ceiling. It wrote the complete `global_step_1` checkpoint and
+ended with `RUN_DONE rc=0`. Step time was 140.0 seconds including 54.5 seconds
+of checkpointing; generation took 46.7 seconds, actor update 31.0 seconds, and
+old-log-probability computation 4.17 seconds. Token TIS, PPO ratio clipping, and
+reward-group count/percentage metrics were present and finite. The E2B packed
+production profile now uses microbatch 8 and the 12,288-token ceiling.
+
+---
+
+## 2026-08-05 — Math reward uses math_verify OR bounded Miles SymPy
+
+The strict last-box reward now marks an answer correct when either Hugging Face
+`math_verify` or the Miles/DeepScaleR SymPy equivalence grader accepts the same
+extracted final box. `math_verify` runs first; SymPy runs only after a miss and
+has a five-second worker-local timeout so pathological simplification cannot
+stall the reward pool. A stratified 1,800-trace audit found 11 grader
+disagreements, all manually valid equivalents; the OR recovered the one
+SymPy-only case (`(15)x - 80.` versus `15x - 80`) while retaining the ten
+`math_verify` acceptances. The verl focused suite passes 19/19 and the NeMo-RL
+parity gate passes 8/8.
+
+---
+
+## 2026-08-05 — Math reward now grades the last well-formed box
+
+The boxed-only `math_verify` path now grades the last balanced `\\boxed{}` or
+`\\fbox{}` in a completion. A completion with no well-formed box still scores
+zero, but an earlier boxed answer no longer invalidates a later correction. The
+majority-vote prediction extractor and the NeMo-RL parity port use the same
+selection rule. Historical results documented below retain the exactly-one-box
+semantics used when those evaluations were run.
+
+---
+
+## 2026-08-05 — Production image repaired; E4B KV-cache failure fixed selectively
+
+**Image repair.** The production image had excluded `verl/third_party` because
+the Docker ignore rule `third_party` matched both the root dependency checkout
+and the package directory. The rule is now scoped to `third_party/**`, and the
+Dockerfile asserts that `verl/third_party/vllm/__init__.py` exists. A direct
+container import verified the packaged module.
+
+**E4B failure and recovery.** E4B job `job_d9p7utt5heri8vqpv6v0` failed at
+vLLM startup because a 512 MiB explicit KV cache was too small for the
+12,288-token window; vLLM required about 0.66 GiB. E4B and 12B now use a 1 GiB
+explicit cache. The selectively relaunched E4B job is
+`job_d9p8f4d5heri8vqpv720`; it passed the previous crash point, initialized all
+eight vLLM servers and the agent-loop manager, and entered the 200-step trainer.
+The focused matrix suite passes (`7 passed`).
+
+**Current jobs.** Healthy jobs were not reset. The final monitored set is 12B
+`job_d9p7ntd5heri67n90cd0` (`IN_PROGRESS`, worker capacity-pending), E2B packed
+4+4 `job_d9p87355heri67n90ceg` (`IN_PROGRESS`, worker running), and E4B
+`job_d9p8f4d5heri8vqpv720` (`IN_PROGRESS`, worker running). All retain EKS,
+high priority, borrowing disabled, 200 steps, validation every 10 steps, and
+checkpoint/Hugging Face export every 20 steps.
+
+---
+
+## 2026-08-03 — Local 8K gate passed; three production jobs launched
+
+**Local gate.** Gemma 4 E2B Easy-10k completed ten real optimizer steps on four
+H100s with the production 4,096/8,192 prompt/response window, microbatch 2, 64
+prompts x16 responses, and explicit 512 MiB vLLM KV cache. All ten steps had
+finite loss, gradient, and reward metrics; steps 1, 3, 4, 5, 8, 9, and 10 each
+included at least one genuine 8,192-token response. Step 10 also completed the
+full in-distribution/GSM8K/MATH500 validation sweep. The complete step-10 FSDP,
+optimizer, extra-state, and Hugging Face checkpoint was written, the container
+exited zero, and the log ended with `RUN_DONE rc=0`.
+
+**Production topology.** Six logical 200-step runs resolve to three
+borrowing-false, high-priority, full-node EKS jobs. One 12B job runs easy then
+medium sequentially; one E4B job does the same; the E2B job runs easy and
+medium concurrently on disjoint four-GPU halves. Validation remains every ten
+steps and checkpoints/HF pushes every twenty. The three production jobs were
+submitted after the local gate passed and were initially queued with no worker
+pods admitted:
+
+- 12B sequential: `job_d9o8g16rkvumpnejdjgg`
+- E4B sequential: `job_d9o8hcurkvum8ubf6hn0`
+- E2B packed 4+4: `job_d9o8i4ihu8ojb1b2cua0`
+
+The previous remote smoke jobs were canceled successfully.
+
+**Queue reset.** At the user's request on 2026-08-03, the three production jobs
+above were canceled and immediately relaunched to move the matrix to the back
+of the queue. Every cancellation returned `Result: True`; the briefly admitted
+12B worker was still `Pending` and disappeared before relaunch. Replacement
+jobs retain EKS, high priority, borrowing disabled, one full node per topology,
+200 steps, validation every 10 steps, and save/export every 20 steps:
+
+- 12B sequential: `job_d9oegh2hu8ojnqcvi9u0`
+- E4B sequential: `job_d9oeimahu8ojnqcvi9ug`
+- E2B packed 4+4: `job_d9oekfahu8ojnqcvi9v0`
+
+All three replacements were initially `QUEUED` with no worker pods.
+
+**Second queue reset.** At the user's request on 2026-08-04, those three
+queued replacements were canceled and immediately resubmitted once more. All
+three old job records now report `CANCELED`. The new jobs preserve the same
+EKS/high-priority/borrowing-disabled production configuration and were
+verified `QUEUED` after submission:
+
+- 12B sequential: `job_d9ol3655hergioua77u0`
+- E4B sequential: `job_d9ol47t5hergioua77ug`
+- E2B packed 4+4: `job_d9ol4ut5hergioua77v0`
+
+**Entry points.** The sequential 12B/E4B wrapper is
+`scale_train/run_gemma4_easy_medium_sequential.sh`; E2B remains in
+`scale_train/run_gemma4_e2b_easy_medium_packed.sh`. The matrix launcher resolves
+all six runs into the three intended jobs, and focused tests pass.
+
+---
+
+## 2026-08-02 — Gemma 4 Easy-10k/Medium-20k six-run RL matrix prepared
+
+**Scope.** Prepared but did not submit six seed-42 DAPO runs: Gemma 4 12B, E4B,
+and E2B on both DeepScaleR Easy-10k and Medium-20k. The 12B/E4B runs reserve one
+eight-GPU node each. The two E2B runs share one full node with four GPUs each,
+isolated CUDA visibility, Ray directories, vLLM port ranges, caches, W&B dirs,
+and checkpoint roots. This is five ScaleTrain jobs containing six logical runs.
+
+**Validation contract.** Each run evaluates its matching 500-question
+in-distribution validation set at x16 (8,000 rows), GSM8K's 1,319 questions at
+x7 (9,233 rows), and MATH-500's 500 questions at x16 (8,000 rows), before
+training and every ten steps. All repeated rows carry stable per-question UIDs.
+The pinned preparation completed end to end and verified train/validation
+non-overlap, exact row counts, uniform repeat counts, and a SHA-256 manifest.
+
+**Training contract.** The matrix retains the current 8k Gemma 4 recipe:
+64 prompts x16 responses, mini-batch 32, LR 1e-6 with 20 warmup steps, 4,096
+prompt + 8,192 response tokens, 2,048-token soft-overlong buffer, strict boxed
+reward, save every 25 steps, and a 500-step production horizon. 12B/E4B use
+microbatch 1; E2B uses the validated configured microbatch 2 with adaptive
+singleton splitting above a 4,096 padded-token ceiling. All use FSDP2 CPU
+offload policy. The new 12B path selects `Gemma4UnifiedTextDecoderLayer` and is
+gated behind a one-step canary because it has not previously trained in this
+repository.
+
+**Entry points.** See `GEMMA4_DIFFICULTY_RL_RUNS.md`,
+`scale_train/launch_gemma4_difficulty_matrix.py`, and
+`scale_train/run_gemma4_e2b_easy_medium_packed.sh`. The default launcher action
+is dry-run; `--launch` is required for submission. Focused tests pass, and all
+five smoke-job commands resolve against the full-node EKS build configuration.
+
+---
+
 ## 2026-07-31 — Finite Gemma 4 gradient spikes accepted; deterministic-cuDNN experiment withdrawn
 
 **Operator decision.** Large but finite Gemma 4 pre-clip gradient norms are not a stop condition for
@@ -679,3 +978,49 @@ Bimodal: ~46% never solved, ~26% always solved, ~28% in the learnable middle (1�
 **Status.** IT-gen + subset build + 4B-PT sanity eval all complete; nothing running. The earlier
 DeepScaleR RL runs (1B local, 4B ScaleTrain) were stopped/cancelled — superseded by this filtering
 work. Next: decide which subset(s) to train RL on (likely the learnable middle 1–3/4).
+
+## 2026-09-13 — Hugging Face Hub cleanup (user request)
+
+**Rule:** delete model repos last modified before 2026-07-30 (datasets untouched; repos created before but modified after the cutoff kept); the two Gemma 4 `4of4strict-seed42` RL repos (2026-07-27/28) were explicitly kept. 37 repos deleted (irreversible), 77 model repos remain.
+
+Earlier the same day: `JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base` pruned to `step_001000` with the other steps' LFS blobs purged (0.47 TB + 1.01 TB); their `step_001000` exports copied to `s3://scale-ml/genai/rl-distill/gemma4-e4b-base-distill-final-exports/`.
+
+Deleted repos (several are still referenced by legacy Gemma 3 launch/eval scripts, which now point at nothing):
+
+- `JWei05/dapo-gemma3-1b-pt`
+- `JWei05/gemma3-4b-pt-sft-nemotron-cascade2-16k`
+- `JWei05/gemma3-4b-pt-sft-distill-from-27b`
+- `JWei05/gemma3-4b-pt-sft-distill-from-12b`
+- `JWei05/dapo-gemma3-4b-pt-sft-nc2-16k`
+- `JWei05/gemma3-1b-pt-sft-distill-from-4b`
+- `JWei05/gemma3-1b-pt-sft-distill-from-12b`
+- `JWei05/gemma3-1b-pt-sft-distill-from-27b`
+- `JWei05/gemma3-1b-pt-onpolicy-distill-from-dapo4b-step60`
+- `JWei05/gemma3-1b-pt-onpolicy-distill-from-dapo12b-step80`
+- `JWei05/gemma3-1b-pt-onpolicy-distill-from-dapo27b-step80`
+- `JWei05/gemma3-4b-pt-onpolicy-distill-from-dapo12b-step80`
+- `JWei05/gemma3-4b-pt-onpolicy-distill-from-dapo27b-step80`
+- `JWei05/gemma3-4b-pt-moe-2e-top1-sft-16k`
+- `JWei05/gemma3-4b-pt-moe-4e-top1-sft-16k`
+- `JWei05/dapo-gemma3-4b-pt`
+- `JWei05/gemma3-4b-pt-sft-distill-from-27b-rl-step40-seed43`
+- `JWei05/gemma3-4b-pt-sft-distill-from-12b-rl-step20-seed43`
+- `JWei05/gemma3-4b-pt-sft-distill-from-27b-rl-step40-seed43-all33296-n4`
+- `JWei05/gemma3-4b-pt-sft-distill-from-12b-rl-step20-seed43-all33296-n4`
+- `JWei05/qwen35-9b-swe-save-smoke`
+- `JWei05/Qwen3-4B-Instruct-2507-Scalar-Critic`
+- `JWei05/DAPO-Gemma3-4B-PT-RL-DAPO17k`
+- `JWei05/Qwen3-4B-Instruct-2507-Hybrid-Scalar-Reasoning-Critic`
+- `JWei05/Qwen3-4B-Instruct-2507-Reasoning-Critic`
+- `JWei05/Qwen2.5-3B-Instruct-DeepScaleR-Canonical-Critic`
+- `JWei05/dapo-gemma3-4b-pt-moe-2e-megatron-rl`
+- `JWei05/DAPO-Gemma3-1B-PT-FewShotMath-seed43`
+- `JWei05/DAPO-Gemma3-1B-PT-FewShotMath-seed44`
+- `JWei05/DAPO-Gemma3-1B-PT-FewShotMath-seed42`
+- `JWei05/DAPO-Gemma3-4B-PT-FewShotMath`
+- `JWei05/DAPO-Gemma3-4B-PT-FewShotMath-seed43`
+- `JWei05/DAPO-Gemma3-1B-PT-DeepScaleR`
+- `JWei05/DAPO-Gemma3-4B-PT-DeepScaleR`
+- `JWei05/DAPO-Gemma3-1B-PT-DeepScaleR-4of4-seed42`
+- `JWei05/DAPO-Gemma3-1B-PT-DeepScaleR-4of4-seed43`
+- `JWei05/DAPO-Gemma3-1B-PT-DeepScaleR-4of4strict-seed42-local`
