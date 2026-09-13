@@ -896,6 +896,9 @@ failure, so the trigger is not a simple resubmission cooldown (accepted: 17:17, 
 v2 run, the cancelled submission still created a Kueue workload (`…-stk-…-1yhbp`, carrying the fixed code), which is now the single
 pending copy of this run: it trains when admitted, re-queues on preemption, and has no ScaleTrain status. The supervisor was stopped after
 this one submission to avoid creating a duplicate workload.
+**Kueue admitted `1yhbp` at 19:47Z; three pods were reclaimed within minutes each, the fourth (20:23Z) trains.** Steps 1–3 at 20:44Z: loss
+0.158 → 0.085 → 0.071, student mass 0.9987 (own top-128), teacher mass on it 0.9964–0.9969, update 85–102 s / step 124–213 s; the step-3 update
+that OOMed before now completes — the chunked/checkpointed loss holds within memory with the 17 GB resident teacher.
 
 ### 9.1 Results
 
