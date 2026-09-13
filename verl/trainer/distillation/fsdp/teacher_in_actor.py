@@ -58,3 +58,32 @@ def teacher_logits_padded(
     if logits.dtype != torch.bfloat16:
         logits = logits.to(torch.bfloat16)
     return logits
+
+
+@torch.no_grad()
+def teacher_hidden_padded(
+    model_path: str,
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    position_ids: torch.Tensor,
+):
+    """Return (hidden (bsz, seqlen, H) bf16, head_fn) for the frozen teacher on padded inputs.
+
+    ``head_fn(hidden_chunk)`` applies the teacher's LM head and final-logit softcap and returns fp32 logits for that
+    chunk, so callers never materialise a full (seqlen, vocab) teacher tensor (mirrors reverse_kl_topk.py's scorer).
+    """
+    model = get_in_actor_teacher(model_path, input_ids.device)
+    hidden = model.model(
+        input_ids=input_ids, attention_mask=attention_mask, position_ids=position_ids, use_cache=False, return_dict=True
+    ).last_hidden_state
+    softcap = getattr(model.config.get_text_config(), "final_logit_softcapping", None)
+    lm_head = model.lm_head
+
+    def head_fn(hidden_chunk: torch.Tensor) -> torch.Tensor:
+        with torch.no_grad():
+            logits = lm_head(hidden_chunk).float()
+            if softcap:
+                logits = torch.tanh(logits / float(softcap)) * float(softcap)
+            return logits
+
+    return hidden, head_fn

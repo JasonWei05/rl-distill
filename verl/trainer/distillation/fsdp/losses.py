@@ -183,3 +183,62 @@ def compute_reverse_kl_student_topk(
     student_mass = q.sum(dim=-1)
     teacher_mass = teacher_topk_log_probs.exp().sum(dim=-1)
     return {"distillation_losses": distillation_losses, "student_mass": student_mass, "teacher_mass": teacher_mass}
+
+
+def compute_reverse_kl_student_topk_padded(
+    student_logits: torch.Tensor,
+    seq_lengths: torch.Tensor,
+    softcap: float | None,
+    teacher_hidden: torch.Tensor,
+    teacher_head,
+    topk: int,
+    chunk_rows: int = 1024,
+) -> dict:
+    """Memory-lean ``reverse_kl_student_topk`` on padded (bsz, seqlen, vocab) student logits (rl-distill fork).
+
+    Works sample by sample and chunk by chunk under activation checkpointing, so the peak extra memory is one chunk's
+    fp32 student and teacher logits (~1 GB each at 1024 rows x 262k vocab) instead of full-vocab fp32 copies of the whole
+    micro-batch (which OOMed at 6 GB per copy on 2026-09-13). The teacher is applied through its hidden states and LM
+    head per chunk (``teacher_head``), never as a full logits tensor. Returns (total_nnz,) tensors in cu_seqlens order.
+
+    Args:
+        student_logits: (bsz, seqlen, vocab) model logits (raw if ``softcap`` is given, otherwise already capped).
+        seq_lengths: (bsz,) real lengths.
+        softcap: final-logit softcap to apply to the student logits, or None.
+        teacher_hidden: (bsz, seqlen, H) teacher hidden states aligned with the student positions.
+        teacher_head: callable (rows, H) -> (rows, vocab) fp32 softcapped teacher logits.
+    """
+    from torch.utils.checkpoint import checkpoint
+
+    k = int(topk)
+
+    def chunk_fn(s_chunk: torch.Tensor, h_chunk: torch.Tensor):
+        s = s_chunk.float()
+        if softcap:
+            s = torch.tanh(s / float(softcap)) * float(softcap)
+        s_lse = torch.logsumexp(s, dim=-1, keepdim=True)
+        ids = torch.topk(s.detach(), k=min(k, s.shape[-1]), dim=-1).indices
+        s_lp = torch.gather(s, dim=-1, index=ids) - s_lse
+        with torch.no_grad():
+            t = teacher_head(h_chunk)
+            t_lp = torch.gather(t, dim=-1, index=ids) - torch.logsumexp(t, dim=-1, keepdim=True)
+            del t
+        q = s_lp.exp()
+        return (q * (s_lp - t_lp)).sum(dim=-1), q.sum(dim=-1), t_lp.exp().sum(dim=-1)
+
+    losses, smass, tmass = [], [], []
+    lengths = seq_lengths.tolist()
+    for j, n in enumerate(lengths):
+        for start in range(0, n, chunk_rows):
+            end = min(n, start + chunk_rows)
+            l, sm, tm = checkpoint(
+                chunk_fn, student_logits[j, start:end], teacher_hidden[j, start:end], use_reentrant=False
+            )
+            losses.append(l)
+            smass.append(sm)
+            tmass.append(tm)
+    return {
+        "distillation_losses": torch.cat(losses),
+        "student_mass": torch.cat(smass),
+        "teacher_mass": torch.cat(tmass),
+    }

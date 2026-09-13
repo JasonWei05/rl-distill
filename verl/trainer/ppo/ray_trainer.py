@@ -1312,6 +1312,9 @@ class RayPPOTrainer:
                 distillation_use_topk=distillation_use_topk,
                 distillation_teacher_in_actor=distillation_teacher_in_actor,
                 distillation_teacher_model_path=distillation_teacher_model_path,
+                distillation_topk=(
+                    int(self.distillation_config.distillation_loss.topk or 0) if distillation_teacher_in_actor else 0
+                ),
                 global_batch_size=ppo_mini_batch_size,
                 mini_batch_size=ppo_mini_batch_size,
                 epochs=ppo_epochs,
