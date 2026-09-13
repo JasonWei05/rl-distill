@@ -793,6 +793,22 @@ CANCELED at 12 s but left exactly one Kueue workload (`…-20260913-t7cym`), whi
 trains the v2 config with Kueue-level re-queue on preemption but no ScaleTrain status. Same signature as 2026-09-11 00:48Z (nightly,
 ~00:40–00:50Z) — to be raised with the ScaleTrain team. No new submissions until the platform accepts them again.
 
+**2026-09-13 05:14–06:08Z:** Kueue admitted all 13 remaining strays; each failed the poisoned preflight within ~2 min (verified: `run completion
+receipt has an invalid terminal step`). **07:47Z: the v2 workload's third pod held the node and the run started training** (ScaleTrain shows
+no job for it; Kueue re-queues it on preemption). First results:
+
+| step | distillation loss (teacher top-128 reverse KL, token-mean) | student mass on teacher top-128 | teacher mass | val mean@16 |
+|---|---|---|---|---|
+| 0 | — | — | — | 0.0777 |
+| 1 | 0.123 | 0.9978 | 0.9976 | |
+| 2–9 | 0.080–0.089 | 0.9975–0.9980 | 0.9968–0.9978 | |
+| 10 | 0.091 | 0.9974 | 0.9969 | 0.0748 |
+
+The loss starts where the offline measurement said it would (0.089 nats/token, §9.0c) and the student's mass on the teacher's support
+matches the teacher's own (0.9975 vs 0.9972), so the teacher-top-k truncation is not hiding a tail (§9.0d note (i)). Timing per step
+≈ 177 s (gen 15–100 s, teacher scoring 66 s, update 78 s) plus ~213 s validation and ~306 s checkpoint+upload every 10 steps → ≈ 14 h
+for 200 steps if the node holds. `actor/pg_loss` is reported but not part of the loss (`use_task_rewards=False`).
+
 **Hub cleanup (2026-09-12).** Both distilled-student repos (`JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base`) were pruned to
 `step_001000` (commits 71254c99 / 3dbd12c5) and the intermediate steps' LFS blobs permanently purged (0.47 TB + 1.01 TB; Hub storage
 counts every blob in git history, so a delete commit alone frees nothing). Old revisions still resolve for `step_001000` but no longer
