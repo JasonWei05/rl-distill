@@ -531,6 +531,20 @@ def main() -> None:
         help="Adopt an already-submitted job before launching any replacement attempt.",
     )
     parser.add_argument(
+        "--quick-cancel-seconds",
+        type=int,
+        default=300,
+        help="A job CANCELED within this many seconds of submission counts as a quick cancel (platform rejecting "
+        "submissions, mass cancellation); consecutive quick cancels back off and eventually stop the supervisor.",
+    )
+    parser.add_argument(
+        "--max-quick-cancels",
+        type=int,
+        default=3,
+        help="Stop relaunching after this many consecutive quick cancels (2026-09-13: 13 relaunches in 8 min while "
+        "ScaleTrain cancelled every submission within ~10 s).",
+    )
+    parser.add_argument(
         "--relaunch-on-cancel",
         action="store_true",
         help="Treat an external CANCELED like a preemption: relaunch (the run-file resumes from the newest S3 checkpoint).",
@@ -574,6 +588,7 @@ def main() -> None:
 
     attempt = 0
     consecutive_failures = 0
+    consecutive_quick_cancels = 0
     initial_job_id = args.initial_job_id
     image_uri = _command_image(command)
     while not args.stop_file.exists():
@@ -617,6 +632,7 @@ def main() -> None:
         }
         _write_state(args.state_file, state)
         _log(args.monitor_log, f"name={args.name} attempt={attempt} job_id={job_id} submitted")
+        submitted_monotonic = time.monotonic()
 
         last_status = None
         missing_status_polls = 0
@@ -710,13 +726,29 @@ def main() -> None:
                 return
             if status == "CANCELED":
                 if args.relaunch_on_cancel:
+                    lifetime = time.monotonic() - submitted_monotonic if "submitted_monotonic" in locals() else None
+                    quick = lifetime is not None and lifetime < args.quick_cancel_seconds
+                    consecutive_quick_cancels = consecutive_quick_cancels + 1 if quick else 0
+                    if consecutive_quick_cancels >= args.max_quick_cancels:
+                        _log(
+                            args.monitor_log,
+                            f"name={args.name} job_id={job_id} terminal=CANCELED after {lifetime:.0f}s; "
+                            f"{consecutive_quick_cancels} consecutive quick cancels (< {args.quick_cancel_seconds}s) -- "
+                            "the platform is cancelling submissions; supervisor stopping instead of storming",
+                        )
+                        _stop_pod_log_capture(pod_log_capture)
+                        return
+                    backoff = args.retry_seconds
+                    if quick:
+                        backoff = max(args.retry_seconds, args.failure_backoff_seconds * min(consecutive_quick_cancels, 10))
                     _log(
                         args.monitor_log,
-                        f"name={args.name} job_id={job_id} terminal=CANCELED (external); "
-                        "relaunching from latest complete checkpoint (--relaunch-on-cancel)",
+                        f"name={args.name} job_id={job_id} terminal=CANCELED (external"
+                        f"{f', quick #{consecutive_quick_cancels} after {lifetime:.0f}s' if quick else ''}); "
+                        f"relaunching from latest complete checkpoint after {backoff}s (--relaunch-on-cancel)",
                     )
                     _stop_pod_log_capture(pod_log_capture)
-                    time.sleep(args.retry_seconds)
+                    time.sleep(backoff)
                     break
                 _log(args.monitor_log, f"name={args.name} job_id={job_id} canceled; supervisor stopping")
                 _stop_pod_log_capture(pod_log_capture)
