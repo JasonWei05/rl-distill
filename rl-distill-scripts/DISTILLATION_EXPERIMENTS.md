@@ -900,6 +900,16 @@ this one submission to avoid creating a duplicate workload.
 0.158 → 0.085 → 0.071, student mass 0.9987 (own top-128), teacher mass on it 0.9964–0.9969, update 85–102 s / step 124–213 s; the step-3 update
 that OOMed before now completes — the chunked/checkpointed loss holds within memory with the 17 GB resident teacher.
 
+| step | loss (student-top-128 reverse KL, mean over the window) | student − teacher mass on the student's top-128 | val mean@16 | response length |
+|---|---|---|---|---|
+| 1–10 (warmup) | 0.087 (0.158 at step 1) | +0.0019 … +0.0024 | 0.077 at 10 | 176–307 |
+| 11–20 (warmup) | 0.081 | +0.0019 … +0.0031 | 0.096 at 20 | 177–233 |
+| 21–30 (full lr) | 0.072 | +0.0017 … +0.0021, flat | 0.108 at 30 | 173–277 |
+
+Contrast with §9.0d at the same point: there the gap had already turned negative by step 40 and the loss plateaued; here the gap is flat
+and positive (the student's top-128 carries ~0.2 % more of its own mass than the teacher does on that support, exactly the tail the old
+objective could not see), the loss keeps easing down at full learning rate, and response length shows no drift. Val 0.077 → 0.108 over 30 steps.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
