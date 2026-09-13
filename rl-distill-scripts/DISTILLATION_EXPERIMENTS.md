@@ -838,6 +838,9 @@ response length 1,759 tokens with 8.6 % of samples hitting the 8k cap, val@100 0
 so the pod runs until preempted (restart blocked by the poisoned root). **Verdict:** teacher-support truncated reverse KL is unusable
 for on-policy distillation of a student already close to the teacher — the loss is minimised by leaking mass into the unseen tail and
 on-policy sampling amplifies it. Use the sampled-token estimator (k1 + policy gradient), student-support top-k, or on-policy forward KL.
+**16:55Z: run ended by itself** — CUDA OOM in `update_actor` at step 101 (`Tried to allocate 9.62 GiB`, GPU 0 with 35 GiB already in use):
+the collapsed policy's 1.7k-token responses (8.6 % at the 8k cap, packed sequence length up to 71k) no longer fit the 12B update's
+memory budget. Pod exited rc=1; any Kueue retry hits the poisoned preflight. Final artefacts: `global_step_10..100` under the v2 root.
 
 **Hub cleanup (2026-09-12).** Both distilled-student repos (`JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base`) were pruned to
 `step_001000` (commits 71254c99 / 3dbd12c5) and the intermediate steps' LFS blobs permanently purged (0.47 TB + 1.01 TB; Hub storage
