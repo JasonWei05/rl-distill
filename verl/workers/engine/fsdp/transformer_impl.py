@@ -1748,7 +1748,44 @@ class FSDPEngineWithLMHead(FSDPEngine):
                                     for c in packed_logits.split(_rows)
                                 ]
                             )
-                        outputs = logits_processor_func(student_logits=packed_logits.unsqueeze(0), data=micro_batch)
+                        processor_kwargs = {}
+                        if tu.get_non_tensor_data(data=micro_batch, key="distillation_teacher_in_actor", default=False):
+                            # rl-distill fork: student-support reverse KL needs the teacher's logits at the same
+                            # positions. Run the frozen teacher on the same padded inputs and pack identically.
+                            from verl.trainer.distillation.fsdp.teacher_in_actor import teacher_logits_padded
+
+                            teacher_path = tu.get_non_tensor_data(
+                                data=micro_batch, key="distillation_teacher_model_path", default=None
+                            )
+                            assert teacher_path, "distillation_teacher_model_path missing for teacher-in-actor distillation"
+                            pad_token_id = tu.get_non_tensor_data(data=micro_batch, key="pad_token_id", default=0)
+                            bsz = len(offsets_list) - 1
+                            max_len = int(seq_lengths.max().item())
+                            teacher_input_ids = torch.nested.to_padded_tensor(
+                                input_ids, padding=pad_token_id, output_size=(bsz, max_len)
+                            )
+                            teacher_position_ids = micro_batch["position_ids"]
+                            if teacher_position_ids.dim() == 3:
+                                teacher_position_ids = torch.nested.to_padded_tensor(
+                                    teacher_position_ids, padding=0, output_size=(bsz, 4, max_len)
+                                ).transpose(0, 1)
+                            else:
+                                teacher_position_ids = torch.nested.to_padded_tensor(
+                                    teacher_position_ids, padding=0, output_size=(bsz, max_len)
+                                )
+                            teacher_attention_mask = make_padded_attention_mask(
+                                seq_lengths.to(device=teacher_input_ids.device), max_sequence_length=max_len
+                            )
+                            teacher_padded = teacher_logits_padded(
+                                teacher_path, teacher_input_ids, teacher_attention_mask, teacher_position_ids
+                            )
+                            processor_kwargs["teacher_logits"] = torch.cat(
+                                [teacher_padded[j, : offsets_list[j + 1] - offsets_list[j]] for j in range(bsz)]
+                            ).unsqueeze(0)
+                            del teacher_padded
+                        outputs = logits_processor_func(
+                            student_logits=packed_logits.unsqueeze(0), data=micro_batch, **processor_kwargs
+                        )
                         for k, v in outputs.items():
                             v = v.squeeze(0)
                             assert v.shape[0] == int(cu_seqlens[-1]), f"{k} shape {v.shape} vs total_nnz {int(cu_seqlens[-1])}"

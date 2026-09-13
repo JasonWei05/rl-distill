@@ -5,8 +5,9 @@
 # Each step: the 12B student samples ONE response per prompt for 128 medium prompts (12-shot prompt, T=1.0,
 # top_p=1.0, top_k=-1, stop on <end_of_turn>/<start_of_turn>, 8k max), a colocated vLLM copy of the E4B base
 # returns its top-128 (token, logprob) at every response position, and the actor takes ONE update on the
-# 128 sequences with verl's `reverse_kl_topk` loss (sum over the teacher's top-128 of q_s (log q_s - log p_t),
-# token-mean, backpropagated through the student logits — no policy-gradient term, no task reward).
+# 128 sequences with the reverse KL on the STUDENT's top-128 (`reverse_kl_student_topk`: sum over top-128(q_s) of
+# q_s (log q_s - log p_t), teacher logits from a frozen in-actor forward pass; token-mean, backpropagated through the
+# student logits — no policy-gradient term, no task reward). The teacher-support variant is kept as an option.
 # Off-policy counterpart: 128 teacher traces/step, teacher top-128 forward KL, lr 2e-6, 1000 steps.
 #
 # Runtime = the Gemma 4 RL run-file (run_gemma4_pt_deepscaler_4of4strict_rl.sh) with ONPOLICY_DISTILL_ENABLE=True,
@@ -24,7 +25,7 @@ INIT_REVISION="${INIT_REVISION:-92368d1f020e685436113d93dc1f75c64033570f}"   # c
 INIT_SUBFOLDER="${INIT_SUBFOLDER:-step_001000}"
 TEACHER_REPO="${TEACHER_REPO:-google/gemma-4-E4B}"
 TEACHER_REVISION="${TEACHER_REVISION:-411aa17b749aa952df1359d2dcea73917a544d9a}"   # same pin as the trace generation
-RUN_TAG="${RUN_TAG:-onpolicy-rkl128-from-e4bbase-distill}"
+RUN_TAG="${RUN_TAG:-onpolicy-studenttop128-from-e4bbase-distill}"
 S3_BASE="${S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-12b-from-e4bbase-distill-onpolicy}"
 TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-1000}"
 SAVE_FREQ="${SAVE_FREQ:-50}"
@@ -40,7 +41,16 @@ ENV_VARS+=",DATA_SEED=42,RUN_NAME_SUFFIX=${RUN_TAG},RUN_SLOT=gemma4-12b-medium-$
 ENV_VARS+=",EXP_NAME=OnPolicyDistill-gemma4-12b-from-e4b-base-medium-${RUN_TAG},HF_PUSH_ENABLE=${HF_PUSH_ENABLE:-False},HF_PUSH_REQUIRED=${HF_PUSH_REQUIRED:-False},HF_PUSH_REPO=JWei05/OnPolicyDistill-gemma4-e4b-base-medium-to-12b-${RUN_TAG}"
 # on-policy distillation objective (teacher + loss); everything else stays the RL contract
 ENV_VARS+=",ONPOLICY_DISTILL_ENABLE=True,ONPOLICY_DISTILL_TEACHER_REPO=${TEACHER_REPO},ONPOLICY_DISTILL_TEACHER_REVISION=${TEACHER_REVISION}"
-ENV_VARS+=",ONPOLICY_DISTILL_LOSS_MODE=${ONPOLICY_DISTILL_LOSS_MODE:-reverse_kl_topk},ONPOLICY_DISTILL_TOPK=128,ONPOLICY_DISTILL_TEACHER_TP=${ONPOLICY_DISTILL_TEACHER_TP:-2}"
+# Loss modes: reverse_kl_topk = teacher-support truncation via a colocated vLLM teacher (collapsed on 2026-09-13, see
+# DISTILLATION_EXPERIMENTS.md §9.0d); reverse_kl_student_topk = STUDENT-support truncation with the frozen E4B teacher run
+# as an extra forward pass inside the actor update (no teacher server; ~17 GB bf16 teacher weights per GPU, so the
+# student engine keeps a smaller footprint below). Default is now the student-support mode.
+ONPOLICY_DISTILL_LOSS_MODE="${ONPOLICY_DISTILL_LOSS_MODE:-reverse_kl_student_topk}"
+if [ "${ONPOLICY_DISTILL_LOSS_MODE}" = reverse_kl_student_topk ]; then
+  ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.30}"
+  VLLM_KV_CACHE_MEMORY_BYTES="${VLLM_KV_CACHE_MEMORY_BYTES:-3221225472}"
+fi
+ENV_VARS+=",ONPOLICY_DISTILL_LOSS_MODE=${ONPOLICY_DISTILL_LOSS_MODE},ONPOLICY_DISTILL_TOPK=128,ONPOLICY_DISTILL_TEACHER_TP=${ONPOLICY_DISTILL_TEACHER_TP:-2}"
 ENV_VARS+=",ONPOLICY_DISTILL_TEACHER_GPU_MEM_UTIL=${ONPOLICY_DISTILL_TEACHER_GPU_MEM_UTIL:-0.20},ONPOLICY_DISTILL_TEACHER_SLEEP=${ONPOLICY_DISTILL_TEACHER_SLEEP:-True}"
 ENV_VARS+=",ONPOLICY_DISTILL_USE_TASK_REWARDS=False,ONPOLICY_DISTILL_USE_POLICY_GRADIENT=False,ONPOLICY_DISTILL_LOSS_COEF=1.0"
 # batch contract mirroring the off-policy recipe: 128 sequences per step, one update per step (pure on-policy)

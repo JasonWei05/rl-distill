@@ -143,3 +143,43 @@ def compute_forward_kl_topk(
     distillation_losses = kl_divergence(log_q=student_topk_log_probs, log_p=teacher_topk_log_probs)
 
     return {"distillation_losses": distillation_losses, "student_mass": student_mass, "teacher_mass": teacher_mass}
+
+
+def compute_reverse_kl_student_topk(
+    student_logits: torch.Tensor,
+    teacher_logits: torch.Tensor,
+    config: DistillationConfig,
+) -> dict:
+    """Reverse KL on the student's top-k support (rl-distill fork).
+
+    Sum over v in top-k(student) of q(v) * (log q(v) - log p(v)), with q the student and p the teacher, both full-vocab
+    softmaxes of the given logits (softcapped upstream). Unlike ``compute_reverse_kl_topk`` the support is chosen by the
+    student, so mass the student moves anywhere is always inside the sum (>= 99 % of q by construction for k=128).
+
+    Args:
+        student_logits: (1, N, vocab) with grad, N packed positions.
+        teacher_logits: (1, N, vocab), no grad, same positions/order as the student logits.
+    Returns:
+        distillation_losses, student_mass (student's top-k mass), teacher_mass (teacher's mass on the student's top-k),
+        each (1, N).
+    """
+    k = int(config.distillation_loss.topk)
+    assert student_logits.shape == teacher_logits.shape, (student_logits.shape, teacher_logits.shape)
+    student_f = student_logits.float()
+    student_lse = torch.logsumexp(student_f, dim=-1, keepdim=True)
+    topk_ids = torch.topk(student_f.detach(), k=min(k, student_f.shape[-1]), dim=-1).indices
+    student_topk_log_probs = torch.gather(student_f, dim=-1, index=topk_ids) - student_lse
+    with torch.no_grad():
+        teacher_f = teacher_logits.float()
+        teacher_lse = torch.logsumexp(teacher_f, dim=-1, keepdim=True)
+        teacher_topk_log_probs = torch.gather(teacher_f, dim=-1, index=topk_ids) - teacher_lse
+        del teacher_f
+    loss_config: DistillationLossConfig = config.distillation_loss
+    if loss_config.log_prob_min_clamp is not None:
+        student_topk_log_probs = student_topk_log_probs.clamp_min(loss_config.log_prob_min_clamp)
+        teacher_topk_log_probs = teacher_topk_log_probs.clamp_min(loss_config.log_prob_min_clamp)
+    q = student_topk_log_probs.exp()
+    distillation_losses = (q * (student_topk_log_probs - teacher_topk_log_probs)).sum(dim=-1)
+    student_mass = q.sum(dim=-1)
+    teacher_mass = teacher_topk_log_probs.exp().sum(dim=-1)
+    return {"distillation_losses": distillation_losses, "student_mass": student_mass, "teacher_mass": teacher_mass}

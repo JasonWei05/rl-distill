@@ -57,6 +57,9 @@ class DistillationLossSettings(BaseConfig):
     names: str | list[str] = field(default_factory=list)
     use_topk: bool = False
     use_estimator: bool = False
+    # rl-distill fork: the teacher is evaluated by an extra frozen forward pass inside the actor update (on the
+    # student's own top-k support) instead of a separate vLLM teacher server. No teacher rollout workers are created.
+    teacher_in_actor: bool = False
 
     _mutable_fields = {"names"}
 
@@ -123,6 +126,7 @@ def compute_topk_loss(
     data: TensorDict,
     student_logits: torch.Tensor,
     data_format: str,
+    teacher_logits: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Compute the topk loss in logit processor.
 
@@ -132,6 +136,25 @@ def compute_topk_loss(
     - teacher_mass: (bsz, seqlen/cp_size)
     """
     loss_mode = distillation_config.distillation_loss.loss_mode
+    if loss_mode == "reverse_kl_student_topk":
+        # rl-distill fork: reverse KL on the STUDENT's top-k support; the teacher's logits for the same positions
+        # come from an in-actor forward pass (see fsdp/teacher_in_actor.py), not from data["teacher_logprobs"].
+        if config.strategy not in ("fsdp", "fsdp2"):
+            raise NotImplementedError(f"reverse_kl_student_topk is implemented for FSDP only, got {config.strategy=}")
+        if teacher_logits is None:
+            raise ValueError(
+                "reverse_kl_student_topk needs teacher_logits from the engine (padded Gemma 4 path); "
+                "the remove-padding path does not provide them yet"
+            )
+        import verl.trainer.distillation.fsdp.losses as fsdp_losses
+
+        outputs = fsdp_losses.compute_reverse_kl_student_topk(
+            student_logits=student_logits, teacher_logits=teacher_logits, config=distillation_config
+        )
+        expected_shape = student_logits.shape[:2]
+        for k, v in outputs.items():
+            assert v.shape == expected_shape, f"Expected shape {expected_shape}, but got {v.shape} for {k=}."
+        return outputs
     match config.strategy:
         case "fsdp" | "fsdp2":
             import verl.trainer.distillation.fsdp.losses as fsdp_losses
@@ -181,6 +204,7 @@ def distillation_ppo_loss(
     dp_group=None,
     student_logits: torch.Tensor = None,
     data_format: str = "thd",
+    teacher_logits: torch.Tensor = None,
 ):
     """Loss function used both for logit processor and final policy loss.
     - student_logits is not None, compute the topk loss in logit processor.
@@ -213,7 +237,9 @@ def distillation_ppo_loss(
 
     # Called as logits processor
     if student_logits is not None:
-        return compute_topk_loss(config, distillation_config, data, student_logits, data_format)
+        return compute_topk_loss(
+            config, distillation_config, data, student_logits, data_format, teacher_logits=teacher_logits
+        )
 
     # Called as final policy loss
     distillation_loss_config = distillation_config.distillation_loss
@@ -384,6 +410,26 @@ def compute_reverse_kl_topk(
     distillation_losses = distillation_losses.clamp_min(0.0)
 
     return distillation_losses, distillation_metrics
+
+
+@register_distillation_loss(  # type: ignore[arg-type]
+    DistillationLossSettings(names=["reverse_kl_student_topk"], use_topk=True, teacher_in_actor=True)
+)
+def compute_reverse_kl_student_topk(
+    config: ActorConfig,
+    distillation_config: DistillationConfig,
+    model_output: dict,
+    data: TensorDict,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    """Reverse KL truncated to the *student's* top-k support (rl-distill fork).
+
+    Same per-token payload as ``reverse_kl_topk`` (``distillation_losses``, ``student_mass``, ``teacher_mass``) but the
+    support is the student's own top-k, so every token the student puts mass on is inside the sum and the loss cannot
+    be lowered by leaking mass into an unseen tail (the failure mode of the teacher-support version, 2026-09-13).
+    ``student_mass`` is the student's top-k mass (>= 0.99 by construction); ``teacher_mass`` is the teacher's mass on
+    the student's top-k -- their gap is the diagnostic to watch (should stay small and stable).
+    """
+    return compute_reverse_kl_topk(config, distillation_config, model_output, data)
 
 
 @register_distillation_loss(

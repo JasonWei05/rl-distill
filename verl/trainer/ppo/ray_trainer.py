@@ -891,6 +891,10 @@ class RayPPOTrainer:
         self.async_rollout_mode = True
 
         # initialize teacher loop manager
+        if is_distillation_enabled(self.config.get("distillation")):
+            # rl-distill fork: the dataclass is needed by _update_actor for every distillation mode, including the
+            # teacher-in-actor modes that create no teacher servers.
+            self.distillation_config: DistillationConfig = omega_conf_to_dataclass(self.config.distillation)
         if self.use_teacher_policy:
             from verl.experimental.teacher_loop import TeacherModelManager
 
@@ -899,7 +903,6 @@ class RayPPOTrainer:
                 config=self.config.distillation,
                 resource_pool=teacher_resource_pool,
             )
-            self.distillation_config: DistillationConfig = omega_conf_to_dataclass(self.config.distillation)
         else:
             self.teacher_model_manager = None
             self.distillation_config = None
@@ -1284,10 +1287,18 @@ class RayPPOTrainer:
             # step 2: convert from padding to no-padding
             batch_td = left_right_2_no_padding(batch_td)
             calculate_entropy = self.config.actor_rollout_ref.actor.entropy_coeff != 0.0
+            distillation_enabled = is_distillation_enabled(self.config.get("distillation"))
             distillation_use_topk = (
-                self.distillation_config.distillation_loss.loss_settings.use_topk
-                if is_distillation_enabled(self.config.get("distillation"))
+                self.distillation_config.distillation_loss.loss_settings.use_topk if distillation_enabled else False
+            )
+            # rl-distill fork: teacher-in-actor modes (reverse_kl_student_topk) need the teacher path in the engine.
+            distillation_teacher_in_actor = (
+                bool(getattr(self.distillation_config.distillation_loss.loss_settings, "teacher_in_actor", False))
+                if distillation_enabled
                 else False
+            )
+            distillation_teacher_model_path = (
+                str(self.distillation_config.teacher_model.model_path) if distillation_teacher_in_actor else ""
             )
             ppo_mini_batch_size = self.config.actor_rollout_ref.actor.ppo_mini_batch_size
             ppo_mini_batch_size = ppo_mini_batch_size * self.config.actor_rollout_ref.rollout.n
@@ -1298,6 +1309,8 @@ class RayPPOTrainer:
                 batch_td,
                 calculate_entropy=calculate_entropy,
                 distillation_use_topk=distillation_use_topk,
+                distillation_teacher_in_actor=distillation_teacher_in_actor,
+                distillation_teacher_model_path=distillation_teacher_model_path,
                 global_batch_size=ppo_mini_batch_size,
                 mini_batch_size=ppo_mini_batch_size,
                 epochs=ppo_epochs,

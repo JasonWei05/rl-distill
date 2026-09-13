@@ -83,7 +83,14 @@ def need_teacher_policy(
     config: DictConfig,
 ) -> bool:
     """Given the config, do we need distillation policy."""
-    return is_distillation_enabled(config.get("distillation"))
+    distillation = config.get("distillation")
+    if not is_distillation_enabled(distillation):
+        return False
+    # rl-distill fork: teacher-in-actor loss modes evaluate the teacher inside the actor update; no teacher servers.
+    from verl.trainer.distillation.losses import get_distillation_loss_settings
+
+    settings = get_distillation_loss_settings(distillation.distillation_loss.loss_mode)
+    return not getattr(settings, "teacher_in_actor", False)
 
 
 def need_reward_model(
