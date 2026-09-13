@@ -850,6 +850,26 @@ serve the removed steps. The final exports were also copied to S3:
 verified) and `…/Distill-gemma4-e4b-base-medium-to-26b-base/step_001000/` (53 GB). The full training checkpoints (weights + Adam) at
 steps 250/500/750/1000 remain under `s3://scale-ml/genai/rl-distill/gemma4-e4b-base-distill-ckpts-v1/`.
 
+### 9.0e On-policy distillation, take 2: reverse KL on the *student's* top-128 (launched 2026-09-13 17:17Z)
+
+**Implementation (commit e2b8849f).** New loss mode `reverse_kl_student_topk` (`verl/trainer/distillation/losses.py`, registered with a
+new `DistillationLossSettings.teacher_in_actor=True`): per position, Σ over top-128(q_s) of q_s (log q_s − log p_t), full-vocab softmaxes of
+both models. The teacher's logits come from an **extra frozen forward pass inside the actor update** — each actor rank lazily loads the
+E4B base (bf16, sdpa, ~17 GB) and runs it on the same padded inputs as the student (`verl/trainer/distillation/fsdp/teacher_in_actor.py`,
+hooked into the padded branch of the FSDP engine next to the student's packed logits). No vLLM teacher server is created
+(`need_teacher_policy` is False for teacher-in-actor modes) and no `teacher_logprobs` payload is needed. Everything else (rollout, data,
+checkpoints, validation, S3-only saving) is unchanged from §9.0d. CPU test: with k = vocab the loss equals the exact reverse KL to 6e-7;
+with k = 8 it equals the brute-force partial sum; moving student mass off its own top token *raises* the loss (the gaming direction of
+§9.0d is now penalised). Student engine footprint lowered to util 0.30 / 3 GiB KV to make room for the resident teacher.
+
+**Launch.** `g4-12b-onpolicy-stk` = job_dajdlful77qg07nj7njg (borrowing, priority high, 8 GPUs) — ScaleTrain accepted it and Kueue admitted
+it within a minute (the instant-cancel condition of 00:37–04:47Z had cleared). Same recipe: distilled 12B `step_001000` student, E4B base
+teacher, 128 prompts × 1 sample, lr 5e-7 constant, warmup 20, 200 steps, SAVE_FREQ 10 (S3 only). `RUN_TAG=onpolicy-studenttop128-from-e4bbase-distill`;
+S3 `…-onpolicy-full-checkpoints/12b-medium-onpolicy-studenttop128-from-e4bbase-distill/`; W&B run id
+`g4-onpolicy-12b-medium-onpolicy-studenttop128-from-e4bbase-distill-s42-v1`. Supervisor `.scale_train_supervisors/g4-12b-onpolicy-stk-20260913/`
+(quick-cancel cap 2). Diagnostics: `actor/distillation/student_mass` is now the student's own top-128 mass (≈ 0.998 by construction) and
+`teacher_mass` is the teacher's mass on the student's support — the loss starts ≈ 0.089 (§9.0c) and cannot be lowered by tail leakage.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
