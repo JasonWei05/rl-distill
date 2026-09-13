@@ -891,7 +891,11 @@ sample in 1024-row chunks under activation checkpointing straight from the padde
 hidden states with a chunked LM head + softcap (as in `reverse_kl_topk.py`), so the peak extra memory is ~1 GB per chunk. Because the
 checkpointed chunks re-read the student logits in backward, the in-place logits-gradient trick is disabled in this mode (one extra bf16
 gradient tensor). CPU test: values and gradients match the packed reference to 2e-7 / 4e-8; padding positions get zero gradient.
-Relaunch scheduled ~19:00Z (rate-limit spacing).
+Relaunch at 18:53Z (job_dajf2dul77qg07nj7npg) was CANCELED by ScaleTrain 8 s after submission despite a 21-minute gap since the last
+failure, so the trigger is not a simple resubmission cooldown (accepted: 17:17, 17:27, 18:14; cancelled: 17:42, 17:44, 18:53). As with the
+v2 run, the cancelled submission still created a Kueue workload (`…-stk-…-1yhbp`, carrying the fixed code), which is now the single
+pending copy of this run: it trains when admitted, re-queues on preemption, and has no ScaleTrain status. The supervisor was stopped after
+this one submission to avoid creating a duplicate workload.
 
 ### 9.1 Results
 
