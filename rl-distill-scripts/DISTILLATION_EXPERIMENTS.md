@@ -884,6 +884,14 @@ engine (util 0.30 / 4 GiB KV) and the CPU-offload actor. Step 1: loss 0.135 (stu
 §9.0d, 0.123 → ~0.085 from step 2), student mass 0.9987 (its own top-128, matches the offline 0.998), teacher mass on the student's support
 0.9965, response length 193. Timing 134 s/step (gen 18 s, update 99 s incl. the teacher forward, no teacher-scoring phase) vs 177 s for
 the vLLM-teacher variant. Both strays from the rate-limited resubmissions were admitted meanwhile and failed at the attempt-2 bug as expected.
+**18:32Z: OOM at step 3** (`Tried to allocate 6.15 GiB`, actor process at 47.8 GiB with the student engine holding 30.4 GiB): the first
+loss implementation materialised full-vocabulary fp32 copies of both the student and teacher logits (6 GB each on a ~6k-token sequence)
+plus a packed bf16 copy, on top of the 17 GB resident teacher. Rewritten (commit on 2026-09-13 ~18:45Z): the loss is computed sample by
+sample in 1024-row chunks under activation checkpointing straight from the padded student logits, and the teacher is applied through its
+hidden states with a chunked LM head + softcap (as in `reverse_kl_topk.py`), so the peak extra memory is ~1 GB per chunk. Because the
+checkpointed chunks re-read the student logits in backward, the in-place logits-gradient trick is disabled in this mode (one extra bf16
+gradient tensor). CPU test: values and gradients match the packed reference to 2e-7 / 4e-8; padding positions get zero gradient.
+Relaunch scheduled ~19:00Z (rate-limit spacing).
 
 ### 9.1 Results
 
