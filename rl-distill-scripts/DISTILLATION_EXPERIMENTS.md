@@ -870,6 +870,14 @@ S3 `…-onpolicy-full-checkpoints/12b-medium-onpolicy-studenttop128-from-e4bbase
 (quick-cancel cap 2). Diagnostics: `actor/distillation/student_mass` is now the student's own top-128 mass (≈ 0.998 by construction) and
 `teacher_mass` is the teacher's mass on the student's support — the loss starts ≈ 0.089 (§9.0c) and cannot be lowered by tail leakage.
 
+**Startup attempts (17:17–17:44Z).** Attempt 1 died at vLLM init: the 3 GiB student KV cache I set for headroom is below vLLM's 3.94 GiB minimum
+for one 12,288-token request (fixed: 4 GiB, commit 4613655d). Attempt 2 died at the first update: upstream's `init_workers` else-branch resets
+`self.distillation_config = None` when no teacher servers are created, which the new teacher-in-actor mode relies on (fixed: commit 0b1ccc61).
+Both attempts were accepted by ScaleTrain, but the supervisor's two rapid resubmissions after attempt 2 (17:42Z, 17:44Z) were CANCELED within
+8 s each — the same instant-cancel behaviour as 00:37–04:47Z, now consistent with a resubmission rate limit rather than an outage; the
+supervisor stopped itself after two quick cancels as designed. Relaunch of the fixed code scheduled for ~18:13Z (failure backoff raised
+to 900 s). The two cancelled submissions left Kueue workloads carrying the attempt-2 code; if admitted they fail at the same point.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
