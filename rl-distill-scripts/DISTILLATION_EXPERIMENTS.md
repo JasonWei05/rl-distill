@@ -817,6 +817,12 @@ the student is slowly moving ~0.1 % of its per-token mass outside the teacher's 
 (note (i) above; the per-token clamp at 0 also hides negative partial sums). Tiny in absolute terms, but it is the predicted blind spot.
 Decision rule: if the gap passes −0.003 or validation keeps falling, switch the next run to the sampled-token estimator
 (`loss_mode=k1`, `use_policy_gradient=True`) or a hybrid; the current run continues to 200 steps for the clean comparison.
+**Steps 51–60 (12:35Z):** loss mean 0.073 (plateau since step 30), val@60 0.088 (flat), response length 186–327; mass gap −0.0009 → −0.0021,
+monotone every step (−0.00087, −0.00109, −0.00126, −0.00138, −0.00143, −0.00186, −0.00190, −0.00204, −0.00210, −0.00205). On this
+trajectory it crosses −0.003 around step 75–90. Prepared follow-up (needs a working ScaleTrain): same launcher with
+`ONPOLICY_DISTILL_LOSS_MODE=k1 ONPOLICY_DISTILL_USE_POLICY_GRADIENT=True RUN_TAG=onpolicy-k1pg-from-e4bbase-distill` (sampled-token
+reverse-KL estimator as a policy-gradient advantage, unbiased over the full vocabulary; the teacher then returns only the sampled token's
+log-prob).
 
 **Hub cleanup (2026-09-12).** Both distilled-student repos (`JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base`) were pruned to
 `step_001000` (commits 71254c99 / 3dbd12c5) and the intermediate steps' LFS blobs permanently purged (0.47 TB + 1.01 TB; Hub storage
