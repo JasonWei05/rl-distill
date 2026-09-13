@@ -905,7 +905,8 @@ class RayPPOTrainer:
             )
         else:
             self.teacher_model_manager = None
-            self.distillation_config = None
+            if not is_distillation_enabled(self.config.get("distillation")):
+                self.distillation_config = None
 
         # Support custom AgentLoopManager via config
         manager_class_fqn = self.config.actor_rollout_ref.rollout.get("agent", {}).get("agent_loop_manager_class")
