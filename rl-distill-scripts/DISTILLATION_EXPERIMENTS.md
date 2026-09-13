@@ -780,6 +780,19 @@ the §9.0c reverse KL of this student) and `val-core/math/acc/mean@16` every 10 
 weight-only HF snapshot under `actor/huggingface/`, and `publish-best-hf` copies the best step's snapshot to `RUN_ARTIFACT_S3_URI/best_hf/`.
 Supervisor dir `.scale_train_supervisors/g4-12b-onpolicy-med-20260912/`.
 
+**2026-09-13 00:37Z platform incident.** ScaleTrain flipped every job of this account to CANCELED at once (this job, the 12B RL job,
+and the unrelated PPO controller's rows) while Kubernetes kept running/queueing the workloads: the RL pod trained on (step 84 at
+01:24Z), and the cancelled on-policy submission stayed Pending in Kueue. The supervisor treated the cancel as a preemption and
+resubmitted 13× in 8 min; every new submission was CANCELED within ~10 s, each leaving another Pending Kueue workload (our role
+cannot list or delete jobsets/workloads; re-issuing `scale-train cancel` on an already-CANCELED job returns True but removes nothing).
+Containment: all supervisors stopped; supervisor patched with a quick-cancel backoff + stop cap (commit 005e986e); the abandoned S3 root
+`…-onpolicy-full-checkpoints/12b-medium-onpolicy-rkl128-from-e4bbase-distill/` holds a deliberately invalid `run_complete.json` so any
+of its 14 stray workloads that Kueue admits fails the completion preflight within minutes instead of training. The real run was moved to
+`RUN_TAG=onpolicy-rkl128-from-e4bbase-distill-v2` (new S3 roots + W&B id); its single submission (job_daivm2er1t20089l77r0) was also
+CANCELED at 12 s but left exactly one Kueue workload (`…-20260913-t7cym`), which is therefore the de-facto pending run: if admitted it
+trains the v2 config with Kueue-level re-queue on preemption but no ScaleTrain status. Same signature as 2026-09-11 00:48Z (nightly,
+~00:40–00:50Z) — to be raised with the ScaleTrain team. No new submissions until the platform accepts them again.
+
 **Hub cleanup (2026-09-12).** Both distilled-student repos (`JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base`) were pruned to
 `step_001000` (commits 71254c99 / 3dbd12c5) and the intermediate steps' LFS blobs permanently purged (0.47 TB + 1.01 TB; Hub storage
 counts every blob in git history, so a delete commit alone frees nothing). Old revisions still resolve for `step_001000` but no longer
