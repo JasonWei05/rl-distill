@@ -878,6 +878,13 @@ Both attempts were accepted by ScaleTrain, but the supervisor's two rapid resubm
 supervisor stopped itself after two quick cancels as designed. Relaunch of the fixed code scheduled for ~18:13Z (failure backoff raised
 to 900 s). The two cancelled submissions left Kueue workloads carrying the attempt-2 code; if admitted they fail at the same point.
 
+**18:14Z relaunch (job_dajeft7s3ggg08df40eg) accepted; in-actor teacher path verified at step 1 (18:28Z).** Each rank logged
+`TEACHER_IN_ACTOR_LOADED … class=Gemma4ForConditionalGeneration softcap=30.0`; no OOM with the 17 GB teacher resident next to the student
+engine (util 0.30 / 4 GiB KV) and the CPU-offload actor. Step 1: loss 0.135 (student-top-128 reverse KL; the first batch was also elevated in
+§9.0d, 0.123 → ~0.085 from step 2), student mass 0.9987 (its own top-128, matches the offline 0.998), teacher mass on the student's support
+0.9965, response length 193. Timing 134 s/step (gen 18 s, update 99 s incl. the teacher forward, no teacher-scoring phase) vs 177 s for
+the vLLM-teacher variant. Both strays from the rate-limited resubmissions were admitted meanwhile and failed at the attempt-2 bug as expected.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
