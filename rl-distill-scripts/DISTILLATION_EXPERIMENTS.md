@@ -909,6 +909,12 @@ that OOMed before now completes — the chunked/checkpointed loss holds within m
 Contrast with §9.0d at the same point: there the gap had already turned negative by step 40 and the loss plateaued; here the gap is flat
 and positive (the student's top-128 carries ~0.2 % more of its own mass than the teacher does on that support, exactly the tail the old
 objective could not see), the loss keeps easing down at full learning rate, and response length shows no drift. Val 0.077 → 0.108 over 30 steps.
+| 31–40 | 0.070 (0.060 at 39–40) | +0.0015 … +0.0021 | 0.101 at 40 | 177–255 |
+| 41–50 | 0.074 (0.055–0.084, noisy) | +0.0018 … +0.0022, flat | 0.091 at 50 | 196–248 |
+
+Steps 31–50 (23:19Z): the per-step loss is noisy (batch composition) with the window mean flat at ~0.07 since step 30; the mass gap has not
+moved in 50 steps and lengths stay ~200–250, i.e. none of the §9.0d degeneration signatures. Validation 0.108 → 0.101 → 0.091 over
+steps 30–50 is within the ±0.02 noise of 128 questions but worth watching against the 0.078 start.
 
 ### 9.1 Results
 
