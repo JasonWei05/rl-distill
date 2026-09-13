@@ -823,6 +823,10 @@ trajectory it crosses −0.003 around step 75–90. Prepared follow-up (needs a 
 `ONPOLICY_DISTILL_LOSS_MODE=k1 ONPOLICY_DISTILL_USE_POLICY_GRADIENT=True RUN_TAG=onpolicy-k1pg-from-e4bbase-distill` (sampled-token
 reverse-KL estimator as a policy-gradient advantage, unbiased over the full vocabulary; the teacher then returns only the sampled token's
 log-prob).
+**Steps 61–70 (13:27Z): rule triggered.** Mass gap −0.0020 → −0.0042 (crossed −0.003 at step 66: −0.00348, −0.00333, −0.00398, −0.00387,
+−0.00415); loss flat 0.062–0.078; val@70 0.0875 (flat since 50); response length drifting up (320–390 at 8 of the last 10 steps vs ~200 for
+the teacher). The teacher-top-128 reverse KL is confirmed to leak mass into the unseen tail on this student. Recommendation: launch the
+k1 + policy-gradient variant as soon as ScaleTrain accepts submissions; keep this run as the baseline (to 100 or 200 steps, user's call).
 
 **Hub cleanup (2026-09-12).** Both distilled-student repos (`JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base`) were pruned to
 `step_001000` (commits 71254c99 / 3dbd12c5) and the intermediate steps' LFS blobs permanently purged (0.47 TB + 1.01 TB; Hub storage
