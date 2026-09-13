@@ -829,6 +829,10 @@ the teacher). The teacher-top-128 reverse KL is confirmed to leak mass into the 
 k1 + policy-gradient variant as soon as ScaleTrain accepts submissions; keep this run as the baseline (to 100 or 200 steps, user's call).
 **Steps 71–80 (14:23Z):** gap accelerating, −0.0042 → −0.0093 (−0.00745, −0.00768, −0.00926, −0.00931 at 77–80); val@80 0.083; loss 0.067–0.080;
 length 300–360. The leak is compounding rather than saturating.
+**Steps 81–90 (15:24Z): degenerate.** Gap −0.0093 → −0.036 (−0.0175, −0.0204, −0.0246, −0.0290, −0.0364 at 86–90); the *truncated* loss now
+FALLS (0.064 → 0.039) precisely because mass leaves the teacher's support; response length 400–570; val@90 0.058 (below the 0.078 start).
+The objective is being gamed as predicted in note (i). Plan: stop at the step-100 checkpoint (k8s-only run: poison the v2 root so a
+restart fails preflight, then delete the pod) and launch the k1 + policy-gradient variant when ScaleTrain accepts submissions.
 
 **Hub cleanup (2026-09-12).** Both distilled-student repos (`JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base`) were pruned to
 `step_001000` (commits 71254c99 / 3dbd12c5) and the intermediate steps' LFS blobs permanently purged (0.47 TB + 1.01 TB; Hub storage
