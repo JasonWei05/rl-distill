@@ -833,6 +833,11 @@ length 300–360. The leak is compounding rather than saturating.
 FALLS (0.064 → 0.039) precisely because mass leaves the teacher's support; response length 400–570; val@90 0.058 (below the 0.078 start).
 The objective is being gamed as predicted in note (i). Plan: stop at the step-100 checkpoint (k8s-only run: poison the v2 root so a
 restart fails preflight, then delete the pod) and launch the k1 + policy-gradient variant when ScaleTrain accepts submissions.
+**Step 100 (16:53Z): collapsed.** Truncated loss 0.0046, mass gap −0.148 (15 % of per-token mass outside the teacher's top-128), mean
+response length 1,759 tokens with 8.6 % of samples hitting the 8k cap, val@100 0.031 (start 0.078). Our role cannot delete the pod/jobset,
+so the pod runs until preempted (restart blocked by the poisoned root). **Verdict:** teacher-support truncated reverse KL is unusable
+for on-policy distillation of a student already close to the teacher — the loss is minimised by leaking mass into the unseen tail and
+on-policy sampling amplifies it. Use the sampled-token estimator (k1 + policy gradient), student-support top-k, or on-policy forward KL.
 
 **Hub cleanup (2026-09-12).** Both distilled-student repos (`JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base`) were pruned to
 `step_001000` (commits 71254c99 / 3dbd12c5) and the intermediate steps' LFS blobs permanently purged (0.47 TB + 1.01 TB; Hub storage
