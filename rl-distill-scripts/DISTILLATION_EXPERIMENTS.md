@@ -809,6 +809,15 @@ matches the teacher's own (0.9975 vs 0.9972), so the teacher-top-k truncation is
 ≈ 177 s (gen 15–100 s, teacher scoring 66 s, update 78 s) plus ~213 s validation and ~306 s checkpoint+upload every 10 steps → ≈ 14 h
 for 200 steps if the node holds. `actor/pg_loss` is reported but not part of the loss (`use_task_rewards=False`).
 
+**Steps 20–50 (11:46Z).** Loss after warmup: mean 0.066 (steps 21–30), 0.067 (31–40), 0.072 (41–50) — noisy per step (0.041–0.086), plateau
+≈ 0.07 vs 0.089 at start. Val mean@16: 0.078 → 0.100 (20) → 0.115 (30) → 0.100 (40) → 0.087 (50) (128 questions; ±0.02 is a few questions).
+Response length swings 170–390 with the batch (1–3 of 128 samples hit 8k), no monotone growth. **Mass gap (student − teacher mass on
+the teacher's top-128):** +0.0005 (10), +0.0005 (20), +0.0003 (30), −0.0001 (40), −0.0002 … −0.0009 (41 → 50), monotone since step 40:
+the student is slowly moving ~0.1 % of its per-token mass outside the teacher's support, which the truncated reverse KL cannot see
+(note (i) above; the per-token clamp at 0 also hides negative partial sums). Tiny in absolute terms, but it is the predicted blind spot.
+Decision rule: if the gap passes −0.003 or validation keeps falling, switch the next run to the sampled-token estimator
+(`loss_mode=k1`, `use_policy_gradient=True`) or a hybrid; the current run continues to 200 steps for the clean comparison.
+
 **Hub cleanup (2026-09-12).** Both distilled-student repos (`JWei05/Distill-gemma4-e4b-base-medium-to-{12b,26b}-base`) were pruned to
 `step_001000` (commits 71254c99 / 3dbd12c5) and the intermediate steps' LFS blobs permanently purged (0.47 TB + 1.01 TB; Hub storage
 counts every blob in git history, so a delete commit alone frees nothing). Old revisions still resolve for `step_001000` but no longer
