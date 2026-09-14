@@ -338,7 +338,45 @@ def _pod_status(job_id: str) -> str | None:
         return None
     if not isinstance(payload, dict):
         return None
-    return _classify_pod_payload(payload)
+    status = _classify_pod_payload(payload)
+    if status in {"COMPLETED", "FAILED"} and _owning_jobs_suspended(payload):
+        # Kueue preemption: the pod finished (the run-file exits 0 on SIGTERM) but
+        # the Job is suspended and will be resumed by Kueue.  Treat as queued so
+        # the supervisor does not cancel a live workload and resubmit a duplicate
+        # (2026-09-14: three such false COMPLETEDs in one day on the on-policy run).
+        return "QUEUED"
+    return status
+
+
+def _owning_jobs_suspended(payload: dict[str, object]) -> bool:
+    items = payload.get("items", [])
+    if not isinstance(items, list):
+        return False
+    job_names = sorted(
+        {
+            item.get("metadata", {}).get("labels", {}).get("job-name")
+            or item.get("metadata", {}).get("labels", {}).get("batch.kubernetes.io/job-name")
+            for item in items
+            if isinstance(item, dict)
+        }
+        - {None}
+    )
+    if not job_names:
+        return False
+    for job_name in job_names:
+        try:
+            completed = subprocess.run(
+                ["kubectl", "get", "job", "-n", "train", job_name, "-o", "jsonpath={.spec.suspend}"],
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            return False
+        if completed.returncode != 0 or completed.stdout.strip().lower() != "true":
+            return False
+    return True
 
 
 def _scale_train_status(job_id: str) -> str | None:
