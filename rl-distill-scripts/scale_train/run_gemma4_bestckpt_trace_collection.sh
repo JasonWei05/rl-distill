@@ -348,8 +348,10 @@ run_worker() {
     worker_pid=$!
     # Capture wait's status directly: `status=$?` after `if wait ...; fi` reads the if
     # statement's own status (always 0), which hid every real exit code and defeated the
-    # no-retry check below.
-    wait "${worker_pid}"; status=$?
+    # no-retry check below. Under `set -e` a bare failing `wait` aborts this subshell before
+    # the retry loop runs (2026-09-14: transient vLLM startup failures were never retried), so
+    # capture the status through `||`.
+    status=0; wait "${worker_pid}" || status=$?
     if ((status == 0)); then
       worker_pid=; echo "[supervisor] split=${split} worker=${worker_id} complete" | tee -a "${log_path}"; return 0
     fi
