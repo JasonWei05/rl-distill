@@ -7,6 +7,8 @@
 set -euo pipefail
 cd /mnt/efs/jasonwei/rl-distill; set -a; source .env; set +a
 export PATH="/mnt/efs/jasonwei/rl-distill/.venv-gemma4/bin:/usr/local/cuda/bin:${PATH:-/usr/bin:/bin}" CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+# vLLM cumem (sleep/shutdown) dlopens libnvrtc.so.13, which lives in the cu13 wheel off the default loader path.
+export LD_LIBRARY_PATH="/mnt/efs/jasonwei/rl-distill/.venv-gemma4/lib/python3.12/site-packages/nvidia/cu13/lib:${LD_LIBRARY_PATH:-}"
 export HF_HOME="$HOME/.cache/huggingface" VLLM_CACHE_ROOT=/tmp/vllm_cache_kl TRITON_CACHE_DIR=/tmp/triton_kl
 PY=.venv-gemma4/bin/python
 STK="${STK:-/opt/dlami/nvme/tmp/jasonwei_hf_stage/onpolicy_stk_step50}"
@@ -19,7 +21,7 @@ pick_gpu() {  # $1 = MiB needed -> sets GPU and UTIL (fraction of the 81559 MiB 
   local need=$1 best= bestfree=0
   for g in $CANDIDATE_GPUS; do local free; free=$(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader | awk -F', ' -v g=$g '$1==g{print 81559-$2}'); [ "${free:-0}" -gt "$bestfree" ] && { bestfree=$free; best=$g; }; done
   if [ "$bestfree" -lt "$need" ]; then echo "$(date -u +%FT%TZ) WAIT: need ${need} MiB, best GPU $best has ${bestfree} MiB free; sleeping 120 s"; sleep 120; pick_gpu "$need"; return; fi
-  GPU=$best; UTIL=$(python3 -c "print(round(min(0.85, ($bestfree-3000)/81559),2))"); export CUDA_VISIBLE_DEVICES=$GPU
+  GPU=$best; UTIL=$(python3 -c "print(round(min(0.75, ($bestfree-7000)/81559),2))"); export CUDA_VISIBLE_DEVICES=$GPU
   echo "$(date -u +%FT%TZ) using GPU $GPU (free ${bestfree} MiB) util $UTIL"
 }
 COMMON=(--train_parquet "$DATA/train.parquet" --val_parquet "$DATA/validation.parquet" --questions_per_split 128 --samples_per_question 4 --topk 128 --splits validation --seed 0 --gen_batch 128 --max_tokens "${MAX_TOKENS:-8192}" --max_model_len "${MAX_MODEL_LEN:-12288}")

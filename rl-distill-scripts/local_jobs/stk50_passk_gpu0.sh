@@ -5,6 +5,8 @@ set -euo pipefail
 cd /mnt/efs/jasonwei/rl-distill; set -a; source .env; set +a
 # vLLM compile/CUDA-graph capture shells out to ninja + nvcc: put the venv and CUDA toolkit on PATH (a bare nohup env lacks them).
 export PATH="/mnt/efs/jasonwei/rl-distill/.venv-gemma4/bin:/usr/local/cuda/bin:${PATH:-/usr/bin:/bin}" CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+# vLLM cumem (sleep/shutdown) dlopens libnvrtc.so.13, which lives in the cu13 wheel off the default loader path.
+export LD_LIBRARY_PATH="/mnt/efs/jasonwei/rl-distill/.venv-gemma4/lib/python3.12/site-packages/nvidia/cu13/lib:${LD_LIBRARY_PATH:-}"
 export CUDA_VISIBLE_DEVICES="${GPU:-0}" HF_HOME="$HOME/.cache/huggingface" VLLM_CACHE_ROOT=/tmp/vllm_cache_pk TRITON_CACHE_DIR=/tmp/triton_pk
 export VERL_MATH_VERIFY_STRICT_BOXED=1 VERL_MATH_VERIFY_TIMEOUT=30 VERL_MATH_SYMPY_TIMEOUT=5.0
 PY=.venv-gemma4/bin/python; S=rl-distill-scripts

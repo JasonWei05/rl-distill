@@ -106,6 +106,8 @@ def generate(args) -> None:
 
 
 def score(args) -> None:
+    import torch  # local import (the generate phase must not import torch before vLLM)
+
     # cuDNN's SDPA backend fails with "No valid execution plans built" for Gemma 4 on some local boxes (2026-09-14);
     # the math/flash SDPA backends give identical results, so turn cuDNN attention off for the scoring pass.
     torch.backends.cuda.enable_cudnn_sdp(False)

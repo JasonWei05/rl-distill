@@ -915,6 +915,14 @@ objective could not see), the loss keeps easing down at full learning rate, and 
 Steps 31–50 (23:19Z): the per-step loss is noisy (batch composition) with the window mean flat at ~0.07 since step 30; the mass gap has not
 moved in 50 steps and lengths stay ~200–250, i.e. none of the §9.0d degeneration signatures. Validation 0.108 → 0.101 → 0.091 over
 steps 30–50 is within the ±0.02 noise of 128 questions but worth watching against the 0.078 start.
+| 51–60 (pod 5, resumed from 50) | 0.072 (0.154 at step 51 = first batch after restore) | +0.0015 … +0.0018 | 0.104 at 60 | 172–257 |
+| 61–70 | 0.076 | +0.0016 … +0.0020 | 0.097 at 70 | 187–218 |
+| 71–80 | 0.074 | +0.0013 … +0.0018, flat | 0.100 at 80 | 165–227 |
+
+**Offline KL of the step-50 checkpoint (2026-09-14, 128 medium validation questions × 4 samples, same protocol as §9.0c, run locally on shared
+GPUs):** reverse KL (student samples, teacher scores) **0.0713 ± 0.0021** nats/token (top-128 estimate 0.0714, student top-128 mass 0.9985,
+mean response length 303) vs **0.0885 ± 0.0024** for the same student before on-policy training — a 19 % reduction in 50 steps with no
+mass leak. Forward KL and the ×32 pass@k of the step-50 checkpoint follow below.
 
 ### 9.1 Results
 
