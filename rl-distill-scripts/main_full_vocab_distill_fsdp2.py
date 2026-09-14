@@ -439,12 +439,33 @@ class FullVocabDistillTrainer(SFTTrainer):
         self._write_completion_receipt()
 
 
+def _reserve_gpu_memory():
+    """Pin DISTILL_RESERVE_GPU_GB of device memory in this process's caching allocator at startup.
+
+    On the shared box other users' schedulers launch jobs onto any GPU that shows free memory; a 10-30 GB
+    intruder arriving mid-run can OOM a training step. Allocating a large block and releasing it into
+    PyTorch's cache keeps the memory reserved (nvidia-smi shows it used) while later allocations reuse it.
+    """
+    import os
+
+    gb = float(os.environ.get("DISTILL_RESERVE_GPU_GB", "0") or 0)
+    if gb <= 0:
+        return
+    import torch
+
+    block = torch.empty(int(gb * 2**30), dtype=torch.uint8, device="cuda")
+    del block  # stays reserved by the caching allocator (no empty_cache)
+    reserved = torch.cuda.memory_reserved() / 2**30
+    print(f"[ReserveGPU] rank {torch.distributed.get_rank()} reserved {reserved:.1f} GiB on {torch.cuda.current_device()}", flush=True)
+
+
 @hydra.main(config_path="config", config_name="full_vocab_distill_fsdp2", version_base=None)
 def main(config):
     from verl.utils.distributed import initialize_global_process_group
 
     initialize_global_process_group()
     auto_set_device(config)
+    _reserve_gpu_memory()
     trainer = FullVocabDistillTrainer(config=config)
     trainer.fit()
 
