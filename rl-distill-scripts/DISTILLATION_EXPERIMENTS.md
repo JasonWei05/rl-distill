@@ -924,6 +924,14 @@ steps 30–50 is within the ±0.02 noise of 128 questions but worth watching aga
 Steps 30–100: training-batch loss plateaued at ~0.07 (from 0.089), the mass gap stayed flat and positive throughout, response length shows
 no drift, and validation oscillates 0.09–0.10 (0.078 at step 0). No degeneration signature after 100 steps, in contrast to §9.0d.
 Step-100 checkpoint on S3 (06:33Z) is the natural next point for the offline KL + pass@k measurement done at step 50.
+| 101–110 | 0.070 | +0.0006 … +0.0009 | 0.094 at 110 | 183–342 |
+| 111–120 | 0.068 | −0.0002 … +0.0011 (≈ 0) | 0.094 at 120 | 187–345 |
+
+**Second-order watch item (step 120):** the student's *own* top-128 mass is drifting down — 0.9987 (step 1) → 0.998 (50) → 0.9965 (111) →
+0.9939 (120) — with the teacher's mass on that support falling in step (gap ≈ 0). The student is slowly flattening (0.5 % of per-token mass
+moved outside its top-128 in 120 steps), which the truncated sum cannot see either (a much weaker version of the §9.0d blind spot: the
+support follows the student's modes, so it cannot be gamed by relocating mass, only by spreading it). Not a problem at this magnitude;
+if `student_mass` falls below ~0.99 the fix is the renormalised variant or the sampled-token estimator.
 
 **Offline KL of the step-50 checkpoint (2026-09-14, 128 medium validation questions × 4 samples, same protocol as §9.0c, run locally on shared
 GPUs):** reverse KL (student samples, teacher scores) **0.0713 ± 0.0021** nats/token (top-128 estimate 0.0714, student top-128 mass 0.9985,
