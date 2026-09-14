@@ -922,7 +922,17 @@ steps 30–50 is within the ±0.02 noise of 128 questions but worth watching aga
 **Offline KL of the step-50 checkpoint (2026-09-14, 128 medium validation questions × 4 samples, same protocol as §9.0c, run locally on shared
 GPUs):** reverse KL (student samples, teacher scores) **0.0713 ± 0.0021** nats/token (top-128 estimate 0.0714, student top-128 mass 0.9985,
 mean response length 303) vs **0.0885 ± 0.0024** for the same student before on-policy training — a 19 % reduction in 50 steps with no
-mass leak. Forward KL and the ×32 pass@k of the step-50 checkpoint follow below.
+mass leak. Forward KL on the same protocol (512 E4B-base samples on the 128 validation questions, scored by each student — the same
+teacher samples for both rows, so the comparison is paired):
+
+| student | reverse KL (student samples; exact MC) | student top-128 mass | forward KL (teacher samples; exact MC) | forward, teacher top-128 (off-policy loss convention) |
+|---|---|---|---|---|
+| distilled 12B, before on-policy (off-policy step 1000) | 0.0885 ± 0.0024 (§9.0c) | 0.998 | **0.0868 ± 0.0027** | 0.0807 |
+| after 50 on-policy steps (student-top-128 reverse KL) | **0.0713 ± 0.0021** | 0.9985 | 0.0912 ± 0.0027 | 0.0855 |
+
+Reverse KL fell 19 % while forward KL rose ~5 % (0.087 → 0.091; the teacher's mean sample length is 223 tokens on both rows). That is the
+expected mode-seeking trade: the student concentrates on its own modes (its samples look more teacher-like) at the cost of slightly
+under-covering the teacher's own samples. Both estimates are per response token; ± is the SE over 512 sequences.
 
 ### 9.1 Results
 
