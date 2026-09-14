@@ -934,6 +934,20 @@ Reverse KL fell 19 % while forward KL rose ~5 % (0.087 → 0.091; the teacher's 
 expected mode-seeking trade: the student concentrates on its own modes (its samples look more teacher-like) at the cost of slightly
 under-covering the teacher's own samples. Both estimates are per response token; ± is the SE over 512 sequences.
 
+**pass@k ×32 of the step-50 on-policy checkpoint (2026-09-14, medium validation set, 300 questions, same protocol as §9.1):**
+
+| model | pass@1 | pass@2 | pass@4 | pass@8 | pass@16 | pass@32 |
+|---|---|---|---|---|---|---|
+| E4B base (teacher) | 8.4 | 15.4 | 26.6 | 41.9 | 59.3 | 74.7 |
+| 12B base (untrained) | 14.1 | 24.7 | 39.6 | 57.0 | 73.4 | 86.3 |
+| 12B off-policy distilled, step 1000 (= on-policy step 0) | 8.1 | 14.9 | 25.8 | 40.7 | 57.6 | 73.0 |
+| **12B on-policy (student-top-128), step 50** | **9.6** | **17.4** | **29.3** | **44.9** | **61.9** | **76.3** |
+
+Fifty on-policy steps lifted the whole curve above both the off-policy student and the E4B teacher itself (+1.5 at pass@1, +3.3 at
+pass@32 over step 0; +1.2 / +1.6 over the teacher), while reverse KL to the teacher fell 19 %. The curve is still far below the untrained
+12B base (the distillation target is the E4B's distribution, not capability), but the student is no longer a strict copy of the teacher.
+Figure: `figures/passk_12b_onpolicy_stk50_vs_teacher.png` (adds the E2B base ×32 reference, evaluated with the same protocol).
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
