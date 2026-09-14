@@ -61,6 +61,14 @@ case "${TEACHER_SPEC}" in
     TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}"
     PROJECT_NAME="${PROJECT_NAME:-gemma4-e4b-base-distill-v1}"
     ;;
+  12bd-*)
+    # RL-on-distilled 12B teacher (§9.0 step 190): bestckpt-v2 trace family on S3, 16 train samples (§9 recipe), no HF dataset mirror.
+    TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2}"
+    TRACE_LOCAL_ROOT="${TRACE_LOCAL_ROOT:-/tmp/gemma4_bestckpt_traces_v2/${TEACHER_SPEC}}"
+    TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}"
+    TRACE_HF_DATASET_BASE="${TRACE_HF_DATASET_BASE-}"
+    PROJECT_NAME="${PROJECT_NAME:-gemma4-12bd-distill-v1}"
+    ;;
   *)
     TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2}"
     TRACE_LOCAL_ROOT="${TRACE_LOCAL_ROOT:-/tmp/gemma4_bestckpt_traces_v2/${TEACHER_SPEC}}"

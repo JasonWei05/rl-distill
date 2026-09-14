@@ -48,6 +48,8 @@ ALLOWED_DIRECTIONS = {
     # E4B *base* teacher -> 12B / 26B-A4B students (pre-training control)
     "e4b_base_medium_to_12b_26b",
     "e4b_base_hard_to_12b_26b",
+    # RL-on-distilled 12B teacher (§9.0 best step 190) -> E4B base student
+    "12bd_medium_to_e4b",
 }
 
 

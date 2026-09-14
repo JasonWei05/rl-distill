@@ -49,6 +49,11 @@ case "${TRACE_SPEC}" in
   # holds the model at its root (no step_NNNNNN/ subdir); 16 samples per training question by default.
   e4b-base-medium) RUN_KEY=e4b-base; BAND=medium; BEST_STEP=0; DIRECTION=e4b_base_medium_to_12b_26b; TEACHER_HF_REPO=google/gemma-4-E4B; TEACHER_HF_REVISION=411aa17b749aa952df1359d2dcea73917a544d9a; TEACHER_HF_ROOT=1 ;;
   e4b-base-hard)   RUN_KEY=e4b-base; BAND=hard;   BEST_STEP=0; DIRECTION=e4b_base_hard_to_12b_26b;   TEACHER_HF_REPO=google/gemma-4-E4B; TEACHER_HF_REVISION=411aa17b749aa952df1359d2dcea73917a544d9a; TEACHER_HF_ROOT=1 ;;
+  # RL on top of the E4B-base-distilled 12B (DISTILLATION_EXPERIMENTS.md §9.0; best val mean@16 0.497 @ step 190) as the
+  # teacher for an E4B-base student under the §9 recipe (16 train samples). RUN_KEY is the S3 run prefix, so TEACHER_SOURCE=s3
+  # reads the verified full checkpoint (…-rl-full-checkpoints/<RUN_KEY>/global_step_190/actor/huggingface); the Hub repo
+  # (steps 170-240, pinned) is the fallback.
+  12bd-medium) RUN_KEY=12b-medium-from-e4bbase-distill-es5; BAND=medium; BEST_STEP=190; DIRECTION=12bd_medium_to_e4b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-medium-seed42-from-e4bbase-distill-es5; TEACHER_HF_REVISION=ed5457f617ecc7288fd429a3fcd619b062d62359; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-12b-from-e4bbase-distill-rl-full-checkpoints}" ;;
   *)
     echo "FATAL: unsupported TRACE_SPEC=${TRACE_SPEC}" >&2
     exit 2
@@ -196,7 +201,7 @@ fi
 
 # --- Source: the band's training + validation data (same as RL) ---
 GLOBAL_SEED="${GLOBAL_SEED:-42}"
-case "${TRACE_SPEC}" in e4b-base-*) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" ;; *) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}" ;; esac
+case "${TRACE_SPEC}" in e4b-base-*|12bd-*) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" ;; *) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}" ;; esac
 VALIDATION_SAMPLES_PER_QUESTION="${VALIDATION_SAMPLES_PER_QUESTION:-1}"
 PROMPTS_PER_SHARD="${PROMPTS_PER_SHARD:-8}"
 ROW_GROUP_ROWS="${ROW_GROUP_ROWS:-2}"
