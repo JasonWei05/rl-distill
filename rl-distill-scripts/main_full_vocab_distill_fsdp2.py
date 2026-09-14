@@ -253,9 +253,12 @@ class FullVocabDistillTrainer(SFTTrainer):
                 f"remote_checkpoint.rolling_freq={rolling_freq} needs an integer trainer.save_freq that is a "
                 f"multiple of it (got {self.save_freq!r})"
             )
-        from full_checkpoint_s3 import upload_rolling_checkpoint
+        from full_checkpoint_s3 import upload_hf_export, upload_rolling_checkpoint
 
         rolling_hf_export = bool(cfg.get("rolling_hf_export", True))
+        # Also keep each rolling save's weight-only HF export permanently on S3 (hf_exports/global_step_N/) --
+        # the S3-only substitute for the Hub push when hf_push is disabled.
+        rolling_hf_export_s3 = rolling_hf_export and bool(cfg.get("rolling_hf_export_s3", False))
         permanent_freq = self.save_freq
         self.save_freq = rolling_freq                      # the fit loop now saves every rolling_freq steps
         permanent_save = self.ckpt_handler.save_checkpoint  # local save + HF push + permanent S3 upload
@@ -279,6 +282,11 @@ class FullVocabDistillTrainer(SFTTrainer):
                     "(permanent checkpoints are unaffected)",
                     flush=True,
                 )
+            if rolling_hf_export_s3:
+                try:
+                    upload_hf_export(checkpoint_root, step, s3_uri)
+                except Exception as error:
+                    print(f"[HFExportS3] upload FAILED step={step}: {type(error).__name__}: {error}", flush=True)
 
         def save(step):
             step = int(step)
@@ -310,7 +318,7 @@ class FullVocabDistillTrainer(SFTTrainer):
         if dist.get_rank() == 0:
             print(
                 f"[RollingCheckpointS3] enabled: resumable checkpoint every {rolling_freq} steps -> {s3_uri}/rolling "
-                f"({'with' if rolling_hf_export else 'without'} HF export + push; permanent checkpoint every {permanent_freq})",
+                f"({'with' if rolling_hf_export else 'without'} HF export + push{' + S3 hf_exports/' if rolling_hf_export_s3 else ''}; permanent checkpoint every {permanent_freq})",
                 flush=True,
             )
 

@@ -592,6 +592,8 @@ if (( ROLLING_CHECKPOINT_FREQ > 0 )); then
 fi
 export ROLLING_HF_EXPORT=${ROLLING_HF_EXPORT:-true}   # rolling saves also write + push the HF export (one evaluable step_* per rolling save)
 case "${ROLLING_HF_EXPORT,,}" in true|false) ;; *) echo "ROLLING_HF_EXPORT must be true or false" >&2; exit 2 ;; esac
+export ROLLING_HF_EXPORT_S3=${ROLLING_HF_EXPORT_S3:-false}   # keep each rolling HF export permanently on S3 (hf_exports/) -- the S3-only alternative to HF pushes
+case "${ROLLING_HF_EXPORT_S3,,}" in true|false) ;; *) echo "ROLLING_HF_EXPORT_S3 must be true or false" >&2; exit 2 ;; esac
 
 export NNODES=${NNODES:-1}
 export NPROC_PER_NODE
@@ -663,6 +665,7 @@ COMMON_OVERRIDES=(
     trainer.remote_checkpoint.s3_uri="${REMOTE_CHECKPOINT_S3_URI}"
     trainer.remote_checkpoint.rolling_freq="${ROLLING_CHECKPOINT_FREQ}"
     trainer.remote_checkpoint.rolling_hf_export="${ROLLING_HF_EXPORT}"
+    trainer.remote_checkpoint.rolling_hf_export_s3="${ROLLING_HF_EXPORT_S3}"
     "checkpoint.save_contents=${CHECKPOINT_SAVE_CONTENTS}"
     'checkpoint.load_contents=["model","optimizer","extra"]'
 )

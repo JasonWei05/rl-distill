@@ -101,6 +101,7 @@ trainer:
     s3_uri: ${oc.env:REMOTE_CHECKPOINT_S3_URI,""}
     rolling_freq: ${oc.decode:${oc.env:ROLLING_CHECKPOINT_FREQ,0}}   # resumable ckpt every N steps between permanent saves (0 = off)
     rolling_hf_export: ${oc.decode:${oc.env:ROLLING_HF_EXPORT,true}}   # rolling saves also write + push the HF export (eval every N steps)
+    rolling_hf_export_s3: ${oc.decode:${oc.env:ROLLING_HF_EXPORT_S3,false}}   # and keep that export on S3 under hf_exports/global_step_N/ (S3-only runs)
 
 model:
   path: ${oc.env:MODEL_PATH,/tmp/hf_models/gemma-3-27b-pt}

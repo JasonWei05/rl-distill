@@ -568,6 +568,52 @@ def publish_best_hf_export(checkpoint_root: Path, s3_uri: str) -> dict[str, obje
     return verified
 
 
+_HF_EXPORT_PREFIX = "hf_exports"
+
+
+def upload_hf_export(checkpoint_root: Path, step: int, s3_uri: str) -> dict[str, object]:
+    """Keep one step's weight-only HF export permanently at <s3_uri>/hf_exports/global_step_<N>/huggingface/.
+
+    Rolling checkpoints occupy a single S3 slot and are retired, and the full permanent saves are ~100 GB
+    each, so this is how a run keeps an evaluable export per rolling save on S3 without pushing to the Hub.
+    Works for both checkpoint layouts (``actor/huggingface`` for the PPO actor, ``huggingface`` for SFT).
+    The completion marker is written last.
+    """
+
+    step_dir = checkpoint_root / f"global_step_{step}"
+    source_dir = step_dir / "actor" / "huggingface"
+    if not source_dir.is_dir():
+        source_dir = step_dir / "huggingface"
+    if not (source_dir / "config.json").is_file():
+        raise FileNotFoundError(f"HF export for step {step} is missing (no config.json under {source_dir})")
+    files = _directory_size_manifest(source_dir)
+    remote_root = _normalize_s3_uri(s3_uri)
+    bucket, prefix = _split_s3_uri(remote_root)
+    remote_step = f"{prefix}/{_HF_EXPORT_PREFIX}/global_step_{step}"
+    total_bytes = sum(int(item["size"]) for item in files)
+    print(f"[HFExportS3] uploading step={step} files={len(files)} bytes={total_bytes} to {remote_root}/{_HF_EXPORT_PREFIX}/global_step_{step}", flush=True)
+    client = _s3_client()
+    for item in files:
+        relative_path = str(item["path"])
+        client.upload_file(str(source_dir / relative_path), bucket, f"{remote_step}/huggingface/{relative_path}")
+    manifest: dict[str, object] = {
+        "schema_version": 1,
+        "step": int(step),
+        "checkpoint_s3_uri": remote_root,
+        "file_count": len(files),
+        "total_bytes": total_bytes,
+        "files": files,
+    }
+    client.put_object(
+        Bucket=bucket,
+        Key=f"{remote_step}/{_COMPLETE_NAME}",
+        Body=(json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode(),
+        ContentType="application/json",
+    )
+    print(f"[HFExportS3] completed step={step}", flush=True)
+    return manifest
+
+
 def check_best_hf_export(s3_uri: str) -> dict[str, object] | None:
     remote_root = _normalize_s3_uri(s3_uri)
     bucket, prefix = _split_s3_uri(remote_root)
