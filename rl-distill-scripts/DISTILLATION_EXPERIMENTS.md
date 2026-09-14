@@ -918,6 +918,12 @@ steps 30–50 is within the ±0.02 noise of 128 questions but worth watching aga
 | 51–60 (pod 5, resumed from 50) | 0.072 (0.154 at step 51 = first batch after restore) | +0.0015 … +0.0018 | 0.104 at 60 | 172–257 |
 | 61–70 | 0.076 | +0.0016 … +0.0020 | 0.097 at 70 | 187–218 |
 | 71–80 | 0.074 | +0.0013 … +0.0018, flat | 0.100 at 80 | 165–227 |
+| 81–90 (pods 6–8; three admissions were reclaimed before the step-90 save) | 0.075 | +0.0013 | 0.094 at 90 | 190–290 |
+| 91–100 | 0.068 (0.050–0.081) | +0.0009 … +0.0013, flat | 0.091 at 100 | 178–310 |
+
+Steps 30–100: training-batch loss plateaued at ~0.07 (from 0.089), the mass gap stayed flat and positive throughout, response length shows
+no drift, and validation oscillates 0.09–0.10 (0.078 at step 0). No degeneration signature after 100 steps, in contrast to §9.0d.
+Step-100 checkpoint on S3 (06:33Z) is the natural next point for the offline KL + pass@k measurement done at step 50.
 
 **Offline KL of the step-50 checkpoint (2026-09-14, 128 medium validation questions × 4 samples, same protocol as §9.0c, run locally on shared
 GPUs):** reverse KL (student samples, teacher scores) **0.0713 ± 0.0021** nats/token (top-128 estimate 0.0714, student top-128 mass 0.9985,
