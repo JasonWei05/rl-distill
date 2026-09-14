@@ -1746,6 +1746,7 @@ class FSDPEngineWithLMHead(FSDPEngine):
                         )
                         assert teacher_path, "distillation_teacher_model_path missing for teacher-in-actor distillation"
                         distill_topk = int(tu.get_non_tensor_data(data=micro_batch, key="distillation_topk", default=128))
+                        distill_mode = str(tu.get_non_tensor_data(data=micro_batch, key="distillation_loss_mode", default=""))
                         pad_token_id = tu.get_non_tensor_data(data=micro_batch, key="pad_token_id", default=0)
                         bsz = int(seq_lengths.numel())
                         max_len = int(seq_lengths.max().item())
@@ -1775,6 +1776,7 @@ class FSDPEngineWithLMHead(FSDPEngine):
                             teacher_head=teacher_head,
                             topk=distill_topk,
                             chunk_rows=verl_F._ChunkedLogprobsFromLogits.CHUNK_ROWS,
+                            tail_bucket=(distill_mode == "reverse_kl_student_topk_bucket"),
                         )
                         del teacher_hidden
                         for k, v in outputs.items():

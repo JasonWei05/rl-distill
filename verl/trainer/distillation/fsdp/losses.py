@@ -193,8 +193,13 @@ def compute_reverse_kl_student_topk_padded(
     teacher_head,
     topk: int,
     chunk_rows: int = 1024,
+    tail_bucket: bool = False,
 ) -> dict:
     """Memory-lean ``reverse_kl_student_topk`` on padded (bsz, seqlen, vocab) student logits (rl-distill fork).
+
+    ``tail_bucket=True`` adds (1-Q_k)(log(1-Q_k) - log(1-P_k)) per position (the ``reverse_kl_student_topk_bucket`` mode):
+    the KL between the (k+1)-bucket distributions, a proper lower bound of the full reverse KL that penalises the student
+    for putting more mass outside its top-k than the teacher does there.
 
     Works sample by sample and chunk by chunk under activation checkpointing, so the peak extra memory is one chunk's
     fp32 student and teacher logits (~1 GB each at 1024 rows x 262k vocab) instead of full-vocab fp32 copies of the whole
@@ -224,7 +229,14 @@ def compute_reverse_kl_student_topk_padded(
             t_lp = torch.gather(t, dim=-1, index=ids) - torch.logsumexp(t, dim=-1, keepdim=True)
             del t
         q = s_lp.exp()
-        return (q * (s_lp - t_lp)).sum(dim=-1), q.sum(dim=-1), t_lp.exp().sum(dim=-1)
+        q_mass = q.sum(dim=-1)
+        p_mass = t_lp.exp().sum(dim=-1)
+        loss = (q * (s_lp - t_lp)).sum(dim=-1)
+        if tail_bucket:
+            q_tail = (1.0 - q_mass).clamp_min(1e-6)
+            p_tail = (1.0 - p_mass).clamp_min(1e-6)
+            loss = loss + q_tail * (torch.log(q_tail) - torch.log(p_tail))
+        return loss, q_mass, p_mass
 
     losses, smass, tmass = [], [], []
     lengths = seq_lengths.tolist()

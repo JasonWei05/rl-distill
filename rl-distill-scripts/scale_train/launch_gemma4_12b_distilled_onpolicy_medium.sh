@@ -25,7 +25,7 @@ INIT_REVISION="${INIT_REVISION:-92368d1f020e685436113d93dc1f75c64033570f}"   # c
 INIT_SUBFOLDER="${INIT_SUBFOLDER:-step_001000}"
 TEACHER_REPO="${TEACHER_REPO:-google/gemma-4-E4B}"
 TEACHER_REVISION="${TEACHER_REVISION:-411aa17b749aa952df1359d2dcea73917a544d9a}"   # same pin as the trace generation
-RUN_TAG="${RUN_TAG:-onpolicy-studenttop128-from-e4bbase-distill}"
+RUN_TAG="${RUN_TAG:-onpolicy-studenttop128-bucket-from-e4bbase-distill}"
 S3_BASE="${S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-12b-from-e4bbase-distill-onpolicy}"
 TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-1000}"
 SAVE_FREQ="${SAVE_FREQ:-50}"
@@ -45,8 +45,11 @@ ENV_VARS+=",ONPOLICY_DISTILL_ENABLE=True,ONPOLICY_DISTILL_TEACHER_REPO=${TEACHER
 # DISTILLATION_EXPERIMENTS.md §9.0d); reverse_kl_student_topk = STUDENT-support truncation with the frozen E4B teacher run
 # as an extra forward pass inside the actor update (no teacher server; ~17 GB bf16 teacher weights per GPU, so the
 # student engine keeps a smaller footprint below). Default is now the student-support mode.
-ONPOLICY_DISTILL_LOSS_MODE="${ONPOLICY_DISTILL_LOSS_MODE:-reverse_kl_student_topk}"
-if [ "${ONPOLICY_DISTILL_LOSS_MODE}" = reverse_kl_student_topk ]; then
+# reverse_kl_student_topk_bucket (default since 2026-09-14) = student-support reverse KL + the (k+1)-th "tail bucket" term
+# (1-Q_k)(log(1-Q_k) - log(1-P_k)): a proper lower bound of the full reverse KL that penalises the slow flattening the plain
+# student-top-k variant cannot see (student top-128 mass drifted 0.9987 -> 0.988 by step 130 of that run).
+ONPOLICY_DISTILL_LOSS_MODE="${ONPOLICY_DISTILL_LOSS_MODE:-reverse_kl_student_topk_bucket}"
+if [ "${ONPOLICY_DISTILL_LOSS_MODE}" = reverse_kl_student_topk ] || [ "${ONPOLICY_DISTILL_LOSS_MODE}" = reverse_kl_student_topk_bucket ]; then
   # vLLM needs >= 3.94 GiB KV for one 12288-token request (3 GiB failed at engine init, 2026-09-13 17:26Z).
   ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.30}"
   VLLM_KV_CACHE_MEMORY_BYTES="${VLLM_KV_CACHE_MEMORY_BYTES:-4294967296}"

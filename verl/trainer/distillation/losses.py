@@ -136,7 +136,7 @@ def compute_topk_loss(
     - teacher_mass: (bsz, seqlen/cp_size)
     """
     loss_mode = distillation_config.distillation_loss.loss_mode
-    if loss_mode == "reverse_kl_student_topk":
+    if loss_mode in ("reverse_kl_student_topk", "reverse_kl_student_topk_bucket"):
         # rl-distill fork: reverse KL on the STUDENT's top-k support; the teacher's logits for the same positions
         # come from an in-actor forward pass (see fsdp/teacher_in_actor.py), not from data["teacher_logprobs"].
         if config.strategy not in ("fsdp", "fsdp2"):
@@ -428,6 +428,25 @@ def compute_reverse_kl_student_topk(
     be lowered by leaking mass into an unseen tail (the failure mode of the teacher-support version, 2026-09-13).
     ``student_mass`` is the student's top-k mass (>= 0.99 by construction); ``teacher_mass`` is the teacher's mass on
     the student's top-k -- their gap is the diagnostic to watch (should stay small and stable).
+    """
+    return compute_reverse_kl_topk(config, distillation_config, model_output, data)
+
+
+@register_distillation_loss(  # type: ignore[arg-type]
+    DistillationLossSettings(names=["reverse_kl_student_topk_bucket"], use_topk=True, teacher_in_actor=True)
+)
+def compute_reverse_kl_student_topk_bucket(
+    config: ActorConfig,
+    distillation_config: DistillationConfig,
+    model_output: dict,
+    data: TensorDict,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    """``reverse_kl_student_topk`` plus the tail bucket (rl-distill fork).
+
+    Adds (1 - Q_k) * (log(1 - Q_k) - log(1 - P_k)) per position, i.e. the KL between the (k+1)-bucket distributions
+    {top-k tokens, everything else}. The sum is then a proper lower bound of the full reverse KL that is sensitive to the
+    student's tail mass: spreading mass outside its own top-k (the slow flattening seen at steps 100-130 on 2026-09-14,
+    student top-128 mass 0.9987 -> 0.988) raises the loss instead of hiding from it.
     """
     return compute_reverse_kl_topk(config, distillation_config, model_output, data)
 

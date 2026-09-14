@@ -933,6 +933,23 @@ moved outside its top-128 in 120 steps), which the truncated sum cannot see eith
 support follows the student's modes, so it cannot be gamed by relocating mass, only by spreading it). Not a problem at this magnitude;
 if `student_mass` falls below ~0.99 the fix is the renormalised variant or the sampled-token estimator.
 
+**Step 130 (08:35Z): the alarm fired.** Student top-128 mass 0.988–0.991 (< 0.99), gap −0.0012 … −0.0025 (the teacher now holds *more*
+mass on the student's top-128 than the student), response length 266–454, val 0.092 (loss 0.055–0.077). Mechanism, reproduced on CPU with
+teacher = original student and ε of the student's mass spread uniformly into the tail:
+
+| tail mass spread ε | student top-k mass | plain student-top-k loss | + tail bucket | exact reverse KL |
+|---|---|---|---|---|
+| 0 | 0.954 | 0.0000 | 0.0000 | 0.0000 |
+| 0.01 | 0.946 | −0.0082 | +0.0024 | +0.0196 |
+| 0.03 | 0.930 | −0.0242 | +0.0147 | +0.0769 |
+| 0.10 | 0.872 | −0.0772 | +0.0965 | +0.3345 |
+
+The plain truncated sum *rewards* flattening (goes negative, then is clamped to 0 with no restoring gradient) — a weak but real relative of
+the §9.0d blind spot. **Fix implemented: `reverse_kl_student_topk_bucket`** adds the (k+1)-th bucket term (1−Q_k)(log(1−Q_k) − log(1−P_k)),
+turning the loss into the KL between the (k+1)-bucket distributions: a proper lower bound of the full reverse KL (equal to it at k = vocab,
+verified to 5e-6) that rises with tail mass. Zero extra compute (Q_k, P_k are already computed). Now the launcher default; the plain
+student-top-k run continues to step 200 for the record.
+
 **Offline KL of the step-50 checkpoint (2026-09-14, 128 medium validation questions × 4 samples, same protocol as §9.0c, run locally on shared
 GPUs):** reverse KL (student samples, teacher scores) **0.0713 ± 0.0021** nats/token (top-128 estimate 0.0714, student top-128 mass 0.9985,
 mean response length 303) vs **0.0885 ± 0.0024** for the same student before on-policy training — a 19 % reduction in 50 steps with no
