@@ -942,6 +942,7 @@ under-covering the teacher's own samples. Both estimates are per response token;
 | 12B base (untrained) | 14.1 | 24.7 | 39.6 | 57.0 | 73.4 | 86.3 |
 | 12B off-policy distilled, step 1000 (= on-policy step 0) | 8.1 | 14.9 | 25.8 | 40.7 | 57.6 | 73.0 |
 | **12B on-policy (student-top-128), step 50** | **9.6** | **17.4** | **29.3** | **44.9** | **61.9** | **76.3** |
+| E2B base (untrained, reference) | 4.1 | 7.6 | 13.6 | 22.9 | 35.4 | 50.3 |
 
 Fifty on-policy steps lifted the whole curve above both the off-policy student and the E4B teacher itself (+1.5 at pass@1, +3.3 at
 pass@32 over step 0; +1.2 / +1.6 over the teacher), while reverse KL to the teacher fell 19 %. The curve is still far below the untrained
