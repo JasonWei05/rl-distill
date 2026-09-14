@@ -980,6 +980,24 @@ pass@32 over step 0; +1.2 / +1.6 over the teacher), while reverse KL to the teac
 12B base (the distillation target is the E4B's distribution, not capability), but the student is no longer a strict copy of the teacher.
 Figure: `figures/passk_12b_onpolicy_stk50_vs_teacher.png` (adds the E2B base ×32 reference, evaluated with the same protocol).
 
+### 9.0f On-policy distillation, take 3: student-top-128 reverse KL with the tail bucket (launched 2026-09-14 09:26Z)
+
+**Why.** The plain student-top-128 run (§9.0e) started flattening after step ~100: student top-128 mass 0.9987 → 0.988 (step 130) → 0.947
+(step 140), response length 200 → 800 tokens, val 0.094 → 0.085 — the truncated sum rewards spreading mass into the unseen tail (CPU
+reproduction in §9.0e). Its S3 root was poisoned at 09:25Z so it stops at its next preemption; checkpoints `global_step_10..140` remain
+and the step-50 results (reverse KL 0.0713, pass@k above the teacher) stand as the reported outcome of that variant.
+
+**Objective.** `reverse_kl_student_topk_bucket` (commit f0181bba): Σ_{v∈top-128(q_s)} q_s (log q_s − log p_t) + (1−Q_k)(log(1−Q_k) − log(1−P_k)),
+the KL between the (k+1)-bucket distributions {top-128 tokens, rest}. A proper lower bound of the full reverse KL (equal to it at k = vocab),
+rising with the student's tail mass, zero extra compute. Everything else identical to §9.0e (distilled 12B `step_001000` student, in-actor
+E4B teacher, 128 prompts × 1 sample, lr 5e-7 / warmup 20 / 200 steps, S3-only saves every 10).
+
+**Launch.** `g4-12b-onpolicy-bkt` = job_dajrr9bns19g07i0ti3g — accepted by ScaleTrain (QUEUED 09:26Z) — `RUN_TAG=onpolicy-studenttop128-bucket-from-e4bbase-distill`;
+S3 `…-onpolicy-full-checkpoints/12b-medium-onpolicy-studenttop128-bucket-from-e4bbase-distill/`; W&B run id
+`g4-onpolicy-12b-medium-onpolicy-studenttop128-bucket-from-e4bbase-distill-s42-v1`; supervisor `.scale_train_supervisors/g4-12b-onpolicy-bkt-20260914/`
+(quick-cancel cap 1). Diagnostics to compare with §9.0e at the same steps: `student_mass` should stay ≈ 0.998 instead of drifting, the gap
+should stay ≈ +0.002, and the loss (now including the bucket term) should start ≈ 0.09.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
