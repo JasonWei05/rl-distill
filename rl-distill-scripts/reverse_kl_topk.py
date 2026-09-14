@@ -62,6 +62,8 @@ def generate(args) -> None:
     print(f"[generate] stop strings={stops} stop_token_ids={stop_ids} (+ eos); detokenize=True so string stops work", flush=True)
     out_dir = Path(args.trace_dir); out_dir.mkdir(parents=True, exist_ok=True)
     for split, parquet in (("train", args.train_parquet), ("validation", args.val_parquet)):
+        if split not in args.splits.split(","):
+            continue
         questions = select_questions(Path(parquet), args.questions_per_split, args.seed, f"medium_{split}")
         requests, params = [], []
         for q in questions:
@@ -104,6 +106,9 @@ def generate(args) -> None:
 
 
 def score(args) -> None:
+    # cuDNN's SDPA backend fails with "No valid execution plans built" for Gemma 4 on some local boxes (2026-09-14);
+    # the math/flash SDPA backends give identical results, so turn cuDNN attention off for the scoring pass.
+    torch.backends.cuda.enable_cudnn_sdp(False)
     import torch
     from transformers import AutoConfig
     from verl.utils.model import get_hf_auto_model_class
@@ -115,7 +120,7 @@ def score(args) -> None:
     softcap = getattr(model.config.get_text_config(), "final_logit_softcapping", None)
     print(f"[score] teacher={args.teacher} class={type(model).__name__} softcap={softcap}", flush=True)
     results = {}
-    for split in ("train", "validation"):
+    for split in [s for s in ("train", "validation") if s in args.splits.split(",")]:
         rows = [json.loads(l) for l in (Path(args.trace_dir) / f"{split}.jsonl").open()]
         seq_records, tok_mc, tok_topk, tok_topk_rn, tok_mass, tok_tlp_sampled, tok_slp_sampled = [], [], [], [], [], [], []
         for row in rows:
@@ -178,6 +183,7 @@ def main() -> int:
     p.add_argument("--student", required=True); p.add_argument("--teacher", default=None)
     p.add_argument("--chat_template", default=str(SCRIPTS / "data/gemma3_it_fewshot_math.jinja"))
     p.add_argument("--train_parquet", required=True); p.add_argument("--val_parquet", required=True)
+    p.add_argument("--splits", default="train,validation", help="comma-separated subset of train,validation to process")
     p.add_argument("--questions_per_split", type=int, default=128); p.add_argument("--samples_per_question", type=int, default=4)
     p.add_argument("--topk", type=int, default=128); p.add_argument("--seed", type=int, default=0)
     p.add_argument("--max_tokens", type=int, default=8192); p.add_argument("--max_prompt_tokens", type=int, default=4096); p.add_argument("--max_model_len", type=int, default=12288)
