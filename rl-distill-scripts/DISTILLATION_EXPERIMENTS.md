@@ -343,7 +343,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-07 00:01Z — math complete for 31/31 models, OOD complete for 29/31. Partial rows are shown as they finish._
+_Updated 2026-09-15 11:21Z — math complete for 33/33 models, OOD complete for 29/33. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -378,6 +378,8 @@ _Updated 2026-09-07 00:01Z — math complete for 31/31 models, OOD complete for 
 | `distill_26b_hard_to_e4b` | distilled | hard | 67.8 / 99.3 | 32.8 / 88.7 | **17.6 / 72.0** | 33.2 / 73.2 | 66.2 / 92.8 |
 | `distill_e4b_hard_to_e4b` | distilled | hard | 38.9 / 81.0 | 19.3 / 55.3 | **15.2 / 46.7** | 16.2 / 48.0 | 43.1 / 78.9 |
 | `distill_12b_medium_to_e4b` | distilled | medium | 68.0 / 96.3 | **32.9 / 82.7** | 19.3 / 65.0 | 33.5 / 67.6 | 69.0 / 93.3 |
+| `distill_12bd_medium_to_e4b_step1000` | distilled | medium | 71.3 / 97.0 | **36.6 / 82.3** | 19.9 / 58.3 | 33.9 / 67.2 | 71.3 / 92.4 |
+| `distill_12bd_medium_to_e4b_step300` | distilled | medium | 66.6 / 97.3 | **32.0 / 81.3** | 17.9 / 58.3 | 30.2 / 65.6 | 67.9 / 91.1 |
 | `distill_26b_medium_to_e4b` | distilled | medium | 71.3 / 99.0 | **37.5 / 89.3** | 20.4 / 69.7 | 34.3 / 71.8 | 67.3 / 92.1 |
 | `distill_e4b_medium_to_e4b` | distilled | medium | 62.2 / 93.7 | **28.5 / 75.7** | 16.2 / 55.0 | 26.1 / 60.2 | 64.1 / 88.6 |
 
@@ -414,6 +416,8 @@ _Updated 2026-09-07 00:01Z — math complete for 31/31 models, OOD complete for 
 | `distill_26b_hard_to_e4b` | 41.4 | 21.7 | 59.8 |
 | `distill_e4b_hard_to_e4b` | 40.3 | 20.7 | 59.5 |
 | `distill_12b_medium_to_e4b` | 39.6 | 14.6 | 58.9 |
+| `distill_12bd_medium_to_e4b_step1000` | — | — | — |
+| `distill_12bd_medium_to_e4b_step300` | — | — | — |
 | `distill_26b_medium_to_e4b` | 41.4 | 19.2 | 59.6 |
 | `distill_e4b_medium_to_e4b` | 43.7 | 26.3 | 61.1 |
 <!-- results:end -->
@@ -603,6 +607,24 @@ cd rl-distill-scripts/scale_train && bash launch_gemma4_12b_distilled_rl_medium.
 #   --completion-best-hf-s3-uri <artifact uri> -- bash launch_gemma4_12b_distilled_rl_medium.sh
 ```
 
+**Progress (2026-09-14 12:15Z).** After the 00:37Z 09-13 platform cancel the run has continued k8s-only (ScaleTrain shows the job
+CANCELED but Kueue keeps resuming the jobset; supervisor stopped to avoid duplicate writers). Pod 9 (since 04:37Z) is at **step 220**;
+permanent checkpoints every 10 steps up to 220 on S3; early-stopping state `best 0.497 @ step 190` (val mean@16 on medium val300 ×16;
+earlier bests 0.340@50, 0.456@130), misses 4 of 5 at step 235 (15:34Z) — the run ends by early stopping at step 240 unless that eval exceeds 0.497,
+or at its step-400 cap. Trajectory of val: 0.306@40 → 0.340@50 → 0.456@130 → 0.497@190 (the distilled 12B started at ≈0.08).
+
+**FINISHED 2026-09-14 16:47Z — early stopping at step 240** (`EARLY_STOP_TRIGGERED step=240 best=0.497 best_step=190 misses=5`;
+val 0.485@200, 0.486@210, 0.482@220, 0.489@230, 0.484@240 never beat 0.497@190). `RUN_DONE rc=0`: best-step-190 HF snapshot (7 files,
+26.0 GB) published to `s3://scale-ml/genai/rl-distill/gemma4-12b-from-e4bbase-distill-rl/gemma4-12b-medium-from-e4bbase-distill-es5/best_hf/`
+(+ `run_outcome.json`), completion receipt at `…-rl-full-checkpoints/12b-medium-from-e4bbase-distill-es5/run_complete.json`, permanent
+checkpoints `global_step_10..240` (every 10) on S3; the run also kept pushing to the Hub (pre-dates the S3-only policy):
+`JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-medium-seed42-from-e4bbase-distill-es5` holds `step_000170..step_000240` (max-to-keep 8;
+the best, step 190, is among them — prune to it if Hub storage matters). Headline: **RL on the E4B-base-distilled 12B takes medium val mean@16 from ≈0.08
+(step 0) to 0.497 (step 190)**, i.e. the distilled student recovers most of the way toward the untrained-12B RL ceiling; compare the E4B RL
+medium teacher (0.231 peak, §9.0b) and 12B-base RL (see the difficulty sweep). Nine pods / eight preemptions across 4.5 days; k8s-only
+since the 09-13 platform cancel. Non-fatal noise at shutdown: a W&B service-teardown traceback and a deferred S3 rolling-checkpoint
+cleanup error (`failed to delete rolling checkpoint objects`).
+
 ### 9.0b Seed-43 replicates of the small RL teachers (E2B, E4B × easy/medium/hard) — launched 2026-09-10 07:4xZ
 
 Same sweep recipe as the seed-42 runs (§9.0 table, minus the 12B memory knobs: `FSDP_CPU_OFFLOAD_POLICY=False`, default
@@ -643,6 +665,15 @@ their supervisors stopped; the 12B distilled RL job and the reverse-KL jobs were
 rolling 135 (best 0.145@130), e2b-hard permanent 10, e4b-easy rolling 25 (best 0.596@20), e4b-medium permanent 30 (best 0.231@30),
 e4b-hard nothing yet. To resume later: `SEED=43 SIZES="e2b e4b" BANDS="easy medium hard" bash start_gemma4_rl_seed_supervisors.sh`
 (same S3 prefixes → each run restores its newest checkpoint).
+
+**2026-09-15 05:36Z — e4b-medium resumed (seed 43) + new seed 44 (user).** `SEED=43 SIZES=e4b BANDS=medium` and `SEED=44 …` via
+`start_gemma4_rl_seed_supervisors.sh` (commit 764b5ec4: supervisors now `--relaunch-on-cancel --relaunch-on-failure --max-relaunches 30`,
+quick-cancel cap 2; the band-seed launcher is **S3-only by default** — `HF_PUSH_ENABLE=False`, the permanent S3 checkpoints carry the HF
+snapshot and `best_hf/` is published at the end). Seed 43 = **job_dakdierns19g0896pmig** (resumes from permanent step 30 of
+`gemma4-difficulty-s43-20260910-full-checkpoints/e4b-medium`; best so far 0.231@30); seed 44 = **job_dakdijrns19g07i0tj50** (fresh; S3 prefix
+`gemma4-difficulty-s44-20260910{,-full-checkpoints}/e4b-medium`, W&B `g4ds26b-e4b-medium-s44-v1`). Both QUEUED at 05:36Z (4 borrowed GPUs
+each, priority high); supervisors tmux `rl-g4-e4b-s43-medi` / `rl-g4-e4b-s44-medi`, state `.scale_train_supervisors/g4-e4b-s4{3,4}-medi-20260915/`.
+The other four seed-43 runs stay paused.
 
 ### 9.0c Reverse KL of the distilled students vs the E4B base (launched 2026-09-10 16:4xZ; final results 2026-09-11 07:02Z)
 
@@ -984,7 +1015,8 @@ Figure: `figures/passk_12b_onpolicy_stk50_vs_teacher.png` (adds the E2B base ×3
 
 **Why.** The plain student-top-128 run (§9.0e) started flattening after step ~100: student top-128 mass 0.9987 → 0.988 (step 130) → 0.947
 (step 140), response length 200 → 800 tokens, val 0.094 → 0.085 — the truncated sum rewards spreading mass into the unseen tail (CPU
-reproduction in §9.0e). Its S3 root was poisoned at 09:25Z so it stops at its next preemption; checkpoints `global_step_10..140` remain
+reproduction in §9.0e). Its S3 root was poisoned at 09:25Z so it stops at its next preemption (still running at 10:12Z: step 150 student mass 0.769,
+gap −0.015, response length 1329, val 0.070, grad-norm 43 — fully collapsed); checkpoints `global_step_10..150` remain
 and the step-50 results (reverse KL 0.0713, pass@k above the teacher) stand as the reported outcome of that variant.
 
 **Objective.** `reverse_kl_student_topk_bucket` (commit f0181bba): Σ_{v∈top-128(q_s)} q_s (log q_s − log p_t) + (1−Q_k)(log(1−Q_k) − log(1−P_k)),
@@ -995,8 +1027,367 @@ E4B teacher, 128 prompts × 1 sample, lr 5e-7 / warmup 20 / 200 steps, S3-only s
 **Launch.** `g4-12b-onpolicy-bkt` = job_dajrr9bns19g07i0ti3g — accepted by ScaleTrain (QUEUED 09:26Z) — `RUN_TAG=onpolicy-studenttop128-bucket-from-e4bbase-distill`;
 S3 `…-onpolicy-full-checkpoints/12b-medium-onpolicy-studenttop128-bucket-from-e4bbase-distill/`; W&B run id
 `g4-onpolicy-12b-medium-onpolicy-studenttop128-bucket-from-e4bbase-distill-s42-v1`; supervisor `.scale_train_supervisors/g4-12b-onpolicy-bkt-20260914/`
-(quick-cancel cap 1). Diagnostics to compare with §9.0e at the same steps: `student_mass` should stay ≈ 0.998 instead of drifting, the gap
+(quick-cancel cap 1). Node at 10:01Z, preempted by borrowing reclaim at 10:05Z (during model download) and again at 10:09Z
+(two minutes after re-admission); re-admitted 10:44Z (pod 3), step-0 val 0.077 (same student as §9.0e), TEACHER_IN_ACTOR_LOADED, first
+updates at 11:00Z. Diagnostics to compare with §9.0e at the same steps: `student_mass` should stay ≈ 0.998 instead of drifting, the gap
 should stay ≈ +0.002, and the loss (now including the bucket term) should start ≈ 0.09.
+
+| step | loss (bucket objective) | student top-128 mass | student − teacher mass | grad-norm | response length | update / step (s) |
+|---|---|---|---|---|---|---|
+| 1 | 0.159 | 0.9988 | +0.0018 | 5.9 | 262 | 109 / 230 |
+| 2 | 0.085 | 0.9986 | +0.0022 | 1.8 | 216 | 84 / 131 |
+| 3 | 0.088 | 0.9986 | +0.0023 | 2.0 | 202 | 84 / 118 |
+
+Steps 1–3 coincide with §9.0e's steps 1–3 (0.158 / ~0.085, mass 0.9987, gap +0.002): with the student's tail (0.0012) *smaller* than
+the teacher's on the same support (0.0037) the bucket term is ≈ −0.001, so the two objectives only separate once the student starts
+spreading mass — which is exactly when the plain sum went negative in §9.0e. Same memory footprint and step time as §9.0e.
+
+**11:10Z: third borrowing preemption at step ~8 (no checkpoint yet), and this time ScaleTrain reported the job COMPLETED** (the first
+two preemptions showed as QUEUED). The supervisor found no durable completion, cancelled job_dajrr9bns19g07i0ti3g and relaunched as
+**attempt 2 = job_dajtd33ns19g0896plog** (jobset `tapu6`, QUEUED 11:12Z, same env/roots, fresh start). Useful fact learned: an explicit
+`scale-train cancel` *does* delete the Kubernetes Job (`kubectl get jobs` no longer lists `0o6od`), unlike ScaleTrain's own 00:37Z
+auto-cancels which leave the Kueue workload alive (the `stk` zombies) — so no duplicate writer for the bucket root.
+
+**12:12Z: cancelled the collapsed plain run outright** (`scale-train cancel job job_dajf2dul77qg07nj7npg`; ScaleTrain still had it
+IN_PROGRESS, so the poison pill alone would only have stopped it at its next preemption). It had reached step 160 (student top-128 mass
+0.77–0.82, val 0.07) and was holding an 8-GPU node while attempt 2 of the bucket run sat queued for an hour. Kubernetes Job gone at 12:13Z;
+checkpoints `global_step_10..160` remain on S3 under `12b-medium-onpolicy-studenttop128-from-e4bbase-distill/`.
+
+**Attempt 2 got a node at 14:19Z** (3 h queued; pod `tapu6…cpq59`): step-0 val 0.071 (same weights as pod 3's 0.077 — ×16 sampling noise),
+steps 1–3 loss 0.137 / 0.091 / 0.088, student mass 0.9987 → 0.9985, gap +0.0020 … +0.0023, grad-norm 7.2 → 1.8, lengths 213–235,
+115–130 s/step. **Step-10 checkpoint on S3 at 15:02Z** (first resumable point). Steps 4–10: loss 0.086–0.094 (window mean 0.090, §9.0e
+warmup window was 0.087), student mass 0.9986–0.9988, gap +0.0018 … +0.0022, lengths 171–296, val 0.079 at step 10 (§9.0e: 0.077).
+Steps 11–20 (checkpoint 20 on S3 15:24Z): loss 0.055–0.088 (window mean 0.080; §9.0e 0.081), student mass 0.9985–0.9989 (no drift),
+gap +0.0017 … +0.0025, lengths 166–275, **val 0.103 at step 20** (§9.0e: 0.096). Steps 21–30 (full lr; checkpoint 30 at 16:03Z): loss
+0.060–0.077 (window 0.071; §9.0e 0.072), student mass 0.9989–0.9991 (slightly *up* from warmup), gap +0.0017 … +0.0020, lengths 156–268,
+**val 0.110 at step 30** (§9.0e: 0.108). Steps 31–40 (checkpoint 40 at 16:33Z): loss 0.052–0.078 (window 0.069; §9.0e 0.070),
+student mass 0.9986–0.9991, gap +0.0016 … +0.0022, lengths 175–305, val 0.093 at step 40 (§9.0e: 0.101; ±0.02 noise). Steps 41–50 (checkpoint 50 at 17:12Z): loss 0.050–0.079
+(window 0.069; §9.0e 0.074), **student mass 0.9984–0.9988 at step 50 vs 0.998 in §9.0e** — first comparison point, no difference yet
+(expected: the plain run only began drifting after step ~100), gap +0.0017 … +0.0022, lengths 173–302, val 0.096 at step 50 (§9.0e:
+0.091). Steps 51–60 (checkpoint 60 at 17:44Z): loss 0.061–0.081 (window 0.073; §9.0e 0.072), student mass 0.9983–0.9988, gap
++0.0014 … +0.0021, mean length 169–262 (an 8192-token non-terminating sample in 3 of the 10 batches — same as the RL/§9.0e runs, harmless
+at 1/128), val 0.102 at step 60 (§9.0e: 0.104). Steps 61–70 (checkpoint 70 at 18:18Z): loss 0.063–0.077 (window 0.072; §9.0e 0.076),
+student mass 0.9980–0.9987 (min so far 0.9980 at step 65, single-batch), gap +0.0013 … +0.0022, lengths 151–293, val 0.095 at step 70
+(§9.0e: 0.097).
+
+**18:30Z: preempted again at step ~75 (4 h 10 min on pod `cpq59`; checkpoint 70 is the resume point).** Same false-COMPLETED
+sequence as at 11:10Z: the supervisor cancelled job_dajtd33ns19g0896plog and submitted **attempt 3 = job_dak3s23ns19g07i0tieg** (jobset
+`en9q5`, QUEUED 18:33Z). Root cause found and fixed (commit below): the supervisor's pod classifier reads a *Succeeded* pod as a completed
+run, but a Kueue-preempted pod exits 0 (the run-file's SIGTERM handling) while its Job sits `spec.suspend=true` waiting for re-admission —
+so the supervisor was cancelling a live workload and giving up its queue position each time (the two earlier preemptions during download
+showed as QUEUED only because the pod was gone before the poll). `supervise_borrowing_job.py` now checks the owning Job's `spec.suspend`
+(tested against the live suspended Job → QUEUED; the finished RL Job → not suspended) and the patched supervisor was restarted adopting
+attempt 3 (`--initial-job-id`, tmux `onpolicy-12b-bkt2`, same log/state files). From here a preemption should just wait for Kueue.
+Attempt 3 got a node at 20:48Z (2 h 15 min queued), restored step 70 at 21:02Z and was **preempted again at 21:06Z** before its first
+step — and the patched supervisor logged `status=QUEUED` instead of COMPLETED, leaving the Kueue workload (and its queue position)
+intact: the fix works. Five borrowing preemptions so far today on this run; 70 steps banked.
+Re-admitted 21:31Z (25 min; queue position kept), restored step 70 at 21:37Z, **checkpoint 80 on S3 at 22:20Z**. Steps 71–80: loss 0.067–0.084
+(0.115 on the first post-restore batch; window 0.079, §9.0e 0.074), student mass 0.9981–0.9983, gap +0.0014 … +0.0019, lengths 168–275,
+val 0.100 at step 80 (§9.0e: 0.100).
+Steps 81–90 (checkpoint 90 at 22:52Z): loss 0.064–0.078 (window 0.072; §9.0e 0.075), student mass 0.9980–0.9984, gap +0.0012 … +0.0018,
+lengths 182–290, val 0.095 at step 90 (§9.0e: 0.094). Next §9.0e comparison point: step 100 (mass 0.9965 there).
+**Step 100 (checkpoint 23:24Z) — first divergence from §9.0e, in the bucket's favour:** student top-128 mass **0.9978–0.9984** (§9.0e at
+step 100: 0.9965 and falling), gap +0.0011 … +0.0020 (§9.0e: +0.0009 … +0.0013), loss window 0.068 (§9.0e 0.068), lengths 168–375,
+**val 0.109 at step 100** (§9.0e: 0.091). The tail-bucket term is holding the mass where the plain objective let it slip.
+Steps 101–110 (checkpoint 110 at 23:58Z): loss 0.060–0.081 (window 0.074; §9.0e 0.070), student mass 0.9972–0.9983 (single-batch
+dip to 0.9972 at step 102; §9.0e at 110: 0.9965 and falling), gap +0.0011 … +0.0020 (§9.0e: +0.0006 … +0.0009), lengths 180–345,
+val 0.100 at step 110 (§9.0e: 0.094).
+**Steps 111–120 (checkpoint 120 at 00:31Z) — the plain run's alarm point:** student mass **0.9976–0.9981** (§9.0e at 120: 0.9939), gap
++0.0012 … +0.0015 (§9.0e: ≈ 0, about to turn negative), loss window 0.074 (§9.0e 0.068), lengths 180–306, val 0.099 at step 120 (§9.0e: 0.094).
+No flattening: the bucket term has removed the drift the plain objective showed here.
+**00:49Z: preempted again** (sixth borrowing preemption; pod `d94vt` ran 21:32–00:49Z, steps 71–~125); resume point = checkpoint 120.
+Remaining §9.0e comparison points: steps 100 (0.9965), 120 (0.9939), 130 (0.99), 140 (0.947).
+
+### 9.0g Reverse direction: the RL'd distilled 12B (§9.0 best, step 190) → E4B base (started 2026-09-14 18:45Z)
+
+**Goal.** Take the strongest RL model of the study — the E4B-base-distilled 12B after DAPO on medium (val mean@16 0.497 @ step 190,
+§9.0) — and distill it back into the **untrained E4B base** with the §9 recipe, then evaluate. Natural control already in hand: §4's
+`12b-medium → e4b` run (the *untrained-12B* RL medium teacher, step 120, same student, same loss) — the only difference is which 12B the
+RL started from.
+
+**Recipe (§9, table above).** Teacher traces: 3,000 medium train questions × **16** samples + 300 validation × 1, T 1.0 / top-p 1.0 / top-k
+off, 8192 max response tokens, 12-shot prompt, top-128 logprobs + token ids per position. Distillation: top-128 forward KL, global batch
+**128**, **1000** steps, lr **2e-6** peak / 100 warmup / linear to 2e-7, 1 sequence per micro-batch under the 4096 padded-token ceiling,
+fp32 master + Adam, resumable checkpoints every 50 steps (S3 only — no Hub pushes), val top-128 KL every 10 steps. Then pass@k ×32 and
+the offline reverse/forward KL against the same teacher.
+
+**Hardware: local GPUs 0 and 2 only** (user's call). Trace generation = 2 data-parallel vLLM workers (TP 1, 12B bf16 ≈ 26 GB each);
+the E4B-base collection took 2 h 54 min for the same 48,300 rows (18:40 → 21:34Z 09-06, 4.5 GB), so expect ~2–3× that for the 12B.
+The E4B student normally needs 4 GPUs (fp32 master + Adam ≈ 56 GB/GPU on two); on 2 GPUs it will run with `FSDP_OFFLOAD=true`
+(params + Adam on the 2 TB host) — slower per step; ETA recorded once the first steps are timed.
+
+**Plumbing added (commit below).** New trace spec `12bd-medium` in `run_gemma4_bestckpt_trace_collection.sh` (RUN_KEY = the RL run's
+S3 prefix `12b-medium-from-e4bbase-distill-es5`, BEST_STEP 190, direction `12bd_medium_to_e4b`, `TEACHER_SOURCE=s3` reads
+`…-rl-full-checkpoints/<RUN_KEY>/global_step_190/actor/huggingface` — the verified artifact; Hub fallback pinned to `ed5457f6`;
+processor_config provisioned from `google/gemma-4-12B` as for every 12B actor export), 16-sample default for `12bd-*`, the direction
+registered in `generate_gemma4_distill_traces.py` and `preflight_gemma4_distill_training_view.py`, and a `12bd-*` branch in
+`run_gemma4_distill_one.sh` (bestckpt-v2 trace family on S3, 16 samples, no HF dataset mirror, W&B project `gemma4-12bd-distill-v1`).
+
+**Step 1 — traces (launched 18:45Z; both vLLM workers up on GPUs 0/2 at 18:56Z, generating from 18:59Z at ≈1.5 min per 128-request
+shard per worker; measured 1.43 shards/min over 18:59–19:45Z (62/375 done) → train split ≈ 23:25Z, bundle ≈ 23:45Z; tmux `trace-12bd-medium`, log `/tmp/gemma4_bestckpt_traces_v2/12bd-medium-collection.log`):**
+
+```bash
+TRACE_SPEC=12bd-medium TEACHER_SOURCE=s3 TRACE_GPU_IDS=0,2 TENSOR_PARALLEL_SIZE=1 TRAIN_SAMPLES_PER_QUESTION=16 \
+  VALIDATION_SAMPLES_PER_QUESTION=1 VENV=/tmp/.venv-gemma4 AWS_PROFILE=ml-worker bash rl-distill-scripts/scale_train/run_gemma4_bestckpt_trace_collection.sh
+# output /tmp/gemma4_bestckpt_traces_v2/12bd-medium/{train,validation}/*.parquet, mirrored to
+# s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2/12bd-medium/ (COMPLETE.json at the end)
+```
+**21:57Z: switched to 4 GPUs** (user: kill the root-owned GPU-holder placeholders on GPUs 1 and 3 — container inits, needed `sudo kill -9` —
+and resume on 0–3). The 2-worker run was stopped with SIGTERM at 240/375 train shards (all mirrored to S3), and relaunched at 21:59Z as
+`TRACE_GPU_IDS=0,1,2,3` → 4 data-parallel workers with the *same* hashed engine config (only `--num-workers`/`--worker-id` change, which
+are not part of the semantic hash), so the generator resumes: every existing shard is validated and skipped, no S3 work redone.
+tmux `trace-12bd-medium-4gpu`, same log.
+
+**22:00–22:06Z: the 4-GPU attempt lost GPUs 0, 2 and 3 to a teammate's evaluator.** The GPU-1/3 placeholders were Docker containers
+(`gpu-hold-1`, `gpu-hold-3`, restart policy on — `gpu-hold-1` came back within a minute; stopped for good with
+`docker update --restart=no` + `docker stop`). But within ~40 s of any GPU going free, `watch_and_eval.sh` loops belonging to
+jingxuanfan (pinned to GPU sets {0,2} and {3,5}) start 10–30 GB reward-bench processes on it, and our engine's hashed
+`gpu_memory_utilization=0.88` requires 69.9 GiB *free at startup* (vLLM `ValueError: Free memory on device … is less than desired`),
+so workers 0/2/3 failed their first attempt while worker 1 (GPU 1, in nobody's list) came up. Static shard ownership (shard % workers)
+means a worker that never gets its GPU stalls the whole split, so the 4-worker run was stopped (still 240/375, nothing lost) and
+relaunched 22:06Z on **GPUs 1,2** (tmux `trace-12bd-medium-g12`, `MAX_WORKER_ATTEMPTS=30`), with a 8-min guard that clears reward-bench
+grabs on GPU 2 until our engine holds it (both engines up 22:10Z).
+
+**22:11Z — user: "sudo kill everything on gpus 0-3 and then immediately launch our generation resume."** Done: our 2-GPU run stopped
+(SIGTERM), every compute process on GPUs 0–3 killed (three reward-bench processes), the collection relaunched on `TRACE_GPU_IDS=0,1,2,3`
+(tmux `trace-12bd-medium-g0123`, `MAX_WORKER_ATTEMPTS=30`) at 22:11:32Z, and a 12-minute startup guard kills any non-EngineCore process
+that lands on GPUs 0–3 until each of our four engines holds ≥ 60 GB (`scratchpad/gpu_guard.sh`, log alongside). Still 240/375 done.
+All four engines held their memory by 22:15Z (the guard then exited; a reward-bench process later squeezed 11.7 GB onto GPU 0 next to
+our engine, harmless). Resume verified: the four workers' first shards were 236/238 (the two in-flight shards of the killed runs, never
+saved) and 245/247 (the first unowned ones); no finished shard was regenerated.
+Four-worker rate **3.46 shards/min** (22:22–22:34Z; 2.5× the 2-worker 1.38) → train split ≈ 23:01Z, bundle ≈ 23:10Z.
+Train split complete 23:13Z (375/375). **Validation split failed at 23:20Z:** three of the four validation workers hit vLLM's
+free-memory check on their first attempt (GPU 0: a 10 GB reward-bench intruder, 69.06 GiB free < 69.9; GPU 3: intruders, 5.5 GiB free; GPU 1:
+65 GiB free while its own train engine was still tearing down) and **never retried** — a latent bug: under `set -e` the bare
+`wait "$pid"; status=$?` aborts the worker subshell on a non-zero exit before the retry loop, so `MAX_WORKER_ATTEMPTS` had never applied
+(this is also why the 22:00Z workers showed `attempts=1`). Fixed (`status=0; wait … || status=$?`, commit below). Worker 2 finished its 9
+validation shards. Relaunched 23:31Z on the two free GPUs (1, 2; tmux `trace-12bd-medium-val`) for the remaining 29 validation shards —
+train shards are all validated and skipped.
+The relaunch spent 23:31–23:48Z re-checking the 375 train shards (per-shard integrity pass, ~25/min), then ran the validation split: worker 0
+(GPU 1) finished its 19 shards by 23:55Z; worker 1 (GPU 2) lost its GPU to a reward-bench grab and **retried 20 times** (the fixed retry loop
+working as intended) before re-acquiring GPU 2 at 00:28Z; 23/38 at 00:33Z, ~15 shards left. Meanwhile a teammate's vLLM server container
+(`vllm-ptp-rl2-30174`, root) took GPU 1 once our worker released it, so the distillation runner now stops intruding *containers* (restart
+policy off) as well as bare processes on GPUs 0–3, and runs a startup guard until all four ranks hold their 60 GB reservation (commit 1346a034).
+
+**Bundle complete 01:06Z** (`TRACE_COLLECTION_COMPLETE`, 48,300 train rows + 300 validation, `COMPLETE.json` + `dataset_index.json` on S3; the
+bundle-wide validator took 31 min — it re-decodes every row). The distillation runner fired at 01:07Z, stopped the vLLM-server container on
+GPU 1, then died on a `set -e` trap in its own container lookup (a bare process has no docker cgroup → `grep` exit 1 → abort); fixed and
+relaunched 01:09Z (**step 2 launched 01:09:54Z on GPUs 0–3**; view build first, ~10 min for 48k rows). Guard clearing intruders meanwhile.
+View built (teacher identity `c9403bab…`, student `acdc0d2b…`) and the trainer launched at ~01:20Z — and **died at the 60 GB reservation**:
+between the runner's clearing pass and the ranks' first CUDA allocation, a root container (`/bridge/.venv/bin/python`, 80.9 GB on each of
+GPUs 1 and 2) and a 29 GB reward-bench process (GPU 3) had landed, so three ranks hit OOM/`CUDA error: out of memory` while rank 0 reserved
+fine. Fix (commit 1a551449): the reservation now *retries* (every 5 s, up to 10 min) while the runner's guard keeps clearing co-tenants
+(guard cycle 3 s, 25 min). Relaunched 01:23Z with GPUs 0–3 clear (the bridge container was gone by then).
+**Training since 01:24Z** (torchrun 4 ranks; all reservations held at 01:24:42Z; W&B
+[`gemma4-12bd-distill-v1/v50a6bro`](https://wandb.ai/rl-distill/gemma4-12bd-distill-v1/runs/v50a6bro)). **Step-0 validation: forward KL 0.323**
+nats/token on the teacher's top-128 (teacher mass 0.9994, E4B-base mass on that support 0.990) — higher than the E4B-base→12B start
+(0.264, §9.0c table): the RL'd 12B is a sharper, more specific target for the untrained E4B than the E4B base was for the 12B.
+Steps 1–3: train KL 0.329 / 0.339 / 0.285, ~40k active response tokens per 128-sequence batch, **86–100 s per step** (4 ranks at
+100 % util, 74–79 GB used incl. the 60 GB reservation) → the 1000 steps take ≈ 26 h (ETA ≈ 03:30Z 09-16). Speed-up option not taken
+(recipe fidelity): `MICRO_BATCH_SIZE_PER_GPU=2` would pack two ~2k-token sequences under the 4096 ceiling for ~1.4× — the loss is
+`token_sum / global_batch_tokens`, so the objective is unchanged, but memory headroom is thin and the audited preflight gates that layout.
+Correction after step 20: the first ~10 steps were slow (compile/warm-up); steps 10→20 ran at **45 s/step**, so the run should take ≈ 12.5 h
+(**ETA ≈ 14:00Z 09-15**). Val KL 0.323 (0) → 0.319 (10) → **0.280 (20)**; student mass on the teacher's top-128 0.990 → 0.9914.
+By step 50 (02:07Z) the pace settled at **32.5 s/step** (≈ 8.6 h for 1000 → **ETA ≈ 10:45Z**). Val KL **0.191 (30) → 0.164 (40) → 0.145 (50)**,
+student mass 0.9965 → 0.9970. **Step-50 save verified on S3 (02:11Z):** rolling slot committed and `hf_exports/global_step_50/huggingface/`
+(6 files, 17.4 GB) uploaded — the S3-only export path works end to end; training resumed at step 51 without a stall.
+Val KL through step 90 (02:35Z, 30 s/step): 60: 0.136, 70: 0.127, 80: 0.122, 90: 0.120; student mass on the teacher's top-128 0.9980.
+
+**Throughput (user question, 02:50Z).** Layout: 4 GPUs, FSDP2 full-shard DP only, **1 sequence per micro-batch** under a 4096 padded-token
+ceiling → 32 sequential micro-steps per GPU per optimizer step, SDPA attention (no remove-padding for Gemma 4), bf16 compute / fp32 master +
+Adam, grad checkpointing, full-vocab KL in 4096-token chunks. Measured 28.7 s/step for ≈ 250k tokens (≈ 2.2k tok/s/GPU ≈ 80 TFLOP/s, < 10 %
+of H100 peak): the one-sequence micro-batch under-feeds the GPU and pays FSDP all-gathers + recompute 32× per step. **Switch at step 150:**
+`MICRO_BATCH_SIZE_PER_GPU=4`, `MAX_PADDED_TOKENS_PER_MICROBATCH=8192` (≈ 8k tokens per micro-step, 8 micro-steps/GPU), reservation 70 GB
+(leaves < 10 GB visible so the box's schedulers keep off). Objective unchanged (loss = token_sum / global batch tokens; data order restored
+from the rolling checkpoint's dataloader position); only the accumulation split changes (the §9 runs already used 16 micro-steps on 8 GPUs).
+Executed 03:10–03:13Z: step-150 rolling checkpoint + `hf_exports/global_step_150` committed, trainer stopped, relaunched 03:13:21Z with
+`MICRO_BATCH_SIZE_PER_GPU=4 MAX_PADDED_TOKENS_PER_MICROBATCH=8192 DISTILL_RESERVE_GPU_GB=70`; resumes from the step-150 rolling checkpoint
+(Adam + LR/RNG + dataloader position). (The automated switch task killed itself with a self-matching `pkill -f` after stopping the trainer, so
+the relaunch was issued by hand ~2.5 min later; GPUs stayed free in the gap.) Val KL before the switch: 0.116 (100) → 0.112 (110) →
+0.111 (120) → 0.109 (130) → 0.108 (140) → **0.108 (150)**; student mass on the teacher's top-128 0.9986. The curve is flattening around
+0.11 at lr ≈ 1.9e-6 — the E4B base cannot get arbitrarily close to the RL'd 12B; compare 0.075–0.076 final for E4B-base→12B/26B (§9.0c).
+**Result of the switch (03:23Z):** restore exact (val@150 0.1087 = pre-switch 0.108; train KL at steps 152–153 within 0.001 of the
+pre-switch values), step time **17.3 s** (steps 152–156: 17.3 / 17.9 / 18.2 / 17.4 / 15.9) vs 28.7 s before → **1.65×**; ≈ 250k tokens/step
+→ 14.5k tok/s total. Remaining 845 steps ≈ 4.1 h → **ETA ≈ 07:30Z**. GPUs at 78.6 GB used (70 GB reservation reused; the high-water mark is
+set by the single long-sample micro-batches, which are the same in both layouts) and 100 % util.
+Val KL after the switch: 160: 0.1072, 170: 0.1070, 180: 0.1053, 190: 0.1045, 200: 0.1028, 210: 0.1021; rolling checkpoint + `hf_exports/global_step_200` committed at ~03:50Z.
+Steps 220–300 (220: 0.1013, 230: 0.1030, 240: 0.1009, 250: 0.0999, 260: 0.1007, 270: 0.1000, 280: 0.1009, 290: 0.1004, 300: 0.0992); **first permanent full checkpoint `global_step_250` on S3** (109 GB), rolling slot at 300. Val KL plateauing ≈ 0.100.
+Steps 310–640: val KL 0.098 → 0.0935 (600) as the LR decays; permanent `global_step_500` on S3; rolling 550, 600 committed.
+
+**06:2xZ incident — `/tmp` filled up and the step-650 save died (`SafetensorError: No space left on device`), crashing the trainer.**
+The 28 TB ephemeral volume had 895 GB free at 18:50Z 09-14; by 06:20Z it was full. My own footprint: `/tmp/gemma4_trace_models` **524 GB**
+(teacher HF copies from every trace collection of the study, never cleaned), `/tmp/verl` 352 GB (the distill's local checkpoints incl. a
+**stale 109 GB `global_step_150`** left from the 03:13Z relaunch — the trainer's max-keep pruning only knows about saves of the current
+process), `/tmp/gemma4_distill_study_eval` 469 GB (the study's eval traces, mirrored to S3), plus ~100 GB of caches. Freed ≈ 620 GB (all
+teacher copies except `12bd-medium`, the stale checkpoint, my caches); relaunched at ~06:28Z → resumes from the S3 rolling step 600
+(≈ 15 min of steps lost). Lesson: `/tmp` is shared and finite — trace/eval runners should delete their model copies when done, and a
+relaunch must purge the previous process's local checkpoints.
+Guards added (commit b6c93f26): the trainer now waits (up to 1 h, `DISTILL_MIN_FREE_GB=160`) for free space before every local save
+instead of dying mid-save, the runner purges any previous process's local checkpoints before launching, and a 5-min `/tmp` free-space
+watch alerts below 200 GB. The 06:37Z relaunch still runs the pre-guard code (the guard applies from the next relaunch); 712 GB free.
+Resume verified: val@600 0.0935 reproduced, step-650 rolling checkpoint + export committed at 07:00Z (611 GB free afterwards); val 0.0937 @ 650.
+
+**07:17Z crash #2 — non-finite gradient at step 692.** Steps 651–690 normal (val 0.0931 @ 660, 0.0932 @ 670, 0.0930 @ 690, grad norm ≈ 3);
+step 691 grad norm **41.7** (clipped), step 692 `FloatingPointError: gradient norm is non-finite: nan` on all ranks — the launcher runs the
+trainer fail-closed (`VERL_FAIL_ON_NONFINITE_GRAD=1`). Loss was finite (the loss check did not fire). Relaunched 07:24Z from the S3 rolling
+step 650 with `VERL_FAIL_ON_NONFINITE_GRAD=0` = verl's standard policy: a non-finite pre-clip norm zeroes the gradients and skips that
+optimizer step with a `WARN` (the loss stays fail-closed). **Step 692 is a deterministic bad batch:** on the resumed run steps 690/691 had
+grad norms 2.5 / 1.6 (no spike this time) and step 692 again produced `grad_norm = nan` with a *finite* loss (mean 0.072, max 7.8) — the
+trainer skipped that optimizer step (`WARN: gradient norm is non-finite`) and continued. So it is one of the 128 sequences of epoch-2 batch
+316 (the data order is fixed by the seed-42 shuffle), most likely a bf16 overflow in the backward of one sequence; the loss values give no
+hint. Effect on the run: one skipped step out of 1000. Worth dumping that batch later to find the row.
+Steps 700–960 (rolling 700–950 + exports on S3, permanent 750): val KL 700: 0.0927, 750: 0.0924, 800: 0.0926, 850: 0.0914, 900: 0.0911, 950: 0.0913, 960: 0.0904 — the LR tail (→ 2e-7) is still buying a little.
+**Step 3 armed (09:35Z):** `local_jobs/step3_evals_after_distill.sh` (tmux `step3-orchestrator`, commit a043bb6e) waits for the step-1000
+export receipt, clears GPUs 0–3, then runs in parallel (a) the §7 math suite on the final export (GPUs 0,1, tag
+`distill_12bd_medium_to_e4b_step1000`) and (b) pass@k ×32 for every 50-step export + the 12bd teacher + the §4 control followed by the
+reverse/forward KL of the final student vs the teacher (GPUs 2,3, `eval_12bd_medium_to_e4b.sh`).
+
+**Step 2 DONE ≈ 09:45Z**: 1000 steps, final permanent checkpoint `global_step_1000` (fp32 + Adam + HF export inside, 109 GB) on S3;
+val KL 970: 0.0906, 980: 0.0906, 990: 0.0904, 1000: 0.0903 → **final 0.0903** (from 0.323). Orchestrator slip: it waited for `hf_exports/global_step_1000`, but permanent saves
+(250/500/750/1000) keep their export *inside* `global_step_N/huggingface/` (only rolling saves write `hf_exports/`), so it never fired —
+caught at 10:41Z (≈ 1 h lost); registry entry + pass@k runner fixed for the permanent layout (commit below) and both evals launched by
+hand at 10:4xZ: (a) tmux `eval-12bd-step1000` (math suite, GPUs 0,1), (b) tmux `eval-12bd-passk` (pass@k ×32: 16 rolling exports +
+250/500/750/1000 + teacher + control, then KL; GPUs 2,3).
+
+**Step 3a result — §7 math suite on the FINAL export (step 1000; official §8 row, eval done 11:21Z):**
+
+| set | **final step 1000** | step 300 | §4 control `distill_12b_medium_to_e4b` (500 steps) | `distill_26b_medium_to_e4b` (best §4 E4B) | `rl_e4b_medium` | `base_e4b` |
+|---|---|---|---|---|---|---|
+| id_easy (16) | **71.3 / 97.0** | 66.6 / 97.3 | 68.0 / 96.3 | 71.3 / 99.0 | 62.2 / 94.3 | 29.6 / 89.3 |
+| **id_medium (16), own band** | **36.6 / 82.3** | 32.0 / 81.3 | 32.9 / 82.7 | 37.5 / 89.3 | 29.1 / 71.3 | 8.6 / 60.3 |
+| id_hard (16) | **19.9 / 58.3** | 17.9 / 58.3 | 19.3 / 65.0 | 20.4 / 69.7 | 17.2 / 58.3 | 4.2 / 38.0 |
+| MATH500 (16) | **33.9 / 67.2** | 30.2 / 65.6 | 33.5 / 67.6 | 34.3 / 71.8 | 26.5 / 61.6 | 10.9 / 50.6 |
+| GSM8K (8) | **71.3 / 92.4** | 67.9 / 91.1 | 69.0 / 93.3 | 67.3 / 92.1 | 65.4 / 88.9 | 26.4 / 72.6 |
+
+Reading: the RL'd *distilled* 12B is a better teacher for the E4B base than the untrained-12B RL model was — **mean@k is higher on every
+set** (own band 36.6 vs 32.9, +3.7; easy +3.3, hard +0.6, MATH500 +0.4, GSM8K +2.3) and it beats the E4B's own RL (29.1) by 7.5 points on the
+medium band — while **pass@16 is equal or lower** (hard 58.3 vs 65.0, medium 82.3 vs 82.7): the sharper teacher (trained from a student
+of the E4B base, then RL'd to 0.497) transfers a more peaked, mode-seeking policy — higher single-sample accuracy, less diversity at large k.
+The 26B-teacher E4B student (§4) still leads on pass@k and edges mean@k on medium/hard. Steps 300 → 1000 added +4.6 on the own band and
++3–5 elsewhere; response lengths 173–471 tokens, ≤ 0.1 % truncation. Figure (5 panels, shared legend, both steps):
+`figures/passk_e4b_from_12bd_math_suite.png`.
+
+Sanity check on the first 62 shards (7,936 rows, 19:45Z): teacher content sha `b3c37391…` (the step-190 export), **strict accuracy 0.581**
+on the medium *train* prompts at T = 1 (the run's val mean@16 was 0.497), mean response 391 tokens (median 312, p95 847), 2 of 2,560
+inspected rows hit the 8192-token cap (finish = length), the rest stop cleanly — the RL'd teacher's short boxed style, no degeneration.
+
+**Step 2 — distillation (armed 19:05Z, tmux `distill-12bd-medium`, waits for the bundle's `COMPLETE.json` and the GPUs, then runs;
+log `/tmp/gemma4_12bd_distill/distill.log`):** `rl-distill-scripts/local_jobs/distill_12bd_medium_to_e4b_gpu02.sh` =
+`TEACHER_SPEC=12bd-medium STUDENT=e4b DISTILL_GPU_IDS=0,2` with the §9 knobs (bs 128, 1000 steps, lr 2e-6 → 2e-7, warmup 100, TEST_FREQ 10),
+`ALLOW_UNDERSIZED_STUDENT_LAYOUT=true FSDP_OFFLOAD=true` (2 GPUs), S3-only checkpoints at
+`s3://scale-ml/genai/rl-distill/gemma4-12bd-distill-ckpts-v1/12bd-medium-to-e4b-bs128-s1000-lr2e-6/` (permanent every 250, rolling every 50,
+plus `hf_exports/global_step_N/huggingface/` for every 50-step export — new `ROLLING_HF_EXPORT_S3`, commit c3e82067), `HF_PUSH_ENABLE=false`,
+W&B `gemma4-12bd-distill-v1/12bd-medium-to-e4b-base-bs128-s1000-lr2e-6-g2-offload`. Resumable: rerunning the script restores the newest S3 checkpoint.
+**22:30Z update:** with GPUs 0–3 cleared for us, the runner now trains on **all four** (`DISTILL_GPU_IDS=0,1,2,3`, `FSDP_OFFLOAD=false` — the §4
+E4B layout, W&B run `…-lr2e-6-g4`), waits for our trace engines to exit, clears anything that landed on 0–3 meanwhile, and reserves 60 GB per
+rank at startup (`DISTILL_RESERVE_GPU_GB`, new in `main_full_vocab_distill_fsdp2.py`: allocate-and-release into PyTorch's caching allocator, so
+the box's free-GPU schedulers see no room) — the reward-bench evaluator otherwise lands 10–30 GB jobs on any GPU with free memory.
+
+**Step 3 — evals (runner ready: `rl-distill-scripts/local_jobs/eval_12bd_medium_to_e4b.sh`, runs after training on GPUs 0/2):** pass@k ×32 on
+the medium validation set (§9.1 protocol) for every 50-step export, the 12bd teacher itself and the §4 control
+(`gemma4-distill-v2-12b-medium-to-e4b-base@b015fe88/step_000500` — the untrained-12B RL teacher → same E4B student, same loss), against the
+existing E4B-base ×32 trace; then reverse + forward KL vs the 12bd teacher (128 val q × 4) for the final student; figure
+`figures/passk_e4b_from_12bd_medium.png`.
+
+**Step 3a — the §7 math suite for the step-300 export (set up 04:5xZ 09-15, NOT launched — GPUs 0–3 are training until ≈ 08:10Z).**
+Same protocol as every row of §8: `id_easy`/`id_medium`/`id_hard` (pinned 300-q band validation splits) ×16, MATH500 ×16, GSM8K ×8, T 1.0 /
+top-p 1.0 / top-k off, 8192 max tokens, 12-shot prompt, scored with the RL reward (strict last-`\boxed{}`), manifest
+`gemma4_rl_distill_math_eval_v2` (already prepared under `/tmp/gemma4_distill_study_eval/data/`), study runner knobs (no logprobs, 16 GiB KV,
+64 q × 16 per vLLM call, per-dataset resume). Plumbing: registry entry **`distill_12bd_medium_to_e4b_step300`** (category distilled,
+E4B, medium; `s3_hf_export` source = `…/hf_exports/global_step_300/huggingface/` + its `_REMOTE_COMPLETE.json`; the materializer now
+accepts the `step` key those receipts carry) in `config/gemma4_distill_study_eval_sources.json` — note the registry *builder* only keeps
+Hub-discovered distilled entries, so re-add this one if the roster is regenerated. Runner: `rl-distill-scripts/local_jobs/eval_12bd_step300_math.sh`
+(`GPUS=0,1`; results under `/tmp/gemma4_distill_study_eval/results/<tag>/`, mirrored to `s3://scale-ml/genai/rl-distill/gemma4-distill-study-evals-v1/<tag>/`,
+then `update_distill_study_results_doc.py --fallback-from-doc` adds the row to §8). Comparison rows already in §8: `distill_12b_medium_to_e4b`
+(§4 control: 68.0/96.3 · **32.9/82.7** · 19.3/65.0 · 33.5/67.6 · 69.0/93.3), `base_e4b` (29.6 · 8.6 · 4.2 · 10.9 · 26.4), `rl_e4b_medium` (62.2 · **29.1** · 17.2 · 26.5 · 65.4).
+Out-of-domain (MMLU-Pro / GPQA-Diamond / MMLU-14k, lm-eval, different scorer) is the same runner with `EVAL_PHASES=ood`.
+**Launched 05:04Z on GPUs 6,7** (user: "just the math … maximize throughput"): `GPUS=6,7 EVAL_KV_CACHE_GIB=48 EVAL_GPU_MEMORY_UTILIZATION=0.85
+MATH_REQUEST_BATCH_SIZE=2048 MATH_QUESTIONS_PER_BATCH=128` — one whole H100 per vLLM instance instead of the queue's half-GPU sharing;
+per-request seeds make the sampled set independent of batching, so the numbers stay comparable with §8. tmux `eval-12bd-step300`, log
+`/tmp/gemma4_distill_study_eval/queue_logs/eval_12bd_step300_driver.log`; a 15-min startup guard keeps GPUs 6/7 clear while vLLM loads.
+
+**Results as they land (mean@k / pass@k, %, computed from the completed trace files with the run's own `acc`; §8 gets the official row at the end):**
+
+| set | step-300 12bd→E4B | §4 control `distill_12b_medium_to_e4b` | `rl_e4b_medium` | `base_e4b` |
+|---|---|---|---|---|
+| GSM8K (8) | **67.9 / 91.1** (maj@8 78.4; 176 tok, 0 % truncated) | 69.0 / 93.3 | 65.4 / 88.9 | 26.4 / 72.6 |
+| MATH500 (16) | **30.2 / 65.6** (maj@16 42.6; 401 tok, 0.1 % truncated) | 33.5 / 67.6 | 26.5 / 61.6 | 10.9 / 50.6 |
+| id_easy (16) | **66.6 / 97.3** (maj@16 83.0; 248 tok) | 68.0 / 96.3 | 62.2 / 94.3 | 29.6 / 89.3 |
+| id_hard (16) | **17.9 / 58.3** (maj@16 27.3; 463 tok, 0.1 % truncated) | 19.3 / 65.0 | 17.2 / 58.3 | 4.2 / 38.0 |
+| **id_medium (16), own band** | **32.0 / 81.3** (404 tok, 0.2 % truncated; from the fully scored trace file before finalisation) | **32.9 / 82.7** | **29.1 / 71.3** | 8.6 / 60.3 |
+
+pass@k curves (one panel per completed set; the four E4B models above): `figures/passk_e4b_step300_vs_refs.png`, regenerated as each set
+lands. pass@1 / pass@4 / pass@n so far — GSM8K (n = 8): base 26.3 / 57.6 / 72.6, RL 65.4 / 83.7 / 88.9, §4 control 69.0 / 88.4 / 93.3,
+**new 67.9 / 86.3 / 91.1**; MATH500 (n = 16): base 10.9 / 27.6 / 50.6, RL 26.5 / 43.6 / 61.6, §4 control 33.5 / 53.1 / 67.6, **new 30.2 / 49.3 / 65.6**.
+At step 300 of 1000 the new student sits between the E4B RL model and the §4 control on both OOD sets (the control is a finished 500-step run).
+
+**Eval complete 05:40Z** (36 min on 2 GPUs for 33k generations); official row in §8 (identical to the table above). Two layout slips fixed
+afterwards: the runner had been given the *shared* results root, so the row first came out blank and the end-of-run mirror copied every other
+model's results under this tag's S3 prefix — results moved into the per-model layout (`results/<tag>/<tag>/math/`), §8 rebuilt, the 37 stray
+prefixes deleted from S3 and the model's own results mirrored (commit a341c62b fixes the runner). Five-panel pass@k figure with one shared legend:
+`figures/passk_e4b_step300_vs_refs.png` (`plot_passk_from_traces.py --shared-legend`, commit d6e21d9d).
+
+### 9.0h Resuming the untrained-12B medium RL run from step 130 (patience 4, fast update layout) — 2026-09-15
+
+**Ask.** Continue the seed-42 DAPO run of `google/gemma-4-12B` on the medium band (§1/§8 teacher `12b-medium`) from its last checkpoint,
+with Adam state and the dataset cursor, early stopping = **4 non-improving validations in a row**, on one 8-GPU node, and with faster
+micro-batching — tested locally first, then launched on ScaleTrain.
+
+**What the checkpoint holds.** `s3://…/gemma4-difficulty-s42-20260819-full-checkpoints/12b-medium/global_step_130/` (169 GB, world size 8):
+fp32 model + Adam shards, `extra_state` (LR/RNG), `data.pt` (dataloader cursor) and `validation_early_stopping.json`. The run had stopped on
+**patience 1**: best 0.5208 @ 120, then 0.51875 @ 130 → one miss → stop. Resuming with `EARLY_STOPPING_PATIENCE=4
+EARLY_STOPPING_MIGRATE_PATIENCE_FROM=1` keeps best/miss history and recomputes the trigger flag (misses 1 < 4), so the next validation is
+miss 2 of 4 (the trainer verifies the saved patience equals the migrate-from value; §3b of `RESUME_GEMMA4_26B_A4B_LOCAL.md` documents the
+same procedure for the 26B). Steps continue 131 → cap 400 (`TOTAL_TRAINING_STEPS=400`, the sweep's cap); permanent + S3 saves every 10,
+rolling every 5, no Hub pushes.
+
+**Blocker handled.** The finished run left durable completion markers (`run_complete.json`, `run_outcome.json`, `best_hf/_REMOTE_COMPLETE.json`);
+the run-file's preflight would exit `RUN_ALREADY_COMPLETE`. `scale_train/move_gemma4_12b_medium_completion_markers.sh` moves them (reversibly)
+under `pre-resume-20260915/` in each prefix right before the launch.
+
+**Micro-batching.** The 12B recipe ran `MICRO_BATCH_SIZE_PER_GPU=1`, 4096 padded cap, per-layer `FSDP_CPU_OFFLOAD_POLICY=True`, vLLM resident
+(distilled-12B run: update 593 s of a 789 s step). The 26B resume measured (2026-09-03, same batch) mbsz 4 / 8192 cap / phase-level
+`OFFLOAD=True` / `VLLM_SLEEP_MODE=True` at 4.9×/step, gradient-neutral (global-token-mean loss). `scale_train/launch_gemma4_12b_medium_resume.sh`
+adopts that layout for 12B (dense: no router replay), rollout util 0.45 / KV 10 GiB (trainer state is off-GPU during generation), every knob
+overridable. **Local test:** the world-size-8 checkpoint cannot load on this box's 4 free GPUs, so `local_jobs/gemma4_12b_fast_layout_local_test.sh`
+runs a fresh 2-step 12B DAPO step on GPUs 0–3 with the fast layout (pessimistic: 48 GB/GPU of fp32 state vs 24 on 8 GPUs) to check memory
+and update time — launched 17:01Z (tmux `g4-12b-local-test`, log `/tmp/gemma4_12b_local_test/fast_mbs4_cap8192.log`).
+First attempt died at Ray start-up (box load 260–300; `/tmp/.venv-gemma4`'s Ray still had the hardcoded 30 s raylet wait — patched to read
+`RAY_RAYLET_START_WAIT_TIME_S`, relaunched 17:23Z with 600 s). **Result (4 × H100, 1024 sequences/step, mbsz 4 / 8192 cap / OFFLOAD=True /
+sleep mode, no OOM):** step 1 gen 125 s · old-log-prob 101 s · update 393 s · step 642 s (warm-up); **step 2 gen 47 s · old-log-prob 60 s ·
+update 289 s · step 418 s** (256 seq/GPU → 64 micro-steps of 4 ≈ 4.5 s each; grad norms 2.7 / 1.7, mean response 202 tokens). On the 8-GPU
+node (128 seq/GPU, half the fp32 state per GPU) the update should land ≈ 150 s vs 593 s for the recipe layout on the distilled-12B run.
+
+**Launched 18:09Z:** completion markers moved to `pre-resume-20260915/` (both prefixes), then `g4-12b-med-resume` = **job_dakojfht1s0g088gt0vg**
+(QUEUED) under supervisor tmux `rl-g4-12b-med-resume` (`.scale_train_supervisors/g4-12b-med-resume-20260915/`, relaunch on cancel/failure,
+quick-cancel cap 2). Expect on start: `restored complete source=permanent step=130`, `EARLY_STOPPING_PATIENCE_MIGRATED … triggered=False`,
+validation at 140, 150, … ; stops after 4 consecutive misses vs the running best (0.5208 @ 120 unless beaten) or at step 400.
+
+**Switched to a local 4-GPU resume (user request, 18:20Z).** The ScaleTrain job was cancelled (`job_dakojfht1s0g088gt0vg`, CANCELED
+18:21Z, supervisor stopped) and the run continues on this box instead. The obstacle: verl's FSDP2 checkpoints are **per-rank `torch.save`
+files** (`model|optim|extra_state_world_size_8_rank_r.pt`), loaded back by `(world_size, rank)`, so an 8-rank checkpoint cannot be resumed on
+4 GPUs. Each sharded value is a `DTensor` with `Shard(0)` on the 1-D `fsdp` mesh whose local piece follows `torch.chunk` semantics (checked:
+every dim-0 size is divisible by 8; 630 model DTensors + 48 replicated buffers; Adam `exp_avg`/`exp_avg_sq` DTensors + scalar `step`).
+New tool **`reshard_fsdp2_checkpoint.py`**: loads the 8 shards on CPU (no GPUs, no NCCL — the destination DTensors are built on a
+`_init_backend=False` mesh under a 1-process gloo group, which pickles exactly like the trainer's own shards), concatenates the local
+pieces in rank order, re-chunks to 4, clones each chunk (a `torch.chunk` view would serialize the whole tensor into every shard file — the
+first attempt wrote 48 GiB per rank), rewrites `fsdp_config.json` (`world_size: 4`), copies `extra_state` rank r ← source rank r (LR
+scheduler identical, RNG per rank), `data.pt` and `validation_early_stopping.json`, then re-reads every destination shard and checks the
+rank-ordered concatenation is **bit-exact** against the source (model 630/630, optim 1236/1236 DTensors). Conversion of the 134 GB step-130
+checkpoint took ~9 min (4 × 12.1 GiB model + 4 × 22.2 GiB Adam shards). It generalizes to any W→D with W % D == 0 or D % W == 0.
+
+`local_jobs/resume_gemma4_12b_medium_local4.sh` drives the same run-file contract as the ScaleTrain launcher with local differences:
+picks **4 GPUs that are idle at start** (no compute process, < 512 MiB; the box's other users were on GPUs 5/6 at launch), checkpoints on EFS
+(`/mnt/efs/jasonwei/gemma4-12b-medium-s42-local4/ckpts`; the `/tmp` volume was at 158 GB free — a 4-rank checkpoint + HF export is ~160 GB),
+`MAX_ACTOR_CKPT_TO_KEEP=2`, a **new S3 prefix** (`…-full-checkpoints/12b-medium-local4`, artifacts `…/gemma4-12b-medium-local4`) so the
+4-rank shards never mix with the 8-rank history (`restore-latest` on the empty prefix is a no-op and the trainer resumes from the local
+tracker), the same W&B run id (`g4ds26b-12b-medium-s42-v1`, curve continues), a GPU guard (kills non-owner processes that land on our GPUs
+after start — the box's evaluator loops grab any GPU that looks idle, and OFFLOAD/vLLM-sleep phases leave ours briefly empty; `GUARD=0`
+disables) and a relaunch loop (≤ 5 attempts, each resuming from the newest complete checkpoint). Initial validation is skipped on a
+resume with restored early-stopping history (`INITIAL_VALIDATION_SKIPPED_ON_RESUME`), so the first observation is at step 140.
+Follow-up: the best step so far (120) lives only in the original prefix; if it is still the best at the end, copy
+`global_step_120/actor/huggingface/` + its `_REMOTE_COMPLETE.json` into the new prefix *after* the run's first upload (so `restore-latest`
+never picks the 8-rank step 120) or publish `best_hf` by hand — the original `gemma4-12b-medium/best_hf/` still holds it.
 
 ### 9.1 Results
 
