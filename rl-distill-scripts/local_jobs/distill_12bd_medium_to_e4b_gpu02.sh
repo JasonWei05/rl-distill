@@ -23,7 +23,18 @@ echo "$(date -u +%FT%TZ) bundle complete; waiting for our trace engines to exit"
 until [[ $(nvidia-smi --query-compute-apps=process_name --format=csv,noheader | grep -c EngineCore) -eq 0 || -z $(pgrep -f run_gemma4_bestckpt_trace_collection.sh | head -1) ]]; do sleep 20; done
 # GPUs 0-3 are ours (user, 2026-09-14 22:11Z: "sudo kill everything on gpus 0-3"): clear whatever landed on them since.
 GPUS="${DISTILL_GPU_IDS:-0,1,2,3}"
-for g in ${GPUS//,/ }; do u=$(nvidia-smi --query-gpu=uuid --format=csv,noheader -i "$g"); for p in $(nvidia-smi --query-compute-apps=gpu_uuid,pid --format=csv,noheader | awk -F', ' -v u="$u" '$1==u{print $2}'); do sudo kill -9 "$p" 2>/dev/null && echo "$(date -u +%FT%TZ) cleared pid $p from GPU $g"; done; done; sleep 3
+clear_gpus() {  # stop Docker containers (restart policy off) and kill bare processes that hold our GPUs
+  for g in ${GPUS//,/ }; do u=$(nvidia-smi --query-gpu=uuid --format=csv,noheader -i "$g")
+    for p in $(nvidia-smi --query-compute-apps=gpu_uuid,pid --format=csv,noheader | awk -F', ' -v u="$u" '$1==u{print $2}'); do
+      [[ $(ps -o user= -p "$p" 2>/dev/null) == jasonwei ]] && continue   # ours
+      cid=$(grep -oE 'docker[-/][0-9a-f]{64}' /proc/"$p"/cgroup 2>/dev/null | head -1 | grep -oE '[0-9a-f]{64}')
+      if [[ -n $cid ]]; then sudo -n docker update --restart=no "$cid" >/dev/null 2>&1; sudo -n docker stop -t 2 "$cid" >/dev/null 2>&1 && echo "$(date -u +%FT%TZ) stopped container ${cid:0:12} ($(sudo -n docker inspect -f '{{.Name}}' "$cid" 2>/dev/null)) on GPU $g"; fi
+      sudo kill -9 "$p" 2>/dev/null && echo "$(date -u +%FT%TZ) cleared pid $p from GPU $g"
+    done; done
+}
+clear_gpus; sleep 3
+# startup guard: keep clearing intruders on our GPUs until every rank holds its reservation (up to 15 min)
+( start=$(date +%s); while [ $(( $(date +%s) - start )) -lt 900 ]; do held=0; for g in ${GPUS//,/ }; do u=$(nvidia-smi --query-gpu=uuid --format=csv,noheader -i "$g"); m=$(nvidia-smi --query-compute-apps=gpu_uuid,pid,used_memory --format=csv,noheader | awk -F', ' -v u="$u" '$1==u{print $2, $3}' | while read -r p mm; do [[ $(ps -o user= -p "$p" 2>/dev/null) == jasonwei ]] && echo "${mm%% *}"; done | sort -n | tail -1); [ "${m:-0}" -ge 50000 ] && held=$((held+1)); done; n=$(echo "${GPUS//,/ }" | wc -w); [ "$held" -ge "$n" ] && { echo "$(date -u +%FT%TZ) guard: all $n ranks hold their GPUs"; exit 0; }; clear_gpus; sleep 5; done; echo "$(date -u +%FT%TZ) guard: timeout" ) &
 echo "$(date -u +%FT%TZ) launching distillation on GPUs ${GPUS}"
 export TEACHER_SPEC=12bd-medium STUDENT=e4b DISTILL_GPU_IDS="${GPUS}"
 # 4 GPUs = the §4 E4B layout (fp32 master + Adam sharded 4-way, no offload). Reserve 60 GB per rank at startup so the box's
