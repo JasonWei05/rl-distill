@@ -1,5 +1,10 @@
 # Resume Gemma 4 26B-A4B difficulty runs locally on another cluster
 
+> **Storage (2026-09-15):** all bulk directories (`CKPTS_DIR`, `DATA_DIR`, `HF_HOME`, `RAY_DATA_HOME`) now default to `/tmp/...`
+> (local NVMe). Do **not** point them at `$HOME` — the devbox home is EFS over one NFS connection shared by every session, and a
+> 134 GB checkpoint write there stalled the whole box. The run-file's `assert_local_fs.sh` guard refuses NFS paths
+> (`ALLOW_NFS_CHECKPOINTS=1` only for tiny smoke runs). S3 (`FULL_CHECKPOINT_S3_URI`) is the durable copy.
+
 Resumes a seed-42 DeepScaleR 26B-A4B DAPO/GRPO run from its published full checkpoint,
 restoring **model weights, Adam optimizer states, RNG + LR scheduler, the exact dataset
 position, and the early-stopping state**. Runs directly with a local Ray (no ScaleTrain,

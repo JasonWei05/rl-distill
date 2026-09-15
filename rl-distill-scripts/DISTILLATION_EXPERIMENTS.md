@@ -1400,6 +1400,24 @@ sequences on 4 GPUs, fast layout): gen 69 s · old-log-prob 73 s · update 296 s
 Note the trainer's own `print`/metric lines go to the DAPOTaskRunner's Ray worker log (`/tmp/ray_12b_medium_local4/session_*/logs/worker-*-<pid>.out`),
 not the driver log. At ~8 min/step, validation every 10 steps lands every ~80 min (first at step 140 ≈ 20:25Z); the cap of 400 steps is ~36 h away.
 
+**Incident 20:49–21:33Z — EFS checkpoints stalled the whole devbox.** The step-140 permanent save (134 GB of FSDP shards + 24 GB HF
+export) went to `/mnt/efs/...`. The devbox home is EFS over a single NFSv4.1 connection (64 session slots, no `nconnect`) shared by ~115
+sessions: our writer queued ~57k NFS requests, every shell on the box took ~30 s to open, and our own throughput collapsed to ~13 MB/s (the
+4 shard files alone took 31 min; the trainer then sat in the HF export at 0 MB/s). Also seen in the same window: the step-135 rolling upload
+to S3 had failed with `AccessDenied` because the launcher did not export `AWS_PROFILE=ml-worker` (the EC2 instance role can only read the
+bucket) — fixed before the second attempt, which resumed from the local step 135. The run was killed at 21:33Z; nothing reached the new S3
+prefix. **Fixes (all committed):** (1) `assert_local_fs.sh` — sourced by the RL run-file and `gemma4_topk_distill_fsdp2.sh`; fails when
+`CKPTS_DIR`/`RAY_DATA_HOME`/`DATA_DIR`/`HF_HOME` resolve to nfs/nfs4 (`ALLOW_NFS_CHECKPOINTS=1` only for tiny smoke runs); (2) the local
+launcher and `resume_gemma4_26b_a4b_local.sh` default every bulk directory to `/tmp` (local NVMe) — S3 is the durable copy; rolling saves are
+off for the local run (permanent saves every 10 steps already match `TEST_FREQ`); (3) host sysctl `vm.dirty_bytes=8 GiB` /
+`vm.dirty_background_bytes=2 GiB` (persisted in `/etc/sysctl.d/60-dirty-bytes-network-fs.conf`) so a slow-filesystem writer blocks after a
+few GB instead of buffering ~100 GB; (4) freed 461 GB of re-materializable eval caches (`/tmp/gemma4_distill_study_eval/work`) so /tmp can hold
+two 12B checkpoints. **Still admin-only:** remount EFS with `nconnect=16` and raise `nfs.max_session_slots` (module parameter, currently 64) —
+both multiply in-flight requests so one writer cannot starve the other sessions; large artifacts should never live on EFS regardless.
+**Run state:** the local resume is stopped (user request). Steps 131–140 exist only on EFS (too slow to read back); the step-130 8-rank
+checkpoint was re-downloaded from S3 to `/tmp/gemma4_12b_medium_s42_local4/src` for a fresh NVMe reshard — relaunch pending the user's go.
+Validation at step 140 (first attempt) scored **0.515** mean@16 (best 0.5208 @ 120 → miss 2 of 4); it will be re-measured on relaunch.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`

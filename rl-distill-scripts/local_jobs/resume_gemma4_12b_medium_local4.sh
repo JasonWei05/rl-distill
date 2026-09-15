@@ -6,7 +6,7 @@
 # drives scale_train/run_gemma4_pt_deepscaler_4of4strict_rl.sh against that directory.
 #
 # Differences from the ScaleTrain launcher (scale_train/launch_gemma4_12b_medium_resume.sh): 4 GPUs (picked at start
-# from the GPUs that are actually idle), checkpoints on EFS (the /tmp volume is full), a NEW S3 prefix (…/12b-medium-local4)
+# from the GPUs that are actually idle), checkpoints on local NVMe (/tmp; EFS was too slow), a NEW S3 prefix (…/12b-medium-local4)
 # so the 4-rank checkpoints never mix with the 8-rank history, MAX_ACTOR_CKPT_TO_KEEP=2, and a relaunch loop that resumes
 # from the newest checkpoint if the run dies.  Same W&B run id (curve continues), same fast layout (mbs 4 / 8192-token
 # cap / OFFLOAD + vLLM sleep), patience 4 (migrated from the original patience 1).
@@ -18,7 +18,7 @@ REPO=/mnt/efs/jasonwei/rl-distill
 cd "${REPO}"
 if [ -f .env ]; then set -a; source .env; set +a; fi
 
-WORK="${WORK:-/mnt/efs/jasonwei/gemma4-12b-medium-s42-local4}"
+WORK="${WORK:-/tmp/gemma4_12b_medium_s42_local4}"   # local NVMe: EFS write throughput collapsed to ~13 MB/s during the step-140 save (2026-09-15 21:20Z)
 export CKPTS_DIR="${CKPTS_DIR:-${WORK}/ckpts}"                 # holds the resharded global_step_130 + latest_checkpointed_iteration.txt
 export DATA_DIR="${DATA_DIR:-/tmp/gemma4_12b_local_test/data}" # medium band parquet already materialized by the local layout test
 export HF_HOME="${HF_HOME:-/tmp/hf_cache}"                     # google/gemma-4-12B@023679ed already cached here
@@ -104,7 +104,7 @@ export ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.45}" 
 export VERL_SKIP_VLLM_MM_WEIGHT_RELOAD=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # S3 only (no HF pushes); NEW prefixes for the 4-rank continuation
 export HF_PUSH_ENABLE=False HF_PUSH_REQUIRED=False HF_PUSH_REPO=JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5 HF_PUSH_FREQ=10 HF_PUSH_MAX_TO_KEEP=8
-export ROLLING_CHECKPOINT_ENABLED=True ROLLING_CHECKPOINT_FREQ="${ROLLING_CHECKPOINT_FREQ:-5}"
+export ROLLING_CHECKPOINT_ENABLED="${ROLLING_CHECKPOINT_ENABLED:-False}" ROLLING_CHECKPOINT_FREQ="${ROLLING_CHECKPOINT_FREQ:-5}"   # permanent saves every 10 steps already match TEST_FREQ; rolling saves doubled the 134 GB write volume
 export FULL_CHECKPOINT_S3_URI="${FULL_CHECKPOINT_S3_URI:-s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-20260819-full-checkpoints/12b-medium-local4}"
 export RUN_ARTIFACT_S3_URI="${RUN_ARTIFACT_S3_URI:-s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-20260819/gemma4-12b-medium-local4}"
 export WANDB_RUN_ID="${WANDB_RUN_ID:-g4ds26b-12b-medium-s42-v1}" WANDB_RESUME=allow

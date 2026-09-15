@@ -36,10 +36,10 @@ esac
 export RUN_NAME_SUFFIX="${RUN_NAME_SUFFIX-${BAND_RUN_NAME_SUFFIX}}"
 
 # --- node-local paths (OVERRIDABLE) -------------------------------------------------------------------------
-export CKPTS_DIR="${CKPTS_DIR:-${HOME}/gemma4-26b-${BAND}-s42/ckpts}"   # holds global_step_N/ + latest_checkpointed_iteration.txt
-export DATA_DIR="${DATA_DIR:-${HOME}/gemma4-26b-${BAND}-s42/data}"
-export HF_HOME="${HF_HOME:-${HOME}/hf_cache}"                            # persistent (the wrapper defaults to /tmp)
-export RAY_DATA_HOME="${RAY_DATA_HOME:-${HOME}/verl}"
+export CKPTS_DIR="${CKPTS_DIR:-/tmp/gemma4-26b-${BAND}-s42/ckpts}"   # local NVMe, NOT $HOME (EFS): a 134 GB checkpoint write there stalled the whole devbox on 2026-09-15
+export DATA_DIR="${DATA_DIR:-/tmp/gemma4-26b-${BAND}-s42/data}"
+export HF_HOME="${HF_HOME:-/tmp/hf_cache}"                                # local NVMe; S3/Hub are the durable copies
+export RAY_DATA_HOME="${RAY_DATA_HOME:-/tmp/verl}"
 export RAY_TEMP_DIR="${RAY_TEMP_DIR:-/tmp/ray_26b_${BAND}_s42}"
 export VENV="${VENV:-${REPO}/.venv-gemma4}"
 mkdir -p "${DATA_DIR}"

@@ -221,6 +221,10 @@ if [ "${#RAY_TEMP_DIR}" -gt 40 ]; then
 fi
 echo "RAY_TEMP_DIR=${RAY_TEMP_DIR}"
 CKPTS_DIR="${CKPTS_DIR:-${DEFAULT_CKPTS_DIR}}"
+# Bulk writes (checkpoints, Ray spill, HF cache, datasets) must not land on NFS/EFS -- see assert_local_fs.sh for the
+# 2026-09-15 incident.  ALLOW_NFS_CHECKPOINTS=1 downgrades the failure to a warning for tiny smoke runs.
+source "${PROJECT_ROOT}/rl-distill-scripts/assert_local_fs.sh"
+assert_local_fs CKPTS_DIR="${CKPTS_DIR}" RAY_DATA_HOME="${RAY_DATA_HOME}" DATA_DIR="${DATA_DIR}" HF_HOME="${HF_HOME:-}"
 export ROLLING_CHECKPOINT_ENABLED="${ROLLING_CHECKPOINT_ENABLED:-False}"
 export ROLLING_CHECKPOINT_FREQ="${ROLLING_CHECKPOINT_FREQ:-1}"
 case "${ROLLING_CHECKPOINT_ENABLED,,}" in

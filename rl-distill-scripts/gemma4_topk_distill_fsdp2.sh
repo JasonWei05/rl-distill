@@ -570,6 +570,8 @@ export PARQUET_OVERSIZED_ROW_GROUP_POLICY=${PARQUET_OVERSIZED_ROW_GROUP_POLICY:-
 export PROJECT_NAME=${PROJECT_NAME:-gemma4-distill-vs-rl}
 export EXP_NAME=${EXP_NAME:-"gemma4-topk128-distill-$(date +%Y%m%d-%H%M%S)"}
 export CKPTS_DIR=${CKPTS_DIR:-"/tmp/verl/ckpts/${PROJECT_NAME}/${EXP_NAME}"}
+source "$(dirname "${BASH_SOURCE[0]}")/assert_local_fs.sh"   # never checkpoint onto EFS/NFS (2026-09-15 incident)
+assert_local_fs CKPTS_DIR="${CKPTS_DIR}" HF_HOME="${HF_HOME}"
 export TRAIN_LOGGER=${TRAIN_LOGGER:-'["console","wandb"]'}
 export REMOTE_CHECKPOINT_ENABLE=${REMOTE_CHECKPOINT_ENABLE:-false}
 export REMOTE_CHECKPOINT_S3_URI=${REMOTE_CHECKPOINT_S3_URI:-}
