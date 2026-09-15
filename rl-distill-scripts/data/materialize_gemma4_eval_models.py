@@ -103,8 +103,9 @@ def _execute_one(model: RegisteredModel, output: Path, python_executable: str) -
         output.parent.mkdir(parents=True, exist_ok=True)
         if source["type"] == "s3_hf_export":
             completion = _read_s3_completion(source["completion_uri"])
-            if completion.get("global_step") != source["expected_global_step"]:
-                raise ValueError(f"unexpected completion global_step for {model.tag}: {completion.get('global_step')}")
+            completed_step = completion.get("global_step", completion.get("step"))  # hf_exports/ receipts (upload_hf_export) use "step"
+            if completed_step != source["expected_global_step"]:
+                raise ValueError(f"unexpected completion global_step for {model.tag}: {completed_step}")
             staging = output.parent / f".{output.name}.partial-{os.getpid()}"
             if staging.exists():
                 raise FileExistsError(f"stale materialization directory exists: {staging}")

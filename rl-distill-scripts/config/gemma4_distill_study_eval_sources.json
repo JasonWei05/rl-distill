@@ -673,6 +673,28 @@
         "metadata_repo": "google/gemma-4-E4B",
         "metadata_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
       }
+    },
+    {
+      "tag": "distill_12bd_medium_to_e4b_step300",
+      "display_name": "Distilled E4B base <- RL'd distilled 12B medium teacher (\u00a79.0 step 190), off-policy \u00a79 recipe, step_000300 of 1000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-12bd-distill-ckpts-v1/12bd-medium-to-e4b-bs128-s1000-lr2e-6/hf_exports/global_step_300/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-12bd-distill-ckpts-v1/12bd-medium-to-e4b-bs128-s1000-lr2e-6/hf_exports/global_step_300/_REMOTE_COMPLETE.json",
+        "expected_global_step": 300,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
     }
   ]
 }

@@ -599,6 +599,7 @@ def upload_hf_export(checkpoint_root: Path, step: int, s3_uri: str) -> dict[str,
     manifest: dict[str, object] = {
         "schema_version": 1,
         "step": int(step),
+        "global_step": int(step),  # same key the full-checkpoint manifests use (eval materializer reads it)
         "checkpoint_s3_uri": remote_root,
         "file_count": len(files),
         "total_bytes": total_bytes,
