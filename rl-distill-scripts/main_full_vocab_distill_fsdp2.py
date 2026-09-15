@@ -451,12 +451,29 @@ def _reserve_gpu_memory():
     gb = float(os.environ.get("DISTILL_RESERVE_GPU_GB", "0") or 0)
     if gb <= 0:
         return
+    import time
+
     import torch
 
-    block = torch.empty(int(gb * 2**30), dtype=torch.uint8, device="cuda")
-    del block  # stays reserved by the caching allocator (no empty_cache)
+    # Another tenant may hold the GPU at the moment we start (the runner's guard clears them, but the race is
+    # real): retry the reservation instead of dying, DISTILL_RESERVE_RETRIES x DISTILL_RESERVE_RETRY_SECONDS.
+    retries = int(os.environ.get("DISTILL_RESERVE_RETRIES", "120") or 0)
+    wait = float(os.environ.get("DISTILL_RESERVE_RETRY_SECONDS", "5") or 5)
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    for attempt in range(retries + 1):
+        try:
+            block = torch.empty(int(gb * 2**30), dtype=torch.uint8, device="cuda")
+            del block  # stays reserved by the caching allocator (no empty_cache)
+            break
+        except (torch.OutOfMemoryError, RuntimeError) as error:  # AcceleratorError is a RuntimeError
+            if attempt >= retries:
+                raise
+            if attempt % 6 == 0:
+                print(f"[ReserveGPU] rank {rank} cannot reserve {gb:g} GiB yet ({type(error).__name__}); retrying every {wait:g}s", flush=True)
+            torch.cuda.empty_cache()
+            time.sleep(wait)
     reserved = torch.cuda.memory_reserved() / 2**30
-    print(f"[ReserveGPU] rank {torch.distributed.get_rank()} reserved {reserved:.1f} GiB on {torch.cuda.current_device()}", flush=True)
+    print(f"[ReserveGPU] rank {rank} reserved {reserved:.1f} GiB on {torch.cuda.current_device()}", flush=True)
 
 
 @hydra.main(config_path="config", config_name="full_vocab_distill_fsdp2", version_base=None)
