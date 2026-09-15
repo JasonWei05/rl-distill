@@ -33,15 +33,19 @@ PY
 }
 # --- 1. models --------------------------------------------------------------------------------
 if [[ -z ${STEPS:-} ]]; then
-  STEPS="$(aws s3 ls "$CKPT_S3/hf_exports/" | grep -oE "global_step_[0-9]+" | sed 's/global_step_//' | sort -n | tr '\n' ' ')"
+  # rolling saves keep their export under hf_exports/global_step_N/; permanent saves (every 250 incl. the final 1000) carry it inside
+  # global_step_N/huggingface/ -- take the union.
+  STEPS="$( { aws s3 ls "$CKPT_S3/hf_exports/" ; aws s3 ls "$CKPT_S3/" ; } | grep -oE "global_step_[0-9]+" | sed 's/global_step_//' | sort -n | uniq | tr '\n' ' ')"
 fi
 log "steps: $STEPS"
 declare -A MODEL TAG
 for st in $STEPS; do
   d="$MODELS/step_$(printf %06d "$st")"
   if [[ ! -f $d/config.json ]]; then
-    aws s3 ls "$CKPT_S3/hf_exports/global_step_$st/_REMOTE_COMPLETE.json" >/dev/null || { log "step $st has no completion marker on S3; skipping"; continue; }
-    log "download step $st"; aws s3 sync --only-show-errors "$CKPT_S3/hf_exports/global_step_$st/huggingface/" "$d/"
+    if aws s3 ls "$CKPT_S3/hf_exports/global_step_$st/_REMOTE_COMPLETE.json" >/dev/null 2>&1; then src="$CKPT_S3/hf_exports/global_step_$st/huggingface/"
+    elif aws s3 ls "$CKPT_S3/global_step_$st/_REMOTE_COMPLETE.json" >/dev/null 2>&1; then src="$CKPT_S3/global_step_$st/huggingface/"
+    else log "step $st has no completion marker on S3; skipping"; continue; fi
+    log "download step $st from $src"; aws s3 sync --only-show-errors "$src" "$d/"
   fi
   MODEL["student_$st"]="$d"; TAG["student_$st"]="distill_12bd_medium_to_e4b_base__step_$(printf %06d "$st")"
 done

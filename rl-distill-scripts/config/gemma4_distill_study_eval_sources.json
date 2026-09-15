@@ -711,8 +711,8 @@
       ],
       "source": {
         "type": "s3_hf_export",
-        "uri": "s3://scale-ml/genai/rl-distill/gemma4-12bd-distill-ckpts-v1/12bd-medium-to-e4b-bs128-s1000-lr2e-6/hf_exports/global_step_1000/huggingface/",
-        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-12bd-distill-ckpts-v1/12bd-medium-to-e4b-bs128-s1000-lr2e-6/hf_exports/global_step_1000/_REMOTE_COMPLETE.json",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-12bd-distill-ckpts-v1/12bd-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-12bd-distill-ckpts-v1/12bd-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/_REMOTE_COMPLETE.json",
         "expected_global_step": 1000,
         "base_repo": "google/gemma-4-E4B",
         "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
