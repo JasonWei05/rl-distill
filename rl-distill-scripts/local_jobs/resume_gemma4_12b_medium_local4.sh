@@ -104,7 +104,7 @@ export ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.45}" 
 export VERL_SKIP_VLLM_MM_WEIGHT_RELOAD=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # S3 only (no HF pushes); NEW prefixes for the 4-rank continuation
 export HF_PUSH_ENABLE=False HF_PUSH_REQUIRED=False HF_PUSH_REPO=JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-medium-seed42-26b-bands-es5 HF_PUSH_FREQ=10 HF_PUSH_MAX_TO_KEEP=8
-export ROLLING_CHECKPOINT_ENABLED="${ROLLING_CHECKPOINT_ENABLED:-False}" ROLLING_CHECKPOINT_FREQ="${ROLLING_CHECKPOINT_FREQ:-5}"   # permanent saves every 10 steps already match TEST_FREQ; rolling saves doubled the 134 GB write volume
+export ROLLING_CHECKPOINT_ENABLED="${ROLLING_CHECKPOINT_ENABLED:-True}" ROLLING_CHECKPOINT_FREQ="${ROLLING_CHECKPOINT_FREQ:-5}"   # full resumable checkpoint (weights+Adam+cursor) to S3 every 5 steps, permanent (+HF export) every 10; cheap on NVMe
 export FULL_CHECKPOINT_S3_URI="${FULL_CHECKPOINT_S3_URI:-s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-20260819-full-checkpoints/12b-medium-local4}"
 export RUN_ARTIFACT_S3_URI="${RUN_ARTIFACT_S3_URI:-s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-20260819/gemma4-12b-medium-local4}"
 export WANDB_RUN_ID="${WANDB_RUN_ID:-g4ds26b-12b-medium-s42-v1}" WANDB_RESUME=allow
