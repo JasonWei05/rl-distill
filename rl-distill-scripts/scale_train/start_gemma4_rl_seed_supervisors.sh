@@ -11,7 +11,10 @@ for size in ${SIZES}; do for band in ${BANDS}; do
   key="${size}-${band}"; name="g4-${size}-s${SEED}-${band:0:4}"; sup=".scale_train_supervisors/${name}-$(date -u +%Y%m%d)${SUP_TAG:-}"
   mkdir -p "${sup}/pod-logs"
   tmux kill-session -t "rl-${name}" 2>/dev/null || true
+  # relaunch on external cancel / failure too (ScaleTrain's 00:37Z mass-cancels, node StartErrors); preemptions are ridden out by Kueue
+  # (the supervisor treats a finished pod of a suspended Job as QUEUED) and the run-file restores the newest S3 checkpoint on any relaunch.
   tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scripts/scale_train/supervise_borrowing_job.py --name ${name} \
+    --relaunch-on-cancel --relaunch-on-failure --max-relaunches 30 --quick-cancel-seconds 300 --max-quick-cancels 2 --failure-backoff-seconds 900 \
     --launch-log ${sup}/launch.log --monitor-log ${sup}/monitor.log --state-file ${sup}/state.json --stop-file ${sup}/STOP --pod-log-dir ${sup}/pod-logs \
     --completion-s3-uri ${S3_BASE}-full-checkpoints/${key} --max-completion-step 400 --expected-completion-world-size ${GPUS} \
     --completion-best-hf-s3-uri ${S3_BASE}/gemma4-${key} \

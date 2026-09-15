@@ -31,6 +31,9 @@ ENV_VARS+=",ROLLOUT_ENFORCE_EAGER=False,ROUTER_REPLAY_MODE=disabled,ROUTER_Z_LOS
 # resumable checkpoints every 5 steps + durable completion markers
 ENV_VARS+=",ROLLING_CHECKPOINT_ENABLED=True,ROLLING_CHECKPOINT_FREQ=${ROLLING_CHECKPOINT_FREQ:-5},FULL_CHECKPOINT_S3_URI=${S3_BASE}-full-checkpoints/${KEY},RUN_ARTIFACT_S3_URI=${S3_BASE}/gemma4-${KEY}"
 ENV_VARS+=",WANDB_RUN_ID=g4ds26b-${KEY}-s${SEED}-v1,WANDB_RESUME=allow"
+# S3-only by default since 2026-09-15 (user): every permanent S3 checkpoint already carries the HF snapshot and best_hf/ is published at
+# the end; set HF_PUSH_ENABLE=True to also push step_* exports to the Hub as the seed-42 runs did.
+ENV_VARS+=",HF_PUSH_ENABLE=${HF_PUSH_ENABLE:-False},HF_PUSH_REQUIRED=False"
 echo "LAUNCH_ENV ${ENV_VARS}"
 exec bash launch_st_with_code.sh --gpus-per-instance "${GPUS}" --priority high --allow-borrowing --active-deadline-hours 240 \
   --run-file run_gemma4_pt_deepscaler_4of4strict_rl.sh --job-name "g4-${SIZE}-s${SEED}-${BAND:0:4}" --env-vars "${ENV_VARS}" "$@"
