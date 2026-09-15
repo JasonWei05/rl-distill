@@ -24,7 +24,8 @@ export DATA_DIR="${DATA_DIR:-/tmp/gemma4_12b_local_test/data}" # medium band par
 export HF_HOME="${HF_HOME:-/tmp/hf_cache}"                     # google/gemma-4-12B@023679ed already cached here
 export RAY_DATA_HOME="${RAY_DATA_HOME:-${WORK}/verl}"
 export RAY_TEMP_DIR="${RAY_TEMP_DIR:-/tmp/ray_12b_medium_local4}"
-export VENV="${VENV:-/tmp/.venv-gemma4}"                       # node.py patched for RAY_RAYLET_START_WAIT_TIME_S on the loaded box
+export VENV="${VENV:-/tmp/.venv-gemma4}"
+export AWS_PROFILE="${AWS_PROFILE:-ml-worker}"                    # S3 writes: the EC2 instance role can only read the bucket (AccessDenied on PutObject at step 135, 2026-09-15)                       # node.py patched for RAY_RAYLET_START_WAIT_TIME_S on the loaded box
 LOG_DIR="${WORK}/logs"; mkdir -p "${LOG_DIR}" "${DATA_DIR}"
 
 # ---- GPUs: take 4 that are idle right now (no compute process, < 512 MiB used) ------------------------------------
@@ -116,6 +117,7 @@ for attempt in $(seq 1 "${MAX_ATTEMPTS}"); do
   set +e
   bash rl-distill-scripts/scale_train/run_gemma4_pt_deepscaler_4of4strict_rl.sh \
     "+ray_kwargs.ray_init.runtime_env.env_vars.EARLY_STOPPING_MIGRATE_PATIENCE_FROM='${EARLY_STOPPING_MIGRATE_PATIENCE_FROM}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.AWS_PROFILE='${AWS_PROFILE}'" \
     > "${log}" 2>&1
   rc=$?
   set -e
