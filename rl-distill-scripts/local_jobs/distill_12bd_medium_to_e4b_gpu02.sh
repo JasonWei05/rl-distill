@@ -35,6 +35,10 @@ clear_gpus() {  # stop Docker containers (restart policy off) and kill bare proc
 clear_gpus; sleep 3
 # startup guard: keep clearing intruders on our GPUs until every rank holds its reservation (up to 25 min; the trainer's reservation retries meanwhile)
 ( start=$(date +%s); while [ $(( $(date +%s) - start )) -lt 1500 ]; do held=0; for g in ${GPUS//,/ }; do u=$(nvidia-smi --query-gpu=uuid --format=csv,noheader -i "$g"); m=$(nvidia-smi --query-compute-apps=gpu_uuid,pid,used_memory --format=csv,noheader | awk -F', ' -v u="$u" '$1==u{print $2, $3}' | while read -r p mm; do [[ $(ps -o user= -p "$p" 2>/dev/null || true) == jasonwei ]] && echo "${mm%% *}"; done | sort -n | tail -1); [ "${m:-0}" -ge 50000 ] && held=$((held+1)); done; n=$(echo "${GPUS//,/ }" | wc -w); [ "$held" -ge "$n" ] && { echo "$(date -u +%FT%TZ) guard: all $n ranks hold their GPUs"; exit 0; }; clear_gpus; sleep 3; done; echo "$(date -u +%FT%TZ) guard: timeout" ) &
+# local checkpoints of a previous process are not pruned by the new trainer (max_ckpt_to_keep only tracks its own saves) and
+# each is ~110 GB; every completed step is on S3, so purge them before launching (2026-09-15: a stale one helped fill /tmp).
+CK=/tmp/verl/ckpts/gemma4-12bd-distill-v1; for d in "$CK"/*/global_step_*; do [ -d "$d" ] && { echo "$(date -u +%FT%TZ) purging stale local checkpoint $d"; rm -rf "$d"; }; done
+echo "$(date -u +%FT%TZ) /tmp free: $(df -h /tmp | tail -1 | awk '{print $4}')"
 echo "$(date -u +%FT%TZ) launching distillation on GPUs ${GPUS}"
 export TEACHER_SPEC=12bd-medium STUDENT=e4b DISTILL_GPU_IDS="${GPUS}"
 # 4 GPUs = the §4 E4B layout (fp32 master + Adam sharded 4-way, no offload). Reserve 60 GB per rank at startup so the box's

@@ -206,6 +206,7 @@ class FullVocabDistillTrainer(SFTTrainer):
         rolling_enabled = int(cfg.get("rolling_freq", 0) or 0) > 0
 
         def save_and_upload(step):
+            _wait_for_disk_space(checkpoint_root, step)
             original_save(step=step)
             result = [None]
             if dist.get_rank() == 0:
@@ -290,6 +291,7 @@ class FullVocabDistillTrainer(SFTTrainer):
 
         def save(step):
             step = int(step)
+            _wait_for_disk_space(checkpoint_root, step)
             if dist.get_rank() == 0:
                 join_rolling()  # this save may prune the local dir the previous rolling upload reads
             if step % permanent_freq == 0 or step >= int(trainer.total_training_steps):
@@ -437,6 +439,37 @@ class FullVocabDistillTrainer(SFTTrainer):
                 print("[HFPusher] waiting for pending uploads before exit...", flush=True)
                 wait_for_hf_pusher(self._hf_pusher, timeout=3600)
         self._write_completion_receipt()
+
+
+def _wait_for_disk_space(checkpoint_root, step, min_free_gb=None, max_wait_s=None):
+    """Block (rank 0 logs) until the checkpoint volume has room for a save; ENOSPC mid-save killed a run on 2026-09-15.
+
+    DISTILL_MIN_FREE_GB (default 160: a full fp32+Adam save is ~110 GB plus the HF export) and
+    DISTILL_DISK_WAIT_S (default 3600) bound the wait; after that the save proceeds and fails loudly.
+    """
+    import os
+    import shutil
+    import time
+
+    import torch.distributed as dist
+
+    min_free_gb = float(os.environ.get("DISTILL_MIN_FREE_GB", "160") or 0) if min_free_gb is None else min_free_gb
+    max_wait_s = float(os.environ.get("DISTILL_DISK_WAIT_S", "3600") or 0) if max_wait_s is None else max_wait_s
+    if min_free_gb <= 0:
+        return
+    os.makedirs(checkpoint_root, exist_ok=True)
+    rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
+    waited = 0.0
+    while True:
+        free_gb = shutil.disk_usage(checkpoint_root).free / 2**30
+        if free_gb >= min_free_gb or waited >= max_wait_s:
+            if waited and rank == 0:
+                print(f"[DiskSpace] step {step}: proceeding with {free_gb:.0f} GiB free after waiting {waited:.0f}s", flush=True)
+            return
+        if rank == 0 and (waited == 0 or int(waited) % 300 == 0):
+            print(f"[DiskSpace] step {step}: only {free_gb:.0f} GiB free on {checkpoint_root} (< {min_free_gb:g}); waiting for space", flush=True)
+        time.sleep(30)
+        waited += 30
 
 
 def _reserve_gpu_memory():
