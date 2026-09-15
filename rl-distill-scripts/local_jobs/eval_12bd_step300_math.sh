@@ -14,7 +14,9 @@ export GPU_COUNT="${#G[@]}" PACKED_PHYSICAL_GPU_IDS="$GPUS"
 # same roots/knobs as the study queue (§7): shared prepared data, one results root for all models, no per-token logprobs,
 # fixed 16 GiB KV per vLLM instance, cross-question batching, per-dataset resume, results mirrored to the study's S3 root.
 export SHARED_DATA_ROOT=/tmp/gemma4_distill_study_eval/data PREPARE_SHARED_ASSETS=false
-export RESULT_ROOT_OVERRIDE=/tmp/gemma4_distill_study_eval/results MODEL_WORK_ROOT="/tmp/gemma4_distill_study_eval/work/${MODEL_TAG}"
+# queue layout: one results root PER MODEL (<base>/<tag>/<tag>/math/...); a shared root here would make the runner mirror every
+# model's results to this tag's S3 prefix and hide the row from update_distill_study_results_doc.py (2026-09-15 lesson).
+export RESULT_ROOT_OVERRIDE="/tmp/gemma4_distill_study_eval/results/${MODEL_TAG}" MODEL_WORK_ROOT="/tmp/gemma4_distill_study_eval/work/${MODEL_TAG}"
 export SHARED_MMMLU_ROOT=/tmp/gemma4_distill_study_eval/mmmlu14k_tasks
 export EVAL_KV_CACHE_GIB=16 EVAL_GPU_MEMORY_UTILIZATION=0.40 EVAL_PREDICTIVE_TOPK_WIDTH=0
 export MATH_QUESTIONS_PER_BATCH=64 MATH_REQUEST_BATCH_SIZE=1024 MATH_RESUME_TRACES=1 EVAL_S3_ENABLE=true
