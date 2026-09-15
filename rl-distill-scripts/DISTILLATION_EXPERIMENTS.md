@@ -1389,6 +1389,17 @@ Follow-up: the best step so far (120) lives only in the original prefix; if it i
 `global_step_120/actor/huggingface/` + its `_REMOTE_COMPLETE.json` into the new prefix *after* the run's first upload (so `restore-latest`
 never picks the 8-rank step 120) or publish `best_hf` by hand — the original `gemma4-12b-medium/best_hf/` still holds it.
 
+**Local launch 18:57Z (tmux `g4-12b-med-local4`, GPUs 0–3, log `/mnt/efs/jasonwei/gemma4-12b-medium-s42-local4/logs/`).** Two earlier
+launch attempts died silently before printing anything: the free-GPU picker piped through `head` under `set -o pipefail`, so `head` closing
+the pipe failed the function and `set -e` exited (fixed). Ray's raylet also logs "/tmp … is over 95% full" every 10 s — the 28 TB shared
+volume is >95 % used even with 300 GB free — harmless so far; `RAY_local_fs_capacity_threshold=0.99` is now exported for relaunches.
+**Resume verified:** all 4 ranks `Loaded model / optimizer / rng / lr_scheduler` from the resharded `world_size_4` shards (19:05–19:09Z),
+`EARLY_STOPPING_PATIENCE_MIGRATED checkpoint_step=130 active_patience=4 misses=1 triggered=False`, `EARLY_STOPPING_STATE_RESTORED best=0.5208
+best_step=120 misses=1 last_observed_step=130`, `INITIAL_VALIDATION_SKIPPED_ON_RESUME`, W&B resumed the original run. **Step 131** (1024
+sequences on 4 GPUs, fast layout): gen 69 s · old-log-prob 73 s · update 296 s · **step 474 s**; train score 0.486, mean response 531 tokens.
+Note the trainer's own `print`/metric lines go to the DAPOTaskRunner's Ray worker log (`/tmp/ray_12b_medium_local4/session_*/logs/worker-*-<pid>.out`),
+not the driver log. At ~8 min/step, validation every 10 steps lands every ~80 min (first at step 140 ≈ 20:25Z); the cap of 400 steps is ~36 h away.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`

@@ -82,6 +82,7 @@ if [ "${GUARD:-1}" = 1 ]; then guard_loop & GUARD_PID=$!; trap 'kill ${GUARD_PID
 # ---- run contract = scale_train/launch_gemma4_12b_medium_resume.sh, local flavour ---------------------------------
 export NCCL_SOCKET_IFNAME=lo NCCL_SOCKET_FAMILY=AF_INET GLOO_SOCKET_IFNAME=lo
 export RAY_ADDRESS=local RAY_RAYLET_START_WAIT_TIME_S=600 RAY_gcs_server_port_wait_time_s=600
+export RAY_local_fs_capacity_threshold=0.99   # /tmp is a 28 TB shared volume: >95% used with hundreds of GB free trips Ray's default 0.95 disk guard
 export GEMMA4_MODEL=google/gemma-4-12B GEMMA4_MODEL_REVISION=023679ed352de9bb66cc873c9009ce3482585c08
 export DIFFICULTY_DATASET_SOURCE=gemma4_26b_bands DIFFICULTY_DATASET=medium
 export DIFFICULTY_DATASET_REPO=JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k DIFFICULTY_DATASET_REVISION=a0ba3c3dc07c7bc27e901670ceb1a0b0ceeaa8db
