@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import defaultdict
 from math import comb
 from pathlib import Path
@@ -44,6 +45,7 @@ def main() -> int:
     parser.add_argument("--trace", action="append", required=True, help='"LABEL=PATH" (repeatable)')
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--title", default="pass@k (unbiased estimator); verifier = RL reward (strict last \\boxed{})")
+    parser.add_argument("--shared-legend", action="store_true", help="one figure-level legend below the panels instead of one per panel")
     args = parser.parse_args()
 
     panels: dict[str, list[tuple[str, Path]]] = defaultdict(list)
@@ -61,11 +63,20 @@ def main() -> int:
             print(f"{dataset:<10}{label:<28}{questions:>5}{ks[-1]:>4}{g(1):>8.1f}{g(4):>8.1f}{g(16):>9.1f}{curve[-1]:>8.1f}")
         ax.set_xscale("log", base=2)
         ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-        ax.set_xlabel("k"); ax.set_ylabel("pass@k (%)"); ax.set_title(dataset); ax.grid(alpha=0.3); ax.legend(fontsize=8)
+        ax.set_xlabel("k"); ax.set_ylabel("pass@k (%)"); ax.set_title(dataset); ax.grid(alpha=0.3)
+        if not args.shared_legend:
+            ax.legend(fontsize=8)
     import textwrap
     title = textwrap.fill(args.title, width=max(60, 72 * len(panels)))   # keep the suptitle inside the figure width
     fig.suptitle(title, fontsize=10)
-    fig.tight_layout(rect=(0, 0, 1, 0.94 - 0.03 * (title.count("\n"))))
+    bottom = 0.0
+    if args.shared_legend:
+        handles, labels = axes[0][0].get_legend_handles_labels()
+        labels = [re.sub(r" \(n=\d+\)$", "", label) for label in labels]   # n differs per panel; keep the legend generic
+        ncol = min(len(labels), 4)
+        fig.legend(handles, labels, loc="lower center", ncol=ncol, fontsize=9, frameon=False)
+        bottom = 0.06 * ((len(labels) + ncol - 1) // ncol)
+    fig.tight_layout(rect=(0, bottom, 1, 0.94 - 0.03 * (title.count("\n"))))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out, dpi=140)
     print(f"wrote {args.out}")
