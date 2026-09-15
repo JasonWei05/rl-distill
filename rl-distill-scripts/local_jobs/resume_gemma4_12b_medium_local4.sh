@@ -29,11 +29,14 @@ LOG_DIR="${WORK}/logs"; mkdir -p "${LOG_DIR}" "${DATA_DIR}"
 
 # ---- GPUs: take 4 that are idle right now (no compute process, < 512 MiB used) ------------------------------------
 pick_free_gpus() {
-  local want="$1" busy_uuids idx uuid used
+  # NB: no `| head` inside the pipeline -- with pipefail, head closing the pipe early makes the function fail (exit 141)
+  # and `set -e` then kills the script before it prints anything (2026-09-15, two silent launches).
+  local want="$1" busy_uuids idx uuid used free=()
   busy_uuids="$(nvidia-smi --query-compute-apps=gpu_uuid --format=csv,noheader 2>/dev/null | sort -u || true)"
-  nvidia-smi --query-gpu=index,uuid,memory.used --format=csv,noheader,nounits | while IFS=', ' read -r idx uuid used; do
-    if [ "${used}" -lt 512 ] && ! grep -qx "${uuid}" <<<"${busy_uuids}"; then echo "${idx}"; fi
-  done | head -n "${want}" | paste -sd, -
+  while IFS=', ' read -r idx uuid used; do
+    if [ "${used}" -lt 512 ] && ! grep -qx "${uuid}" <<<"${busy_uuids}"; then free+=("${idx}"); fi
+  done < <(nvidia-smi --query-gpu=index,uuid,memory.used --format=csv,noheader,nounits)
+  local IFS=,; echo "${free[*]:0:${want}}"
 }
 if [ -z "${GPUS:-}" ]; then GPUS="$(pick_free_gpus 4)"; fi
 n_gpus="$(awk -F, '{print NF}' <<<"${GPUS}")"
