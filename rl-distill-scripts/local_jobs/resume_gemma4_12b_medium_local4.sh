@@ -82,7 +82,11 @@ if [ "${GUARD:-1}" = 1 ]; then guard_loop & GUARD_PID=$!; trap 'kill ${GUARD_PID
 
 # ---- run contract = scale_train/launch_gemma4_12b_medium_resume.sh, local flavour ---------------------------------
 export NCCL_SOCKET_IFNAME=lo NCCL_SOCKET_FAMILY=AF_INET GLOO_SOCKET_IFNAME=lo
-export RAY_ADDRESS=local RAY_RAYLET_START_WAIT_TIME_S=600 RAY_gcs_server_port_wait_time_s=600
+export RAY_ADDRESS=local RAY_RAYLET_START_WAIT_TIME_S=1200 RAY_gcs_server_port_wait_time_s=1200
+# The raylet aborts in NodeManager::WaitForDashboardAgentPorts when the (Python) dashboard/runtime-env agent cannot import
+# and register within agent_register_timeout_ms (default 100 s) -- seen at box load avg ~500 on 2026-09-15 23:12Z. Ray 2.58
+# reads the RAY_agent_register_timeout_ms override from the raylet's environment (inherited from this shell via ray.init).
+export RAY_agent_register_timeout_ms=900000
 export RAY_local_fs_capacity_threshold=0.99   # /tmp is a 28 TB shared volume: >95% used with hundreds of GB free trips Ray's default 0.95 disk guard
 export GEMMA4_MODEL=google/gemma-4-12B GEMMA4_MODEL_REVISION=023679ed352de9bb66cc873c9009ce3482585c08
 export DIFFICULTY_DATASET_SOURCE=gemma4_26b_bands DIFFICULTY_DATASET=medium

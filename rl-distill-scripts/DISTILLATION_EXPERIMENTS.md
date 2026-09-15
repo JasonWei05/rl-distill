@@ -1418,6 +1418,14 @@ both multiply in-flight requests so one writer cannot starve the other sessions;
 checkpoint was re-downloaded from S3 to `/tmp/gemma4_12b_medium_s42_local4/src` for a fresh NVMe reshard — relaunch pending the user's go.
 Validation at step 140 (first attempt) scored **0.515** mean@16 (best 0.5208 @ 120 → miss 2 of 4); it will be re-measured on relaunch.
 
+**Relaunch on NVMe (user go at 22:37Z).** Rolling full checkpoints (weights + Adam + dataloader cursor + early-stopping state) now go to
+S3 every 5 steps on top of the permanent saves every 10 (`ROLLING_CHECKPOINT_ENABLED=True`; cheap on NVMe). Step 130 was resharded again on
+`/tmp` (model 630/630, Adam 1236/1236 DTensors bit-exact) and launched at 23:00Z on GPUs 0–3. That attempt died at `ray.init`: the raylet aborted
+in `NodeManager::WaitForDashboardAgentPorts` — the Python dashboard/runtime-env agent could not import and register within
+`agent_register_timeout_ms` (default 100 s) at a box load average of ~500 (other users' evaluators; 192 cores). Ray 2.58 honours the
+`RAY_agent_register_timeout_ms` environment override in the raylet, so the launcher now exports 900 000 ms (plus 1200 s for the driver→node and
+GCS waits) — relaunched 23:27Z. Disk: `/tmp` had 420 GB free after the reshard (one 4-rank checkpoint + HF export ≈ 160 GB; keep-2).
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
