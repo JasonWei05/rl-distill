@@ -294,7 +294,14 @@ fi
 export GEMMA4_INIT_MODEL_REPO="${GEMMA4_INIT_MODEL_REPO:-${GEMMA4_MODEL}}"
 export GEMMA4_INIT_MODEL_REVISION="${GEMMA4_INIT_MODEL_REVISION:-${GEMMA4_MODEL_REVISION:-}}"
 export GEMMA4_INIT_MODEL_SUBFOLDER="${GEMMA4_INIT_MODEL_SUBFOLDER:-}"
-if [ -n "${GEMMA4_INIT_MODEL_SUBFOLDER}" ] && [ "${GEMMA4_INIT_MODEL_REPO}" != "${GEMMA4_MODEL}" ]; then
+if [ -n "${GEMMA4_INIT_MODEL_PATH:-}" ]; then
+  # Initialize from a LOCAL HF export directory (e.g. an S3-restored actor/huggingface/ of another run). It must already
+  # carry the base model's processor_config.json (unified Gemma 4 load; see the Hub branch below).
+  test -s "${GEMMA4_INIT_MODEL_PATH}/config.json" && test -s "${GEMMA4_INIT_MODEL_PATH}/processor_config.json" \
+    && ls "${GEMMA4_INIT_MODEL_PATH}"/*.safetensors >/dev/null || { echo "FATAL: GEMMA4_INIT_MODEL_PATH=${GEMMA4_INIT_MODEL_PATH} lacks config.json / processor_config.json / *.safetensors" >&2; exit 2; }
+  echo "INIT_MODEL local_path=${GEMMA4_INIT_MODEL_PATH} files=$(ls "${GEMMA4_INIT_MODEL_PATH}" | tr '\n' ' ')"
+  MODEL_LOCAL_PATH="${GEMMA4_INIT_MODEL_PATH}"
+elif [ -n "${GEMMA4_INIT_MODEL_SUBFOLDER}" ] && [ "${GEMMA4_INIT_MODEL_REPO}" != "${GEMMA4_MODEL}" ]; then
   # Initialize from a pushed HF export (e.g. a distilled student's step_NNNNNN/). Those exports hold only
   # config/weights/tokenizer; the Gemma 4 unified (VLM-class) rollout also needs the base model's processor
   # config, so materialize the subfolder the way the eval pipeline does: download + patch the missing metadata

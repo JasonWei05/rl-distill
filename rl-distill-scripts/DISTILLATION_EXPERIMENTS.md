@@ -1525,6 +1525,23 @@ usual benign tail). **Net effect of the patience-4 resume:** the untrained-12B m
 beat it. Wall clock on the 4-GPU pod: 50 steps in 6.9 h (~6.3 min/step + 5 validations/saves). The `rl_12b_medium` teacher in §1/§8 still
 refers to step 120 (Hub pin); the step-140 export is S3-only (`global_step_140/actor/huggingface/`, and `best_hf/`).
 
+### 9.0i RL on the tail-bucket on-policy student, step 50 (prepared 2026-09-16 ~20:40Z, NOT launched)
+
+**Why.** Of the on-policy checkpoints measured offline (§9.0f table), the tail-bucket run's step 50 has the lowest reverse KL to the E4B
+base teacher (0.0713 nats/token; forward 0.0937), so it is the natural student to put through the §9.0 RL recipe and compare with the
+distilled-12B RL run (init = off-policy step 1000, best 0.497 @ 190, §9.0).
+
+**Setup (local, 4 GPUs).** `local_jobs/rl_12b_onpolicy_bkt50_local4.sh`: recipe = `scale_train/launch_gemma4_12b_distilled_rl_medium.sh`
+(DAPO medium band, 64 prompts × 16, lr 1e-6 warm-up 20, patience 5 on val mean@16 incl. the initial validation, cap 400, saves every 10 +
+rolling S3 every 5, no Hub pushes) with the local 4-GPU layout from §9.0h (mbs 4 / 8192 cap / OFFLOAD + vLLM sleep, NVMe-only paths,
+fixed-port Ray head, GPU wait + guard, relaunch loop). Init weights: the step-50 export restored from S3 to
+`/tmp/gemma4_onpolicy_bkt_step50/hf` (+ the 12B base `processor_config.json`), fed through a new run-file option
+`GEMMA4_INIT_MODEL_PATH` (local HF dir; the Hub-subfolder path is unchanged). New prefixes:
+`s3://scale-ml/genai/rl-distill/gemma4-12b-from-onpolicy-bkt50-rl-full-checkpoints/12b-medium-from-onpolicy-bkt50-es5` (+ `…-rl/gemma4-12b-medium-…`),
+W&B `g4ds26b-12b-medium-from-onpolicy-bkt50-es5-s42-v1`, vLLM port base 58000, Ray ports 56490+. Local venv `/tmp/.venv-gemma4` is being
+rebuilt (the devbox restart wiped it; `setup_env_gemma4.sh` + `patches/`); the EFS venv works as a fallback (`VENV=…/.venv-gemma4`).
+Launch = `bash rl-distill-scripts/local_jobs/rl_12b_onpolicy_bkt50_local4.sh` in a tmux session, once the user says go.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
