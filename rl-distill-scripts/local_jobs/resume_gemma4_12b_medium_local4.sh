@@ -92,6 +92,9 @@ if [ "${GUARD:-1}" = 1 ]; then guard_loop & GUARD_PID=$!; trap 'kill ${GUARD_PID
 # ---- run contract = scale_train/launch_gemma4_12b_medium_resume.sh, local flavour ---------------------------------
 export NCCL_SOCKET_IFNAME=lo NCCL_SOCKET_FAMILY=AF_INET GLOO_SOCKET_IFNAME=lo
 export RAY_RAYLET_START_WAIT_TIME_S=1200 RAY_gcs_server_port_wait_time_s=1200
+# Workers must register with the raylet within worker_register_timeout_seconds (default 60 s); at load avg ~700 the actor
+# creation died with "worker startup repeatedly failed" (2026-09-16 00:50Z). The raylet reads this RAY_* override from its env.
+export RAY_worker_register_timeout_seconds=900
 # Ray head with FIXED agent ports. With unassigned ports the raylet waits only 15 s (hardcoded default in Ray 2.58
 # port_persistence.h, not tunable) for the Python dashboard/runtime-env agents to publish their port files; at a box load
 # average of ~500-650 those agents need 45-60 s just to import, so ray.init(address=local) aborted twice on 2026-09-15
