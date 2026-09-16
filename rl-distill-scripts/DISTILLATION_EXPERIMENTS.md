@@ -1475,7 +1475,8 @@ export + `data.pt` + early-stopping state); remote tracker 130; step 120 copied 
 **Running on ScaleTrain (4 GPUs) since 02:18Z:** `restored complete source=permanent step=130` (4 shards), `EARLY_STOPPING_PATIENCE_MIGRATED
 … active_patience=4 misses=1`, steps 131–139 at **~370–395 s/step** (gen 40–57 s · update 250–260 s; faster than the local 4×H100 run's
 ~430–490 s), rolling upload at 135 committed. **Step 140 validation: 0.5271 mean@16 — new best** (was 0.5208 @ 120; the abandoned local
-attempt had measured 0.515 on the same step with a different sample), misses reset to 0.
+attempt had measured 0.515 on the same step with a different sample), misses reset to 0. **Step 150: 0.511** (miss 1), **step 160: 0.519** (miss 2 of 4); checkpoints 150/160 uploaded. Two more
+non-improving validations (170, 180) would end the run with best 0.5271 @ 140.
 
 ### 9.1 Results
 
