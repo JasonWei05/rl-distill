@@ -1106,6 +1106,24 @@ tail errors: the wandb service teardown traceback and `wandb sync --sync-all` (f
 lacks `s3:DeleteObject`, so every `retire-pointer-after-permanent-N` rolling-checkpoint cleanup was deferred (`AccessDenied`) — the rolling
 shards for steps 135–195 are still on S3 and should be deleted from the devbox with the `ml-worker` profile.
 
+Final stretch (steps 130 → 200, from the completed pod's log; §9.0e's plain objective had collapsed to mass 0.77 / val 0.07 by step 160):
+
+| step | loss (bucket objective) | student top-128 mass | teacher mass on that support | val mean@16 | best@16 (mean) | response length |
+|---|---|---|---|---|---|---|
+| 140 | 0.076 | 0.9978 | 0.9967 | 0.105 | 0.521 | 200–280 |
+| 150 | 0.072 | 0.9975 | 0.9963 | 0.098 | 0.495 | ~210 |
+| 160 | 0.065 | 0.9970 | 0.9954 | 0.101 | 0.508 | ~260 |
+| 170 | 0.071 | 0.9975 | 0.9966 | 0.106 | 0.527 | 200–370 |
+| 180 | 0.079 | 0.9979 | 0.9972 | 0.099 | 0.496 | ~160 |
+| 190 | 0.076 | 0.9974 | 0.9965 | 0.103 | 0.545 | ~180 |
+| 200 | 0.063 | 0.9976 | 0.9967 | 0.107 | 0.536 | ~190 |
+
+Reading: the tail-bucket objective held the student's top-128 mass at 0.997–0.998 for all 200 steps (gap to the teacher +0.001), the loss
+settled in the 0.06–0.08 band it reached by step 50, response lengths stayed at 150–370 tokens, and validation accuracy plateaued at
+≈ 0.10 mean@16 from step 100 on (E4B-base teacher level; step 0 was 0.071–0.077) — i.e. the student matches the base teacher's
+distribution without the drift that killed the plain variant. Grad-norm mostly < 1 with isolated spikes to 4–5. Not yet done for this run:
+pass@k / reverse-KL evaluation of the step-200 export (`best_hf/`), and deleting the deferred rolling shards on S3.
+
 ### 9.0g Reverse direction: the RL'd distilled 12B (§9.0 best, step 190) → E4B base (started 2026-09-14 18:45Z)
 
 **Goal.** Take the strongest RL model of the study — the E4B-base-distilled 12B after DAPO on medium (val mean@16 0.497 @ step 190,
