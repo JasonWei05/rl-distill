@@ -1472,6 +1472,11 @@ and `CKPT_SUFFIX` (`=4`, `=-local4` here; defaults keep the 8-GPU/original-prefi
 1–14 h seen for 8-GPU shapes today. The uploaded step-130 manifest: `layout ppo_actor, world_size 4, 22 files, 161.2 GiB` (shards + HF
 export + `data.pt` + early-stopping state); remote tracker 130; step 120 copied alongside.
 
+**Running on ScaleTrain (4 GPUs) since 02:18Z:** `restored complete source=permanent step=130` (4 shards), `EARLY_STOPPING_PATIENCE_MIGRATED
+… active_patience=4 misses=1`, steps 131–139 at **~370–395 s/step** (gen 40–57 s · update 250–260 s; faster than the local 4×H100 run's
+~430–490 s), rolling upload at 135 committed. **Step 140 validation: 0.5271 mean@16 — new best** (was 0.5208 @ 120; the abandoned local
+attempt had measured 0.515 on the same step with a different sample), misses reset to 0.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
