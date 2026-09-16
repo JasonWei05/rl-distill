@@ -1131,9 +1131,14 @@ the §9.0e step-50 measurement: 128 medium validation questions × 4 samples, ex
 |---|---|---|---|---|---|
 | distilled 12B, before on-policy (off-policy step 1000) | 0.0885 ± 0.0024 | 0.998 | 0.0868 ± 0.0027 | 0.0807 | 260 / 223 |
 | plain student-top-128, step 50 (§9.0e) | 0.0713 ± 0.0021 | 0.9985 | 0.0912 ± 0.0027 | 0.0855 | — / 223 |
+| **tail-bucket, step 50** (measured 20:01–20:23Z) | **0.0713 ± 0.0023** (top-128 est. 0.0695) | 0.9987 | **0.0937 ± 0.0027** (teacher top-128 0.0883) | 0.0883 | 261 / 207 |
 | **tail-bucket, step 100** | **0.0817 ± 0.0024** (top-128 est. 0.0794) | 0.9981 | **0.0950 ± 0.0027** (teacher top-128 0.0879) | 0.0879 | 221 / 222 |
 
-Reading: after 100 bucket steps the reverse KL is down only 8 % from the off-policy starting point (0.0885 → 0.0817), against the plain
+Reading (updated with the step-50 row): at step 50 the bucket run's reverse KL (0.0713) is identical to the plain run's at the same step — expected,
+since the two objectives coincide while the student's tail is smaller than the teacher's (§9.0f steps 1–3) — and its forward KL is 0.0937 vs 0.0912.
+Between steps 50 and 100 the bucket run's offline reverse KL then **rose** from 0.0713 to 0.0817 (≈ 3 s.e.) while its on-policy training loss on
+train prompts stayed in the 0.06–0.08 band and its student samples got shorter (261 → 221 tokens): the validation-prompt distribution drifted
+away from the teacher even though the train-prompt objective did not. Worth measuring steps 150 and 200 before drawing conclusions. Earlier reading: after 100 bucket steps the reverse KL is down only 8 % from the off-policy starting point (0.0885 → 0.0817), against the plain
 objective's 19 % drop at step 50 — the bucket term penalises exactly the tail-spreading that let the plain sum drive its truncated
 estimate down, so a smaller measured reduction is expected, and the top-128 estimate (0.0794) tracks the exact value closely (mass 0.998,
 no hidden tail). Forward KL rose 9 % (0.0868 → 0.0950), the same mode-seeking trade as before, slightly larger. Sampling caveat: the
