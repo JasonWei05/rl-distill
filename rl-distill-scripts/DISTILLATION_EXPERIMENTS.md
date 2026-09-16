@@ -1542,6 +1542,13 @@ W&B `g4ds26b-12b-medium-from-onpolicy-bkt50-es5-s42-v1`, vLLM port base 58000, R
 rebuilt (the devbox restart wiped it; `setup_env_gemma4.sh` + `patches/`); the EFS venv works as a fallback (`VENV=…/.venv-gemma4`).
 Launch = `bash rl-distill-scripts/local_jobs/rl_12b_onpolicy_bkt50_local4.sh` in a tmux session, once the user says go.
 
+**Launched on ScaleTrain instead (user request, 21:03Z): `g4-12b-bkt50-rl-med` = `job_dalg97jns19g0896pnrg`** — 4 GPUs, borrowing on, priority
+high, IN_PROGRESS at submit. `scale_train/launch_gemma4_12b_onpolicy_bkt50_rl_medium.sh` (same recipe/layout as the local launcher; the pod
+pulls the step-50 export from S3 through the new run-file option `GEMMA4_INIT_MODEL_S3_URI`, adding the base `processor_config.json`),
+supervisor tmux `rl-g4-12b-bkt50-rl-med` (`.scale_train_supervisors/g4-12b-bkt50-rl-med-20260916/`). Expect on start: `INIT_MODEL_S3
+downloaded=… -> /tmp/gemma4_init_model/s3_…`, `no completed remote checkpoint` (fresh run), step-0 validation (the student's mean@16 on the
+medium val set was ≈ 0.096 at on-policy step 50), then ~6–8 min/step.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
