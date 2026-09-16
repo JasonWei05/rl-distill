@@ -1024,3 +1024,17 @@ Deleted repos (several are still referenced by legacy Gemma 3 launch/eval script
 - `JWei05/DAPO-Gemma3-1B-PT-DeepScaleR-4of4-seed42`
 - `JWei05/DAPO-Gemma3-1B-PT-DeepScaleR-4of4-seed43`
 - `JWei05/DAPO-Gemma3-1B-PT-DeepScaleR-4of4strict-seed42-local`
+
+## 2026-09-14 — 12B distilled RL (medium) finished
+- `g4-12b-distill-rl-med` (RL on top of the E4B-base→12B off-policy distilled student, DeepScaleR medium, seed 42, ES patience 5): early stopping at step 240, best val mean@16 **0.497 @ step 190** (from ≈0.08 at step 0). Best HF snapshot + receipt on S3 (`gemma4-12b-from-e4bbase-distill-rl/gemma4-12b-medium-from-e4bbase-distill-es5/best_hf/`). Details: DISTILLATION_EXPERIMENTS.md §9.0.
+- On-policy distillation take 3 (student-top-128 reverse KL + tail bucket) running: job_dajtd33ns19g0896plog, step 40+, no flattening so far (§9.0f). Plain student-top-k run (take 2) collapsed by step 150 and was cancelled; its step-50 results stand (§9.0e).
+
+## 2026-09-16 — devbox-008 restart backup
+
+Infra is stop/starting devbox-008 (erases `/opt/dlami/nvme` = `/tmp` and `/dev/shm`). Everything of ours on `/tmp` that had no S3/Hub copy
+was synced to `s3://scale-ml/genai/rl-distill/devbox-008-backup-20260916/` (≈62 GB): `gemma4_12bd_evals/passk`, `gemma4_distill_study_eval/results`,
+`gemma4_e4b_val32`, `gemma4_stk50_kl`, `local_eval_raw`, `gemma4_distill_views`, `jasonwei_hf_stage/onpolicy_stk_step50`, the paper draft
+(`tmax-research.*/paper`, `paper.tar`), two eval jsonl dumps and the local 12B-resume logs. Not uploaded (recoverable elsewhere): 26B checkpoint
+copies (S3), Hub staging dirs (uploads finished), trace bundles (S3), HF/vLLM caches, agent scratch. `local_eval_models` (569 GB of Qwen2.5-3B
+GRPO eval exports) was left for the user to decide. `/dev/shm` held only 238 MB of ours. The local venv `/tmp/.venv-gemma4` is rebuilt by
+`setup_env_gemma4.sh` + `rl-distill-scripts/patches/`. GitHub `main` pushed through `dd6647dc`.
