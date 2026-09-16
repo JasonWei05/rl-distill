@@ -1,0 +1,11 @@
+--- /tmp/.venv-gemma4/lib/python3.12/site-packages/ray/_private/node.py.orig	2026-09-15 17:23:28.222761599 +0000
++++ /tmp/.venv-gemma4/lib/python3.12/site-packages/ray/_private/node.py	2026-09-15 17:23:28.228761700 +0000
+@@ -425,7 +425,7 @@
+             # We retry in a loop in case it takes longer than expected.
+             time.sleep(0.1)
+             start_time = time.monotonic()
+-            raylet_start_wait_time_s = 30
++            raylet_start_wait_time_s = int(os.environ.get("RAY_RAYLET_START_WAIT_TIME_S", "30"))
+             while True:
+                 try:
+                     # Will raise a RuntimeError if the node info is not available.

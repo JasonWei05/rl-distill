@@ -1,0 +1,12 @@
+--- /tmp/.venv-gemma4/lib/python3.12/site-packages/ray/_private/services.py.orig_agent_listen_port	2026-09-16 00:19:57.941204841 +0000
++++ /tmp/.venv-gemma4/lib/python3.12/site-packages/ray/_private/services.py	2026-09-16 00:19:58.427213149 +0000
+@@ -1980,6 +1980,9 @@
+         f"--metrics-agent-port={metrics_agent_port}",
+         f"--metrics_export_port={metrics_export_port}",
+         f"--runtime_env_agent_port={runtime_env_agent_port}",
++        # local patch (2026-09-16): Ray 2.58 never forwards the listen port to the raylet, so NodeManager::WaitForDashboardAgentPorts
++        # always blocks 15 s (hardcoded) on the agent's port file and aborts on an overloaded host; forwarding it skips that wait.
++        f"--dashboard_agent_listen_port={dashboard_agent_listen_port}",
+         f"--object_store_memory={object_store_memory}",
+         f"--plasma_directory={plasma_directory}",
+         f"--fallback_directory={fallback_directory}",
