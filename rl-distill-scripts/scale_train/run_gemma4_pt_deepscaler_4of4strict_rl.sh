@@ -294,6 +294,32 @@ fi
 export GEMMA4_INIT_MODEL_REPO="${GEMMA4_INIT_MODEL_REPO:-${GEMMA4_MODEL}}"
 export GEMMA4_INIT_MODEL_REVISION="${GEMMA4_INIT_MODEL_REVISION:-${GEMMA4_MODEL_REVISION:-}}"
 export GEMMA4_INIT_MODEL_SUBFOLDER="${GEMMA4_INIT_MODEL_SUBFOLDER:-}"
+if [ -n "${GEMMA4_INIT_MODEL_S3_URI:-}" ] && [ -z "${GEMMA4_INIT_MODEL_PATH:-}" ]; then
+  # Initialize from an HF export on S3 (e.g. another run's global_step_N/actor/huggingface/). Downloaded once per pod; the
+  # base model's processor_config.json is added when the export lacks it (unified Gemma 4 load).
+  GEMMA4_INIT_MODEL_PATH="/tmp/gemma4_init_model/s3_$(echo "${GEMMA4_INIT_MODEL_S3_URI}" | md5sum | cut -c1-12)"
+  "${VENV}/bin/python" - "${GEMMA4_INIT_MODEL_S3_URI}" "${GEMMA4_INIT_MODEL_PATH}" "${GEMMA4_MODEL}" "${GEMMA4_MODEL_REVISION:-}" <<'PY'
+import os, sys
+from pathlib import Path
+import boto3
+from huggingface_hub import hf_hub_download
+uri, out, base, rev = sys.argv[1], Path(sys.argv[2]), sys.argv[3], sys.argv[4] or None
+bucket, prefix = uri[5:].split("/", 1); prefix = prefix.rstrip("/") + "/"
+s3 = boto3.client("s3"); out.mkdir(parents=True, exist_ok=True); n = 0
+for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+    for obj in page.get("Contents", []):
+        rel = obj["Key"][len(prefix):]
+        if not rel or rel.endswith("/"): continue
+        dst = out / rel; dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists() and dst.stat().st_size == obj["Size"]: continue
+        s3.download_file(bucket, obj["Key"], str(dst)); n += 1
+if not (out / "processor_config.json").exists():
+    src = hf_hub_download(base, "processor_config.json", revision=rev); (out / "processor_config.json").write_bytes(Path(src).read_bytes())
+assert (out / "config.json").is_file() and any(out.glob("*.safetensors")), f"incomplete init export at {out}"
+print(f"INIT_MODEL_S3 downloaded={n} files -> {out}")
+PY
+  export GEMMA4_INIT_MODEL_PATH
+fi
 if [ -n "${GEMMA4_INIT_MODEL_PATH:-}" ]; then
   # Initialize from a LOCAL HF export directory (e.g. an S3-restored actor/huggingface/ of another run). It must already
   # carry the base model's processor_config.json (unified Gemma 4 load; see the Hub branch below).
