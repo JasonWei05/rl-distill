@@ -442,6 +442,9 @@ if [ -n "${FULL_CHECKPOINT_S3_URI:-}" ]; then
   fi
 fi
 
+# RUN_RAY_ADDRESS (optional): connect to a head node the caller started with fixed agent ports instead of ray.init(address=local).
+# Needed on the overloaded shared devbox: with unassigned ports the raylet waits only 15 s (hardcoded, Ray 2.58
+# port_persistence.h) for the Python dashboard/runtime-env agents to publish their port files and aborts otherwise.
 status=0
 MODEL_TAG="${MODEL_TAG}" MODEL_REPO="${GEMMA4_MODEL}" MODEL_PATH="${MODEL_LOCAL_PATH}" \
 WRAP_LAYER_CLS="${WRAP_LAYER_CLS}" \
@@ -455,7 +458,7 @@ MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH}" MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LEN
 LOG_VAL_GENERATIONS="${LOG_VAL_GENERATIONS:-100}" LOG_TRAIN_GENERATIONS="${LOG_TRAIN_GENERATIONS:-100}" \
 ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.65}" \
 N_GPUS_PER_NODE="${n_gpus}" NNODES=1 OFFLOAD="${OFFLOAD:-False}" SAVE_FREQ="${SAVE_FREQ:-25}" \
-RAY_ADDRESS=local VERL_VLLM_PORT_BASE="${VERL_VLLM_PORT_BASE:-52000}" \
+RAY_ADDRESS="${RUN_RAY_ADDRESS:-local}" VERL_VLLM_PORT_BASE="${VERL_VLLM_PORT_BASE:-52000}" \
 DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
     bash rl-distill-scripts/gemma3_pt_fewshot_math_rl.sh \
       +ray_kwargs.ray_init._temp_dir="${RAY_TEMP_DIR}" \

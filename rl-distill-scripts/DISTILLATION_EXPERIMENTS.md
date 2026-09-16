@@ -1426,6 +1426,20 @@ in `NodeManager::WaitForDashboardAgentPorts` — the Python dashboard/runtime-en
 `RAY_agent_register_timeout_ms` environment override in the raylet, so the launcher now exports 900 000 ms (plus 1200 s for the driver→node and
 GCS waits) — relaunched 23:27Z. Disk: `/tmp` had 420 GB free after the reshard (one 4-rank checkpoint + HF export ≈ 160 GB; keep-2).
 
+**Ray start-up on the overloaded box — root cause found (00:20Z, 2026-09-16).** The 23:27Z relaunch died the same way even with
+`RAY_agent_register_timeout_ms=900000`: the raylet aborts with `Timed out waiting for file <session>/metrics_agent_port_<node_id>` (first
+attempt) or `.../dashboard_agent_listen_port_<node_id>` (fixed-port probe). Ray 2.58 source (`src/ray/raylet/node_manager.cc`
+`WaitForDashboardAgentPorts`, `src/ray/util/port_persistence.h`): when an agent port is unassigned (0) the raylet polls for the port file the
+Python dashboard/runtime-env agent writes, with a **hardcoded 15 s** default (`WaitForPersistedPort(..., timeout_ms = 15000)`) — not governed
+by `agent_register_timeout_ms` or any `RAY_*` override. At load average 500–680 (other users' evaluators on the 192-core box) those agents
+need 45–60 s just to import, so `ray.init(address=local)` cannot succeed. Pre-assigned ports skip the wait — but `ray start --head`'s
+`--dashboard-agent-listen-port` is never forwarded to the raylet by `ray/_private/services.py` (it only passes `--metrics-agent-port`,
+`--metrics_export_port`, `--runtime_env_agent_port`), so that one wait always fires. **Fix:** (1) venv patch adding
+`--dashboard_agent_listen_port=…` to the raylet command in `/tmp/.venv-gemma4/.../ray/_private/services.py` (backup `.orig_agent_listen_port`);
+(2) the local launcher starts its own head node with all agent ports fixed (`RAY_PORT_BASE=56390`, ports +0…+7) and the run-file connects to
+it via the new opt-in `RUN_RAY_ADDRESS` (default still `local`, so ScaleTrain is unchanged). Bare-`ray.init` probes at this load also showed
+the raylet itself takes ~60 s to come up, so expect several minutes of start-up before the checkpoint load.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`

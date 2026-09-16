@@ -82,11 +82,24 @@ if [ "${GUARD:-1}" = 1 ]; then guard_loop & GUARD_PID=$!; trap 'kill ${GUARD_PID
 
 # ---- run contract = scale_train/launch_gemma4_12b_medium_resume.sh, local flavour ---------------------------------
 export NCCL_SOCKET_IFNAME=lo NCCL_SOCKET_FAMILY=AF_INET GLOO_SOCKET_IFNAME=lo
-export RAY_ADDRESS=local RAY_RAYLET_START_WAIT_TIME_S=1200 RAY_gcs_server_port_wait_time_s=1200
-# The raylet aborts in NodeManager::WaitForDashboardAgentPorts when the (Python) dashboard/runtime-env agent cannot import
-# and register within agent_register_timeout_ms (default 100 s) -- seen at box load avg ~500 on 2026-09-15 23:12Z. Ray 2.58
-# reads the RAY_agent_register_timeout_ms override from the raylet's environment (inherited from this shell via ray.init).
-export RAY_agent_register_timeout_ms=900000
+export RAY_RAYLET_START_WAIT_TIME_S=1200 RAY_gcs_server_port_wait_time_s=1200
+# Ray head with FIXED agent ports. With unassigned ports the raylet waits only 15 s (hardcoded default in Ray 2.58
+# port_persistence.h, not tunable) for the Python dashboard/runtime-env agents to publish their port files; at a box load
+# average of ~500-650 those agents need 45-60 s just to import, so ray.init(address=local) aborted twice on 2026-09-15
+# ("Timed out waiting for file .../metrics_agent_port_*"). Pre-assigned ports skip that wait entirely.
+RAY_PORT_BASE="${RAY_PORT_BASE:-56390}"   # 8 consecutive ports: gcs, node-manager, object-manager, agent grpc, agent listen, runtime-env agent, metrics export, client
+export RUN_RAY_ADDRESS="127.0.0.1:${RAY_PORT_BASE}"
+start_ray_head() {
+  "${VENV}/bin/ray" stop --grace-period 10 >/dev/null 2>&1 || true
+  local s=$(date +%s)
+  "${VENV}/bin/ray" start --head --port "${RAY_PORT_BASE}" --node-manager-port $((RAY_PORT_BASE + 1)) \
+    --object-manager-port $((RAY_PORT_BASE + 2)) --dashboard-agent-grpc-port $((RAY_PORT_BASE + 3)) \
+    --dashboard-agent-listen-port $((RAY_PORT_BASE + 4)) --runtime-env-agent-port $((RAY_PORT_BASE + 5)) \
+    --metrics-export-port $((RAY_PORT_BASE + 6)) --ray-client-server-port $((RAY_PORT_BASE + 7)) \
+    --include-dashboard=false --disable-usage-stats --temp-dir "${RAY_TEMP_DIR}" --num-gpus "${n_gpus}" \
+    > "${LOG_DIR}/ray_head_$(date -u +%Y%m%dT%H%M%SZ).log" 2>&1 || { echo "FATAL: ray start --head failed (see ${LOG_DIR}/ray_head_*.log)" >&2; return 1; }
+  echo "RAY_HEAD_UP address=${RUN_RAY_ADDRESS} gpus=${n_gpus} in $(( $(date +%s) - s )) s"
+}
 export RAY_local_fs_capacity_threshold=0.99   # /tmp is a 28 TB shared volume: >95% used with hundreds of GB free trips Ray's default 0.95 disk guard
 export GEMMA4_MODEL=google/gemma-4-12B GEMMA4_MODEL_REVISION=023679ed352de9bb66cc873c9009ce3482585c08
 export DIFFICULTY_DATASET_SOURCE=gemma4_26b_bands DIFFICULTY_DATASET=medium
@@ -118,6 +131,7 @@ MAX_ATTEMPTS="${MAX_ATTEMPTS:-5}"
 for attempt in $(seq 1 "${MAX_ATTEMPTS}"); do
   log="${LOG_DIR}/run_$(date -u +%Y%m%dT%H%M%SZ)_attempt${attempt}.log"
   echo "ATTEMPT ${attempt}/${MAX_ATTEMPTS} log=${log}"
+  start_ray_head || { sleep 120; continue; }
   set +e
   bash rl-distill-scripts/scale_train/run_gemma4_pt_deepscaler_4of4strict_rl.sh \
     "+ray_kwargs.ray_init.runtime_env.env_vars.EARLY_STOPPING_MIGRATE_PATIENCE_FROM='${EARLY_STOPPING_MIGRATE_PATIENCE_FROM}'" \
