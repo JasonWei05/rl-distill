@@ -1098,6 +1098,14 @@ No flattening: the bucket term has removed the drift the plain objective showed 
 **00:49Z: preempted again** (sixth borrowing preemption; pod `d94vt` ran 21:32–00:49Z, steps 71–~125); resume point = checkpoint 120.
 Remaining §9.0e comparison points: steps 100 (0.9965), 120 (0.9939), 130 (0.99), 140 (0.947).
 
+**Finished 2026-09-16 00:39Z (after the 10th borrowing preemption / relaunch at 20:17Z):** ran 130 → 200 without interruption (~8 min/step),
+`RUN_OUTCOME_WRITTEN reason=max_steps final_step=200 best_step=200`; best HF export published to
+`s3://scale-ml/genai/rl-distill/gemma4-12b-from-e4bbase-distill-onpolicy/gemma4-12b-medium-onpolicy-studenttop128-bucket-from-e4bbase-distill/best_hf`
+and the completion receipt to the `…-full-checkpoints/12b-medium-onpolicy-studenttop128-bucket-from-e4bbase-distill` prefix. Two benign
+tail errors: the wandb service teardown traceback and `wandb sync --sync-all` (flag removed in this wandb version). One follow-up: the pod role
+lacks `s3:DeleteObject`, so every `retire-pointer-after-permanent-N` rolling-checkpoint cleanup was deferred (`AccessDenied`) — the rolling
+shards for steps 135–195 are still on S3 and should be deleted from the devbox with the `ml-worker` profile.
+
 ### 9.0g Reverse direction: the RL'd distilled 12B (§9.0 best, step 190) → E4B base (started 2026-09-14 18:45Z)
 
 **Goal.** Take the strongest RL model of the study — the E4B-base-distilled 12B after DAPO on medium (val mean@16 0.497 @ step 190,
