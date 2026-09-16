@@ -1457,6 +1457,17 @@ writes; I freed my re-downloadable eval-model caches — `gemma4_12bd_evals/mode
 `gemma4_trace_models` 25 GB — to get back to ~380 GB; the local 4-rank step-130 copy is deleted automatically once the trainer has loaded it).
 The on-policy tail-bucket run finished at step 200 in the meantime (§9.0f).
 
+**Switched to ScaleTrain on 4 GPUs (user request, 01:35Z 2026-09-16).** The local run (relaunched 01:05Z on GPUs 0,1,2,6 with the fixed-port
+head, still in model load) was stopped: the shared box is at load ~500 and its /tmp volume keeps filling from other users, so a 4-GPU
+ScaleTrain job is the safer home. Recipe unchanged; what moved: the 4-rank step-130 reshard (+ the step-130 HF export copied from the original
+prefix) is uploaded as a permanent checkpoint to `…-full-checkpoints/12b-medium-local4` (`full_checkpoint_s3.py upload`, manifest world_size 4),
+the original step-120 checkpoint (current best, 8-rank) is server-side copied into the same prefix so end-of-run best-HF publishing can find it
+(never selected by `restore-latest`, since 130 is newer), and `scale_train/launch_gemma4_12b_medium_resume.sh` gained `GPUS_PER_INSTANCE`
+and `CKPT_SUFFIX` (`=4`, `=-local4` here; defaults keep the 8-GPU/original-prefix behaviour). Supervisor:
+`scale_train/start_gemma4_12b_medium_resume_local4_supervisor.sh` (tmux `rl-g4-12b-med-resume-local4`, completion checks against the
+-local4 prefixes, expected world size 4). Expect on start: `restored complete source=permanent step=130` (4 shards), the same
+`EARLY_STOPPING_PATIENCE_MIGRATED … active_patience=4 misses=1` line, then steps 131+ at ~7–8 min each (4 × H100, mbs 4 / 8192 cap).
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
