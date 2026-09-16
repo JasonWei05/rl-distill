@@ -39,10 +39,19 @@ pick_free_gpus() {
   done < <(nvidia-smi --query-gpu=index,uuid,memory.used --format=csv,noheader,nounits)
   local IFS=,; echo "${free[*]:0:${want}}"
 }
-if [ -z "${GPUS:-}" ]; then GPUS="$(pick_free_gpus 4)"; fi
+if [ -z "${GPUS:-}" ]; then
+  # Wait for 4 idle GPUs (the box is shared; co-tenants took all 8 on 2026-09-16 00:20Z). Poll every 60 s, report every 10 min.
+  GPU_WAIT_HOURS="${GPU_WAIT_HOURS:-24}"; waited=0
+  GPUS="$(pick_free_gpus 4)"
+  while [ "$(awk -F, '{print NF}' <<<"${GPUS}")" -ne 4 ] && [ -n "${GPUS}" ] || [ -z "${GPUS}" ]; do
+    [ $((waited % 600)) -eq 0 ] && echo "GPU_WAIT $(date -u +%FT%TZ) idle='${GPUS}' waited=$((waited / 60))min (need 4; giving up after ${GPU_WAIT_HOURS}h)"
+    if [ "${waited}" -ge $((GPU_WAIT_HOURS * 3600)) ]; then echo "FATAL: no 4 idle GPUs within ${GPU_WAIT_HOURS}h" >&2; exit 2; fi
+    sleep 60; waited=$((waited + 60)); GPUS="$(pick_free_gpus 4)"
+  done
+fi
 n_gpus="$(awk -F, '{print NF}' <<<"${GPUS}")"
 if [ "${n_gpus}" -ne 4 ]; then
-  echo "FATAL: need exactly 4 free GPUs (checkpoint is resharded to world_size=4); free right now: '${GPUS}'" >&2
+  echo "FATAL: need exactly 4 GPUs (checkpoint is resharded to world_size=4); got '${GPUS}'" >&2
   exit 2
 fi
 export CUDA_VISIBLE_DEVICES="${GPUS}"
