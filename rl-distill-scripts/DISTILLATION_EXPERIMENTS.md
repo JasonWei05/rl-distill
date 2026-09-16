@@ -1475,8 +1475,14 @@ export + `data.pt` + early-stopping state); remote tracker 130; step 120 copied 
 **Running on ScaleTrain (4 GPUs) since 02:18Z:** `restored complete source=permanent step=130` (4 shards), `EARLY_STOPPING_PATIENCE_MIGRATED
 … active_patience=4 misses=1`, steps 131–139 at **~370–395 s/step** (gen 40–57 s · update 250–260 s; faster than the local 4×H100 run's
 ~430–490 s), rolling upload at 135 committed. **Step 140 validation: 0.5271 mean@16 — new best** (was 0.5208 @ 120; the abandoned local
-attempt had measured 0.515 on the same step with a different sample), misses reset to 0. **Step 150: 0.511** (miss 1), **step 160: 0.519** (miss 2 of 4); checkpoints 150/160 uploaded. Two more
-non-improving validations (170, 180) would end the run with best 0.5271 @ 140.
+attempt had measured 0.515 on the same step with a different sample), misses reset to 0. **Step 150: 0.511** (miss 1), **step 160: 0.519** (miss 2 of 4); checkpoints 150/160 uploaded. **Step 170: 0.519** (miss 3), **step 180: 0.513** (miss 4) → `EARLY_STOP_TRIGGERED step=180 best=0.5271 best_step=140`;
+`RUN_OUTCOME_WRITTEN reason=early_stopping final_step=180 best_step=140`; best HF export published to
+`s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-20260819/gemma4-12b-medium-local4/best_hf/` and the completion receipt to the
+`…-full-checkpoints/12b-medium-local4` prefix (RUN_DONE rc=0 at 09:15Z; the wandb teardown traceback and `wandb sync --sync-all` error are the
+usual benign tail). **Net effect of the patience-4 resume:** the untrained-12B medium teacher's best moved from **0.5208 @ 120 → 0.5271 @ 140**
+(+0.6 pt, within the ±0.5–1 pt run-to-run noise seen at 130/140/150/160/170/180 = 0.519/0.527/0.511/0.519/0.519/0.513); steps 141–180 never
+beat it. Wall clock on the 4-GPU pod: 50 steps in 6.9 h (~6.3 min/step + 5 validations/saves). The `rl_12b_medium` teacher in §1/§8 still
+refers to step 120 (Hub pin); the step-140 export is S3-only (`global_step_140/actor/huggingface/`, and `best_hf/`).
 
 ### 9.1 Results
 
