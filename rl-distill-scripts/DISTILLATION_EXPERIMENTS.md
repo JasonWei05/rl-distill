@@ -1124,6 +1124,24 @@ settled in the 0.06–0.08 band it reached by step 50, response lengths stayed a
 distribution without the drift that killed the plain variant. Grad-norm mostly < 1 with isolated spikes to 4–5. Not yet done for this run:
 pass@k / reverse-KL evaluation of the step-200 export (`best_hf/`), and deleting the deferred rolling shards on S3.
 
+**Offline KL of the tail-bucket run's step-100 checkpoint (2026-09-16 18:58–19:28Z, one free local GPU after the devbox restart; same protocol as
+the §9.0e step-50 measurement: 128 medium validation questions × 4 samples, exact Monte-Carlo KL plus top-128 estimates, E4B base teacher):**
+
+| student | reverse KL (student samples; exact MC) | student top-128 mass | forward KL (teacher samples; exact MC) | forward, teacher top-128 (off-policy loss convention) | mean len (student / teacher samples) |
+|---|---|---|---|---|---|
+| distilled 12B, before on-policy (off-policy step 1000) | 0.0885 ± 0.0024 | 0.998 | 0.0868 ± 0.0027 | 0.0807 | 260 / 223 |
+| plain student-top-128, step 50 (§9.0e) | 0.0713 ± 0.0021 | 0.9985 | 0.0912 ± 0.0027 | 0.0855 | — / 223 |
+| **tail-bucket, step 100** | **0.0817 ± 0.0024** (top-128 est. 0.0794) | 0.9981 | **0.0950 ± 0.0027** (teacher top-128 0.0879) | 0.0879 | 221 / 222 |
+
+Reading: after 100 bucket steps the reverse KL is down only 8 % from the off-policy starting point (0.0885 → 0.0817), against the plain
+objective's 19 % drop at step 50 — the bucket term penalises exactly the tail-spreading that let the plain sum drive its truncated
+estimate down, so a smaller measured reduction is expected, and the top-128 estimate (0.0794) tracks the exact value closely (mass 0.998,
+no hidden tail). Forward KL rose 9 % (0.0868 → 0.0950), the same mode-seeking trade as before, slightly larger. Sampling caveat: the
+two on-policy rows are different runs at different steps (the bucket run's step-50 export is on S3 if a same-step comparison is wanted);
+± are per-sequence standard errors. Traces + metrics: `s3://scale-ml/genai/rl-distill/devbox-008-backup-20260916/gemma4_bkt100_kl/`
+(`reverse/`, `forward/`); runner `local_jobs/stk50_kl_gpu2.sh` with `STK=<step-100 export> OUT=/tmp/gemma4_bkt100_kl` (the export needs
+the 12B base `processor_config.json` added for the unified vLLM load).
+
 ### 9.0g Reverse direction: the RL'd distilled 12B (§9.0 best, step 190) → E4B base (started 2026-09-14 18:45Z)
 
 **Goal.** Take the strongest RL model of the study — the E4B-base-distilled 12B after DAPO on medium (val mean@16 0.497 @ step 190,
