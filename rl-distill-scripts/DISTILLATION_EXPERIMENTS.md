@@ -1468,6 +1468,10 @@ and `CKPT_SUFFIX` (`=4`, `=-local4` here; defaults keep the 8-GPU/original-prefi
 -local4 prefixes, expected world size 4). Expect on start: `restored complete source=permanent step=130` (4 shards), the same
 `EARLY_STOPPING_PATIENCE_MIGRATED … active_patience=4 misses=1` line, then steps 131+ at ~7–8 min each (4 × H100, mbs 4 / 8192 cap).
 
+**Submitted 01:53Z as `job_dakvn1pt1s0g07hmc3dg`** (4 GPUs, borrowing, priority high); a pod was scheduled at 02:14Z — ~20 min, versus the
+1–14 h seen for 8-GPU shapes today. The uploaded step-130 manifest: `layout ppo_actor, world_size 4, 22 files, 161.2 GiB` (shards + HF
+export + `data.pt` + early-stopping state); remote tracker 130; step 120 copied alongside.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
