@@ -1448,6 +1448,15 @@ need 45–60 s just to import, so `ray.init(address=local)` cannot succeed. Pre-
 it via the new opt-in `RUN_RAY_ADDRESS` (default still `local`, so ScaleTrain is unchanged). Bare-`ray.init` probes at this load also showed
 the raylet itself takes ~60 s to come up, so expect several minutes of start-up before the checkpoint load.
 
+**00:40–00:58Z:** with the fixed-port head the raylet came up in 112 s and the driver connected, but actor creation then failed with
+`ActorUnschedulableError: worker startup repeatedly failed` — Ray workers must register within `worker_register_timeout_seconds` (default 60 s),
+also too short at this load; the launcher now exports `RAY_worker_register_timeout_seconds=900` for the head. Two more launcher changes for the
+shared box: it **waits** for 4 idle GPUs instead of failing (co-tenants took all 8 GPUs during the 00:20Z restart gap, and GPU 3 again during
+the 00:58Z one), and `MAX_ACTOR_CKPT_TO_KEEP=1` (the shared /tmp volume dropped from 420 GB to 71 GB free within an hour from other users'
+writes; I freed my re-downloadable eval-model caches — `gemma4_12bd_evals/models` 243 GB, `gemma4_distill_students` 47 GB,
+`gemma4_trace_models` 25 GB — to get back to ~380 GB; the local 4-rank step-130 copy is deleted automatically once the trainer has loaded it).
+The on-policy tail-bucket run finished at step 200 in the meantime (§9.0f).
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
