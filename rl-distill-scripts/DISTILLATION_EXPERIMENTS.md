@@ -1683,7 +1683,8 @@ suite / pass@k as in §9.0g).
 **(c) 12br → E4B at peak 2e-6 (launched 2026-09-17 ~17:55Z, user request): same recipe as (a) with `LR=2e-6` (→ 2e-7), 4 GPUs on ScaleTrain with
 borrowing OFF (dedicated capacity, priority high).** Reuses the complete `12br-medium` bundle on S3 (stage 1 skipped); distill prefix
 `s3://scale-ml/genai/rl-distill/gemma4-12br-distill-ckpts-v1/12br-medium-to-e4b-bs128-s1000-lr2e-6`, exp `12br-medium-to-e4b-base-bs128-s1000-lr2e-6-st4`,
-W&B project `gemma4-12br-distill-v1`; supervisor tmux `rl-g4-12br-trace-distill-lr2e-6`. Gives the same 1e-6 vs 2e-6 pair for the 12br teacher
+W&B project `gemma4-12br-distill-v1`; supervisor tmux `rl-g4-12br-trace-distill-lr2e-6`; **`job_dam2sj7n0ur007idquj0`** (submitted 18:15Z — the
+ScaleTrain API took ~20 min to accept it). Gives the same 1e-6 vs 2e-6 pair for the 12br teacher
 that (b)/§9.0g gave for the 12bd teacher (there 2e-6 ended lower: 0.0903 vs 0.0935).
 
 ### 9.1 Results
