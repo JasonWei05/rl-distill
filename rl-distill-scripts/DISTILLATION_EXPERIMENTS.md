@@ -708,6 +708,20 @@ batch-dependent, so only the marker proves the switch is live.
 completion receipt at step 170, supervisor verified both (`COMPLETED_RECEIPTS`). Caveat for the seed table: this best is the re-sampled step-120
 validation after the 04:11Z preemption (the first sample of step 120 scored 0.313, which would have ended the run at best 0.315 @ 70); seed 42's
 E4B medium best was 0.34 @ 90 (§1). Seed 44 continues (best 0.335 @ 150, 0 misses).
+**Seed 44 finished 15:50Z** (`job_dalpomnn0ur007idqu60`): early stop at step 210 after five misses (vals 170–210 = 0.340 / 0.314 / 0.305 /
+0.311 / 0.296), **best 0.3404 @ 160**; best HF export + completion receipt on S3 (`…/gemma4-difficulty-s44-20260910/gemma4-e4b-medium/best_hf/`),
+supervisor `COMPLETED_RECEIPTS`. Net wall clock after the 01:27Z fast-layout relaunch: steps 65 → 210 in ~14 h including 3 relaunches (cuDNN ×2,
+preemption ×2) — versus ~26 min/step before.
+
+**E4B medium, three seeds (DAPO, 64×16, patience 5):**
+
+| seed | best val mean@16 | best step | stop step | notes |
+|---|---|---|---|---|
+| 42 (§1) | 0.340 | 90 | — | original sweep run |
+| 43 | 0.3175 | 120 | 170 | best is the re-sampled step-120 validation after a preemption (first sample 0.313 would have ended at 0.315 @ 70) |
+| 44 | 0.3404 | 160 | 210 | slower climb (0.087 @ 0, 0.224 @ 30, 0.30 @ 60), same plateau |
+
+Seed spread of the best: 0.3175–0.340 (≈ 2 pts), plateau reached between steps 70 and 160.
 
 ### 9.0c Reverse KL of the distilled students vs the E4B base (launched 2026-09-10 16:4xZ; final results 2026-09-11 07:02Z)
 
