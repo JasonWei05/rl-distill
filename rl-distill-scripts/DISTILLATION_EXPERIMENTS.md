@@ -1680,6 +1680,12 @@ The 12br job's supervisor was stopped by hand after the run-file's RL-style `com
 receipt and marked the finished job FAILED (fixed: commit a3c03da4, receipt step removed). Neither student has been evaluated yet (§7 math
 suite / pass@k as in §9.0g).
 
+**(c) 12br → E4B at peak 2e-6 (launched 2026-09-17 ~17:55Z, user request): same recipe as (a) with `LR=2e-6` (→ 2e-7), 4 GPUs on ScaleTrain with
+borrowing OFF (dedicated capacity, priority high).** Reuses the complete `12br-medium` bundle on S3 (stage 1 skipped); distill prefix
+`s3://scale-ml/genai/rl-distill/gemma4-12br-distill-ckpts-v1/12br-medium-to-e4b-bs128-s1000-lr2e-6`, exp `12br-medium-to-e4b-base-bs128-s1000-lr2e-6-st4`,
+W&B project `gemma4-12br-distill-v1`; supervisor tmux `rl-g4-12br-trace-distill-lr2e-6`. Gives the same 1e-6 vs 2e-6 pair for the 12br teacher
+that (b)/§9.0g gave for the 12bd teacher (there 2e-6 ended lower: 0.0903 vs 0.0935).
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
