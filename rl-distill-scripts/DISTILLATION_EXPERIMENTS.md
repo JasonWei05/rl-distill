@@ -695,6 +695,14 @@ lives in `verl/utils/device.py` (imported by both paths; commit 63e22397; verifi
 that bundle and **cleared step 102 (step 103 in 230 s)**. Seed 43 (relaunched 03:28Z, restored 120 after a preemption race and a 4th/5th-miss
 near-stop: its re-sampled step-120 validation came out 0.3175 = new best, resetting the counter) still runs the earlier bundle; a recurrence
 there triggers one more automatic relaunch with the fix. Lesson: worker-side env-gated hooks belong in a module both worker paths import.
+**07:48Z: seed 44 crashed a THIRD time (step 117) on bundle 63e22397**, and seed 43 once more at step 130 on its older bundle — so the
+`verl.utils.device` hook was still not taking effect. The remaining difference: it was gated on `torch.cuda.is_available()`, which is False when
+Ray imports the module before the actor's CUDA context/visible devices exist. Commit 91b125c0 drops the gate, re-asserts the switch in
+`engine/fsdp/transformer_impl.py`, and prints `RL_DISTILL_CUDNN_SDPA_DISABLED pid=… cudnn_sdp_enabled=False` once per process. Seed 44
+relaunched 07:53Z (`job_dalpomnn0ur007idqu60`): the marker appears in the driver and every worker, and it **cleared steps 117–118** (the batch
+that killed it) at ~210–250 s/step. Seed 43 relaunched 06:39Z (`job_dalom5fn0ur007idqu30`, bundle 63e22397 — gated hook) cleared its own crash
+step 130 and runs on; if it crashes again its next relaunch gets 91b125c0. Earlier "confirmations" (steps 103, 116) were luck: the failure is
+batch-dependent, so only the marker proves the switch is live.
 
 ### 9.0c Reverse KL of the distilled students vs the E4B base (launched 2026-09-10 16:4xZ; final results 2026-09-11 07:02Z)
 
