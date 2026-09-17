@@ -86,6 +86,8 @@ DIRECTIONS = (
     "e4b_base_hard_to_12b_26b",
     # RL on top of the E4B-base-distilled 12B (DISTILLATION_EXPERIMENTS.md §9.0, best step 190) -> E4B base student.
     "12bd_medium_to_e4b",
+    # Untrained-12B medium RL after the patience-4 resume (best step 140, §9.0h) -> E4B base student, 16 samples.
+    "12b_medium_r140_to_e4b",
 )
 SPLITS = ("train", "validation")
 

@@ -54,6 +54,9 @@ case "${TRACE_SPEC}" in
   # reads the verified full checkpoint (…-rl-full-checkpoints/<RUN_KEY>/global_step_190/actor/huggingface); the Hub repo
   # (steps 170-240, pinned) is the fallback.
   12bd-medium) RUN_KEY=12b-medium-from-e4bbase-distill-es5; BAND=medium; BEST_STEP=190; DIRECTION=12bd_medium_to_e4b; TEACHER_HF_REPO=JWei05/DAPO-gemma4-12b-PT-DeepScaleR-gemma26b-medium-seed42-from-e4bbase-distill-es5; TEACHER_HF_REVISION=ed5457f617ecc7288fd429a3fcd619b062d62359; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-12b-from-e4bbase-distill-rl-full-checkpoints}" ;;
+  # Untrained-12B medium RL, patience-4 RESUME (§9.0h): best step 140 (val 0.5271) lives only in the 4-rank -local4 S3 prefix
+  # (no Hub copy) -> TEACHER_SOURCE=s3 is mandatory. 16 train samples (§9 recipe) for an E4B-base student.
+  12br-medium) RUN_KEY=12b-medium-local4; BAND=medium; BEST_STEP=140; DIRECTION=12b_medium_r140_to_e4b; TEACHER_HF_REPO=""; TEACHER_HF_REVISION="" ;;
   *)
     echo "FATAL: unsupported TRACE_SPEC=${TRACE_SPEC}" >&2
     exit 2
@@ -201,7 +204,7 @@ fi
 
 # --- Source: the band's training + validation data (same as RL) ---
 GLOBAL_SEED="${GLOBAL_SEED:-42}"
-case "${TRACE_SPEC}" in e4b-base-*|12bd-*) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" ;; *) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}" ;; esac
+case "${TRACE_SPEC}" in e4b-base-*|12bd-*|12br-*) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" ;; *) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}" ;; esac
 VALIDATION_SAMPLES_PER_QUESTION="${VALIDATION_SAMPLES_PER_QUESTION:-1}"
 PROMPTS_PER_SHARD="${PROMPTS_PER_SHARD:-8}"
 ROW_GROUP_ROWS="${ROW_GROUP_ROWS:-2}"

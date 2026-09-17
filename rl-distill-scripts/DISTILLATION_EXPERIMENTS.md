@@ -1557,6 +1557,31 @@ supervisor tmux `rl-g4-12b-bkt50-rl-med` (`.scale_train_supervisors/g4-12b-bkt50
 downloaded=… -> /tmp/gemma4_init_model/s3_…`, `no completed remote checkpoint` (fresh run), step-0 validation (the student's mean@16 on the
 medium val set was ≈ 0.096 at on-policy step 50), then ~6–8 min/step.
 
+### 9.0j Two distillation re-runs into E4B base (prepared 2026-09-17 ~01:45Z, NOT launched; both local)
+
+**(a) Untrained-12B medium RL → E4B base, with the resumed teacher.** The §4 control used the step-120 teacher (val 0.5208) with 8 samples per
+prompt; the patience-4 resume (§9.0h) produced a better checkpoint, **step 140 (val 0.5271)**, which lives only in the 4-rank S3 prefix
+`…-full-checkpoints/12b-medium-local4/global_step_140/actor/huggingface/` (no Hub copy). New trace spec **`12br-medium`**
+(`run_gemma4_bestckpt_trace_collection.sh`: RUN_KEY `12b-medium-local4`, BEST_STEP 140, direction `12b_medium_r140_to_e4b`, TEACHER_SOURCE=s3,
+16 train samples) over the full medium band = **3000 train prompts × 16 + 300 validation × 1** (the band's train split is exactly 3000 prompts,
+so "3000 × 16" is the whole band at the §9 sample count). Generation: `local_jobs/trace_12br_medium_dp2.sh` — 2 local GPUs as DP=2 / TP=1
+vLLM workers, output `/tmp/gemma4_bestckpt_traces_v2/12br-medium` mirrored to `s3://…/gemma4-bestckpt-traces-topk128-v2/12br-medium`
+(resumable per shard). Distillation: `local_jobs/distill_12br_medium_to_e4b_gpu4.sh` — waits for the bundle, then the §9 recipe on 4 GPUs
+(bs 128, 1000 steps, lr 2e-6 → 2e-7 linear, 100 warm-up, mbs 4 / 8192 cap, val every 10; S3 checkpoints permanent every 250 + rolling every 50
+with HF exports) to `s3://scale-ml/genai/rl-distill/gemma4-12br-distill-ckpts-v1/12br-medium-to-e4b-bs128-s1000-lr2e-6`, W&B project
+`gemma4-12br-distill-v1`, exp `12br-medium-to-e4b-base-bs128-s1000-lr2e-6-g4`. `LR=…` overrides the peak if the lower rate from (b) is preferred.
+
+**(b) RL'd distilled 12B (step 190) → E4B base at a lower LR.** In the §9.0g run (peak 2e-6) the validation KL was flat for a long stretch
+and only dropped as the linear schedule decayed. Re-run with **peak 1e-6 → floor 1e-7** (linear, `MIN_LR_RATIO=0.1`), everything else
+identical, same trace bundle (`12bd-medium`, 8.3 GB on S3; the runner re-downloads it since the devbox restart wiped /tmp):
+`local_jobs/distill_12bd_medium_to_e4b_lr1e-6_gpu4.sh` (4 GPUs) →
+`s3://scale-ml/genai/rl-distill/gemma4-12bd-distill-ckpts-v1/12bd-medium-to-e4b-bs128-s1000-lr1e-6`, exp `12bd-medium-to-e4b-base-bs128-s1000-lr1e-6-g4`.
+
+**GPU plan (8 local GPUs, all idle at prep time):** (b) on 4 GPUs and the (a) generation on 2 GPUs can run together; the (a) distillation
+takes the next 4 idle GPUs once its bundle completes (the previous 12bd-medium collection took ~6 h on 4 GPUs for the same 3000 × 16;
+expect ~10–12 h on 2). Registrations: direction `12b_medium_r140_to_e4b` in `generate_gemma4_distill_traces.py` and the preflight view;
+`run_gemma4_distill_one.sh` branch `12bd-*|12br-*`.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
