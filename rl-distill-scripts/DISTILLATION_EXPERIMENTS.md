@@ -1624,6 +1624,25 @@ expect ~10–12 h on 2). Registrations: direction `12b_medium_r140_to_e4b` in `g
   (`--completion-s3-uri … --expected-completion-step 1000 --expected-completion-world-size 4`), so a COMPLETED job without a receipt is
   relaunched and resumes from S3 (trace shards + distill checkpoints).
 
+**Both §9.0j distillations finished 2026-09-17.**
+
+| run | teacher | LR | val top-128 KL: step 0 → 100 → 500 → 1000 | student mass @1000 | wall clock | S3 |
+|---|---|---|---|---|---|---|
+| (b) 12bd → E4B, low LR (local, 4 GPUs) | RL'd distilled 12B, step 190 | 1e-6 → 1e-7 | 0.323 → 0.122 → 0.0976 → **0.0935** | 0.9989 | 01:50–07:35Z (~5.7 h, 15–20 s/step) | `gemma4-12bd-distill-ckpts-v1/12bd-medium-to-e4b-bs128-s1000-lr1e-6/` |
+| §9.0g reference (same traces) | same | 2e-6 → 2e-7 | 0.323 → ~0.30 → ~0.19 → 0.0903 | — | — | `…/12bd-medium-to-e4b-bs128-s1000-lr2e-6/` |
+| (a) 12br → E4B (ScaleTrain 4 GPUs) | resumed untrained-12B RL, step 140 | 1e-6 → 1e-7 | 0.274 → 0.114 → 0.0936 → **0.0898** | 0.9985 | 06:39–11:57Z (~5.3 h after the last preemption; 5 preemptions overall) | `gemma4-12br-distill-ckpts-v1/12br-medium-to-e4b-bs128-s1000-lr1e-6/` |
+
+Reading. (b) answers the LR question: at 1e-6 the validation KL falls immediately (0.122 by step 100, where the 2e-6 run was still ≈0.30 in its
+flat stretch) and reaches 0.10 by step 390 — but it then flattens, and the 2e-6 run's late decay overtakes it: **0.0903 (2e-6) vs 0.0935 (1e-6)
+at step 1000**. So the flat start at 2e-6 was a too-hot peak, not a too-cold one; the higher peak still ends lower once the schedule decays. A
+1e-6 peak with a longer or later decay (or ~1.5e-6) is the natural next knob if this pair is re-run. (a) with the better untrained-12B RL
+teacher (val 0.5271 vs the §4 control's 0.5208 teacher at 8 samples) starts closer (0.274 vs 0.323) and ends at 0.0898 — the lowest of the
+three; its teacher's top-128 mass on the validation set is 0.9986 vs 0.9994 for the 12bd teacher. Each run left `global_step_{250,500,750,1000}/`
+(full FSDP + `huggingface/`) plus the trainer's `run_complete.json`; every 50-step `hf_exports/global_step_N/huggingface/` is on S3 too.
+The 12br job's supervisor was stopped by hand after the run-file's RL-style `complete-run` step failed on the trainer's differently-shaped
+receipt and marked the finished job FAILED (fixed: commit a3c03da4, receipt step removed). Neither student has been evaluated yet (§7 math
+suite / pass@k as in §9.0g).
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
