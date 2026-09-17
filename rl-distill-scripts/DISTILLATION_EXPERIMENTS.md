@@ -1597,6 +1597,21 @@ supervisor tmux `rl-g4-12b-bkt50-rl-med` (`.scale_train_supervisors/g4-12b-bkt50
 downloaded=… -> /tmp/gemma4_init_model/s3_…`, `no completed remote checkpoint` (fresh run), step-0 validation (the student's mean@16 on the
 medium val set was ≈ 0.096 at on-policy step 50), then ~6–8 min/step.
 
+**Result (finished 2026-09-17 16:38Z, `job_dalg97jns19g0896pnrg`, no preemptions, ~6.5–7 min/step):** early stop at step 150 after five misses;
+**best 0.444 @ 100**. Best HF export at `s3://scale-ml/genai/rl-distill/gemma4-12b-from-onpolicy-bkt50-rl/gemma4-12b-medium-from-onpolicy-bkt50-es5/best_hf/`,
+full checkpoints every 10 steps + receipt (step 150) under `…-rl-full-checkpoints/12b-medium-from-onpolicy-bkt50-es5/`.
+
+| step | 0 | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 100 | 110 | 120 | 130 | 140 | 150 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| RL from tail-bucket on-policy step 50 (this run) | 0.097 | 0.091 | 0.145 | 0.242 | 0.307 | 0.356 | 0.395 | 0.418 | 0.414 | 0.431 | **0.444** | 0.442 | 0.443 | 0.426 | 0.423 | 0.412 |
+| RL from off-policy step 1000 (§9.0, same recipe) | 0.10 | 0.09 | 0.13 | ~0.20 | ~0.27 | ~0.31 | ~0.34 | ~0.37 | — | ~0.40 | ~0.42 | — | ~0.45 | — | — | … **0.497 @ 190** (stopped 240) |
+
+Reading: the on-policy-distilled student learns faster for the first 100 RL steps (+4–5 pts at every validation through step 100) but plateaus at
+≈ 0.44 from step 100 on, while the off-policy-init run kept climbing to 0.497 @ 190. The lower reverse KL to the E4B base at init (0.0713 vs
+0.0885) therefore bought a faster start, not a better ceiling, on the medium band — consistent with the on-policy student being more
+mode-seeking (higher forward KL, shorter samples): less to explore from. Single seed each; the §9.0 run's late gains came after step 120, so a
+patience-4/5 stop at 150 may also simply be earlier than that run's second climb.
+
 ### 9.0j Two distillation re-runs into E4B base (prepared 2026-09-17 ~01:45Z, NOT launched; both local)
 
 **(a) Untrained-12B medium RL → E4B base, with the resumed teacher.** The §4 control used the step-120 teacher (val 0.5208) with 8 samples per
