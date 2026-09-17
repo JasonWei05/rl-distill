@@ -682,6 +682,13 @@ i.e. ~26 min/step and 4.3 h per validation. `launch_gemma4_rl_band_seed.sh` now 
 were cancelled by name and the supervisors relaunched them within 90 s (seed 43 → `job_dalk4c1t1s0g088gt32g`, running at 01:28Z; seed 44 →
 `job_dalk4c1t1s0g07hmc430`, queued), resuming from the last rolling checkpoints (seed 43: step 95, best 0.315 @ 70; seed 44: step 65, best
 0.300 @ 60). Expect update_actor to drop to ~100–250 s.
+Measured after the relaunch: seed 43 step 96 **update 156 s / step 235 s** (was 1432 / 1522), seed 44 steps 76–78 update ~137 s / step 211–241 s
+— a 6.5× step speed-up. **02:51Z: seed 44 died at step 79** with `RuntimeError: Expected mha_graph.execute(handle, variant_pack, workspace_ptr.get()).is_good()
+to be true` inside update_actor — PyTorch's cuDNN fused-attention SDPA backend failing on some padded micro-batch shape of the new layout
+(not an OOM; deterministic on that batch, so a plain resume would re-hit it). Fix (commits c26af130, c53cb124): the run-file forwards
+`TORCH_CUDNN_SDPA_ENABLED` into the Ray workers and `verl/workers/fsdp_workers.py` calls `torch.backends.cuda.enable_cudnn_sdp(False)` when it is
+0 (torch 2.11 no longer reads the env var itself); the E4B launcher sets it to 0. SDPA falls back to the flash/efficient kernels. The supervisor's
+900 s failure back-off relaunches seed 44 with the fix (~03:07Z); seed 43 keeps running the old code until its next relaunch.
 
 ### 9.0c Reverse KL of the distilled students vs the E4B base (launched 2026-09-10 16:4xZ; final results 2026-09-11 07:02Z)
 
