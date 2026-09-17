@@ -1582,6 +1582,16 @@ takes the next 4 idle GPUs once its bundle completes (the previous 12bd-medium c
 expect ~10–12 h on 2). Registrations: direction `12b_medium_r140_to_e4b` in `generate_gemma4_distill_traces.py` and the preflight view;
 `run_gemma4_distill_one.sh` branch `12bd-*|12br-*`.
 
+**Launched 2026-09-17 ~01:50–02:05Z (user decision: (b) local, (a) on ScaleTrain).**
+- (b) `distill_12bd_medium_to_e4b_lr1e-6_gpu4.sh` running locally on GPUs 0,1,6,7 (tmux `distill-12bd-lr1e-6`, log
+  `/tmp/gemma4_12bd_distill_lr1e-6/launcher.log`): bundle views reused from `gemma4-distill-views-v2/12bd-medium` on S3, then training.
+- (a) as ONE 4-GPU ScaleTrain job (borrowing, priority high): **`g4-12br-trace-distill` = `job_dalkh9pt1s0g088gt33g`** (IN_PROGRESS at submit),
+  run-file `scale_train/run_gemma4_12br_trace_and_distill_st.sh` (stage 1: 12br-medium collection with all 4 GPUs as DP workers, per-shard S3
+  mirror, skipped once `COMPLETE.json` is on S3; stage 2: `run_gemma4_distill_one.sh` §9 recipe → `gemma4-12br-distill-ckpts-v1/12br-medium-to-e4b-bs128-s1000-lr2e-6`,
+  exp `12br-medium-to-e4b-base-bs128-s1000-lr2e-6-st4`, W&B project `gemma4-12br-distill-v1`), supervisor tmux `rl-g4-12br-trace-distill`
+  (`.scale_train_supervisors/g4-12br-trace-distill-20260917/`; no completion receipts — the distill trainer does not write the RL receipt, so a
+  COMPLETED job is taken as finished). The local `trace_12br_medium_dp2.sh` / `distill_12br_medium_to_e4b_gpu4.sh` pair stays as a fallback.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
