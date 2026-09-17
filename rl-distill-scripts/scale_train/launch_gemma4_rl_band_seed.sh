@@ -17,7 +17,7 @@ case "${SIZE}" in
        # 2026-09-17: fast update layout (was mbs 1 / 4096 cap, resident vLLM: update_actor ~1450 s/step = 256 serial micro-steps per GPU).
        # mbs 4 / 8192-token padded cap + phase-level OFFLOAD + vLLM sleep is the 12B recipe validated on 4 GPUs (§9.0h); gradient-neutral
        # (global token-mean loss). E2B already runs mbs 8 / 12288. Override with E4B_MEM=... to experiment.
-       MEM="${E4B_MEM:-MICRO_BATCH_SIZE_PER_GPU=4,MAX_PADDED_TOKENS_PER_MICROBATCH=8192,OFFLOAD=True,VLLM_SLEEP_MODE=True,ROLLOUT_GPU_MEMORY_UTILIZATION=0.25,VLLM_KV_CACHE_MEMORY_BYTES=1073741824}" ;;
+       MEM="${E4B_MEM:-MICRO_BATCH_SIZE_PER_GPU=4,MAX_PADDED_TOKENS_PER_MICROBATCH=8192,OFFLOAD=True,VLLM_SLEEP_MODE=True,TORCH_CUDNN_SDPA_ENABLED=0,ROLLOUT_GPU_MEMORY_UTILIZATION=0.25,VLLM_KV_CACHE_MEMORY_BYTES=1073741824}" ;;
   *) echo "FATAL: SIZE must be e2b or e4b" >&2; exit 2 ;;
 esac
 case "${BAND}" in easy|medium|hard) ;; *) echo "FATAL: BAND must be easy|medium|hard" >&2; exit 2 ;; esac

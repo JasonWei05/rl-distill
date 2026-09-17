@@ -475,6 +475,9 @@ if [ -n "${FULL_CHECKPOINT_S3_URI:-}" ]; then
   fi
 fi
 
+# TORCH_CUDNN_SDPA_ENABLED=0 disables PyTorch's cuDNN fused-attention SDPA backend in the workers (falls back to flash/efficient/math).
+# The E4B fast-layout runs hit `RuntimeError: Expected mha_graph.execute(...).is_good()` inside update_actor (2026-09-17 02:51Z,
+# seed 44 step 79) -- a cuDNN graph failure on some padded micro-batch shape, deterministic on that batch. Default 1 = unchanged.
 # RUN_RAY_ADDRESS (optional): connect to a head node the caller started with fixed agent ports instead of ray.init(address=local).
 # Needed on the overloaded shared devbox: with unassigned ports the raylet waits only 15 s (hardcoded, Ray 2.58
 # port_persistence.h) for the Python dashboard/runtime-env agents to publish their port files and aborts otherwise.
@@ -504,6 +507,7 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       +ray_kwargs.ray_init.runtime_env.env_vars.VLLM_ATTENTION_BACKEND="TRITON_ATTN" \
       +ray_kwargs.ray_init.runtime_env.env_vars.VLLM_USE_FLASHINFER_SAMPLER="'0'" \
       +ray_kwargs.ray_init.runtime_env.env_vars.VERL_FSDP2_LOCAL_LOAD="'1'" \
+      +ray_kwargs.ray_init.runtime_env.env_vars.TORCH_CUDNN_SDPA_ENABLED="'${TORCH_CUDNN_SDPA_ENABLED:-1}'" \
       +ray_kwargs.ray_init.runtime_env.env_vars.VERL_SKIP_VLLM_MM_WEIGHT_RELOAD="'${VERL_SKIP_VLLM_MM_WEIGHT_RELOAD}'" \
       "+ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROLLOUT_EXTRA_STOP='${VERL_ROLLOUT_EXTRA_STOP}'" \
       actor_rollout_ref.model.use_remove_padding=False \
