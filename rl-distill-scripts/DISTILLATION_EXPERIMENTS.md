@@ -1612,6 +1612,14 @@ Reading: the on-policy-distilled student learns faster for the first 100 RL step
 mode-seeking (higher forward KL, shorter samples): less to explore from. Single seed each; the §9.0 run's late gains came after step 120, so a
 patience-4/5 stop at 150 may also simply be earlier than that run's second climb.
 
+**Resumed with patience 10 (user request, 2026-09-17 17:47Z): `job_dam2f37n0ur007idqui0`.** Same 4-GPU recipe and prefixes; completion markers
+(`run_complete.json`, `run_outcome.json`, `best_hf/_REMOTE_COMPLETE.json`) moved to `pre-resume-20260917/` in each prefix; the launcher now takes
+`EARLY_STOPPING_PATIENCE=10 EARLY_STOPPING_MIGRATE_PATIENCE_FROM=5`, so the trainer restores the step-150 checkpoint (weights + Adam + dataloader
+cursor + early-stopping history: best 0.444 @ 100, 5 misses), recomputes the trigger (5 < 10) and continues from step 151; it now stops after 10
+non-improving validations in a row (i.e. at step 200 at the earliest) or at the 400-step cap. Rationale: train accuracy was still rising when
+patience 5 fired. Submission took 9 min — the ScaleTrain API was unresponsive (a `get job` timed out at 60 s) before accepting it. Supervisor
+tmux `rl-g4-12b-bkt50-rl-med`, state `.scale_train_supervisors/g4-12b-bkt50-rl-med-20260917-resume/`.
+
 ### 9.0j Two distillation re-runs into E4B base (prepared 2026-09-17 ~01:45Z, NOT launched; both local)
 
 **(a) Untrained-12B medium RL → E4B base, with the resumed teacher.** The §4 control used the step-120 teacher (val 0.5208) with 8 samples per
