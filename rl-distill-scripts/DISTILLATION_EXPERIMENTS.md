@@ -689,6 +689,12 @@ to be true` inside update_actor — PyTorch's cuDNN fused-attention SDPA backend
 `TORCH_CUDNN_SDPA_ENABLED` into the Ray workers and `verl/workers/fsdp_workers.py` calls `torch.backends.cuda.enable_cudnn_sdp(False)` when it is
 0 (torch 2.11 no longer reads the env var itself); the E4B launcher sets it to 0. SDPA falls back to the flash/efficient kernels. The supervisor's
 900 s failure back-off relaunches seed 44 with the fix (~03:07Z); seed 43 keeps running the old code until its next relaunch.
+**05:42Z: seed 44 hit the same `mha_graph.execute` failure again at step 102** — the first hook sat in `verl/workers/fsdp_workers.py`, but the
+actor runs through the newer `engine_workers.py` / `engine/fsdp/transformer_impl.py` path, which never imports that module. The switch now
+lives in `verl/utils/device.py` (imported by both paths; commit 63e22397; verified in-process). Seed 44 relaunched 05:50Z from step 100 with
+that bundle and **cleared step 102 (step 103 in 230 s)**. Seed 43 (relaunched 03:28Z, restored 120 after a preemption race and a 4th/5th-miss
+near-stop: its re-sampled step-120 validation came out 0.3175 = new best, resetting the counter) still runs the earlier bundle; a recurrence
+there triggers one more automatic relaunch with the fix. Lesson: worker-side env-gated hooks belong in a module both worker paths import.
 
 ### 9.0c Reverse KL of the distilled students vs the E4B base (launched 2026-09-10 16:4xZ; final results 2026-09-11 07:02Z)
 
