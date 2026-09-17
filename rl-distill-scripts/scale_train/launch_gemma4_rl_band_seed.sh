@@ -14,7 +14,10 @@ case "${SIZE}" in
   e2b) MODEL=google/gemma-4-E2B; REV=d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f
        MEM="MICRO_BATCH_SIZE_PER_GPU=8,MAX_PADDED_TOKENS_PER_MICROBATCH=12288,ROLLOUT_GPU_MEMORY_UTILIZATION=0.25,VLLM_KV_CACHE_MEMORY_BYTES=536870912" ;;
   e4b) MODEL=google/gemma-4-E4B; REV=411aa17b749aa952df1359d2dcea73917a544d9a
-       MEM="MICRO_BATCH_SIZE_PER_GPU=1,MAX_PADDED_TOKENS_PER_MICROBATCH=4096,ROLLOUT_GPU_MEMORY_UTILIZATION=0.25,VLLM_KV_CACHE_MEMORY_BYTES=1073741824" ;;
+       # 2026-09-17: fast update layout (was mbs 1 / 4096 cap, resident vLLM: update_actor ~1450 s/step = 256 serial micro-steps per GPU).
+       # mbs 4 / 8192-token padded cap + phase-level OFFLOAD + vLLM sleep is the 12B recipe validated on 4 GPUs (§9.0h); gradient-neutral
+       # (global token-mean loss). E2B already runs mbs 8 / 12288. Override with E4B_MEM=... to experiment.
+       MEM="${E4B_MEM:-MICRO_BATCH_SIZE_PER_GPU=4,MAX_PADDED_TOKENS_PER_MICROBATCH=8192,OFFLOAD=True,VLLM_SLEEP_MODE=True,ROLLOUT_GPU_MEMORY_UTILIZATION=0.25,VLLM_KV_CACHE_MEMORY_BYTES=1073741824}" ;;
   *) echo "FATAL: SIZE must be e2b or e4b" >&2; exit 2 ;;
 esac
 case "${BAND}" in easy|medium|hard) ;; *) echo "FATAL: BAND must be easy|medium|hard" >&2; exit 2 ;; esac
