@@ -24,6 +24,12 @@ from dataclasses import asdict
 
 import psutil
 import torch
+
+# rl-distill: TORCH_CUDNN_SDPA_ENABLED=0 (forwarded via Ray runtime_env by the Gemma 4 run-file) disables PyTorch's cuDNN
+# fused-attention SDPA backend in every worker. torch 2.11 no longer reads this env var itself; the E4B fast-layout RL runs died
+# with `RuntimeError: Expected mha_graph.execute(...).is_good() to be true` in update_actor (2026-09-17). Default: unchanged.
+if __import__("os").environ.get("TORCH_CUDNN_SDPA_ENABLED", "1") == "0" and torch.cuda.is_available():
+    torch.backends.cuda.enable_cudnn_sdp(False)
 import torch.distributed
 import torch.distributed as dist
 from codetiming import Timer
