@@ -4,7 +4,7 @@
 #   distill_12bd_lr1e6_medium_to_e4b_step1000   (b) 12bd -> E4B, peak 1e-6
 #   distill_12br_medium_to_e4b_step1000         (a) 12br -> E4B, peak 1e-6
 #   distill_12br_lr2e6_medium_to_e4b_step1000   (c) 12br -> E4B, peak 2e-6  -- evaluated once its S3 completion marker exists
-# Waits for idle GPUs (the box is shared), prepares the shared math data if the devbox restart wiped it, runs one model at a time on
+# Waits for idle GPUs (the box is shared; a failed attempt — typically a co-tenant grabbing the GPUs during vLLM start-up — is retried), prepares the shared math data if the devbox restart wiped it, runs one model at a time on
 # GPUS_PER_MODEL GPUs, mirrors results to the study's S3 root and rebuilds §8 after each model.
 #
 #   bash rl-distill-scripts/local_jobs/eval_9_0j_math.sh                       # all three (c waits for completion)
@@ -29,16 +29,29 @@ d = json.load(open("rl-distill-scripts/config/gemma4_distill_study_eval_sources.
 print(next(m["source"]["completion_uri"] for m in d["models"] if m["tag"] == sys.argv[1]))
 PY
 }
+wait_for_gpus() { local want="$1" tag="$2" gpus="" again=""
+  while :; do gpus="$(pick_free_gpus "$want")"
+    if [ -n "$gpus" ] && [ "$(awk -F, '{print NF}' <<<"$gpus")" -eq "$want" ]; then
+      sleep 30; again="$(pick_free_gpus "$want")"   # co-tenants grab idle GPUs within minutes; require two consistent readings
+      [ "$again" = "$gpus" ] && { echo "$gpus"; return; }
+    fi
+    echo "$(date -u +%FT%TZ) $tag: GPU_WAIT idle='$gpus'" >&2; sleep 120; done; }
 for tag in $TAGS; do
   cu="$(completion_uri "$tag")"
   until aws s3 ls "$cu" >/dev/null 2>&1; do echo "$(date -u +%FT%TZ) $tag: waiting for $cu"; sleep 600; done
-  gpus=""; while [ "$(awk -F, '{print NF}' <<<"$gpus")" -ne "$GPUS_PER_MODEL" ] || [ -z "$gpus" ]; do gpus="$(pick_free_gpus "$GPUS_PER_MODEL")"; [ -n "$gpus" ] && [ "$(awk -F, '{print NF}' <<<"$gpus")" -eq "$GPUS_PER_MODEL" ] && break; echo "$(date -u +%FT%TZ) $tag: GPU_WAIT idle='$gpus'"; sleep 120; done
-  echo "$(date -u +%FT%TZ) EVAL $tag phases=math gpus=$gpus"
-  env -u CUDA_VISIBLE_DEVICES MODEL_TAG="$tag" EVAL_PHASES=math GPU_COUNT="$GPUS_PER_MODEL" PACKED_PHYSICAL_GPU_IDS="$gpus" PREPARE_SHARED_ASSETS=false \
-    RESULT_ROOT_OVERRIDE="$STUDY/results/$tag" MODEL_WORK_ROOT="$STUDY/work/$tag" \
-    EVAL_KV_CACHE_GIB=16 EVAL_GPU_MEMORY_UTILIZATION=0.40 EVAL_PREDICTIVE_TOPK_WIDTH=0 \
-    MATH_QUESTIONS_PER_BATCH=64 MATH_REQUEST_BATCH_SIZE=1024 MATH_RESUME_TRACES=1 EVAL_S3_ENABLE=true \
-    bash rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_one_model.sh 2>&1 | tee -a "$STUDY/queue_logs/$tag.log" || echo "$(date -u +%FT%TZ) EVAL_FAILED $tag"
+  attempt=0
+  while :; do
+    attempt=$((attempt+1)); gpus="$(wait_for_gpus "$GPUS_PER_MODEL" "$tag")"
+    echo "$(date -u +%FT%TZ) EVAL $tag phases=math gpus=$gpus attempt=$attempt"
+    if env -u CUDA_VISIBLE_DEVICES MODEL_TAG="$tag" EVAL_PHASES=math GPU_COUNT="$GPUS_PER_MODEL" PACKED_PHYSICAL_GPU_IDS="$gpus" PREPARE_SHARED_ASSETS=false \
+        RESULT_ROOT_OVERRIDE="$STUDY/results/$tag" MODEL_WORK_ROOT="$STUDY/work/$tag" \
+        EVAL_KV_CACHE_GIB=16 EVAL_GPU_MEMORY_UTILIZATION=0.40 EVAL_PREDICTIVE_TOPK_WIDTH=0 \
+        MATH_QUESTIONS_PER_BATCH=64 MATH_REQUEST_BATCH_SIZE=1024 MATH_RESUME_TRACES=1 EVAL_S3_ENABLE=true \
+        bash rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_one_model.sh 2>&1 | tee -a "$STUDY/queue_logs/$tag.log"; then break; fi
+    echo "$(date -u +%FT%TZ) EVAL_FAILED $tag attempt=$attempt (usually a co-tenant took the GPUs during vLLM start-up) -> waiting for GPUs and retrying"
+    [ "$attempt" -ge "${MAX_ATTEMPTS:-8}" ] && { echo "$(date -u +%FT%TZ) EVAL_GIVEUP $tag"; continue 2; }
+    sleep 300
+  done
   echo "$(date -u +%FT%TZ) rebuilding §8"; "$PY" rl-distill-scripts/update_distill_study_results_doc.py --fallback-from-doc || true
   echo "$(date -u +%FT%TZ) EVAL_DONE $tag"
 done
