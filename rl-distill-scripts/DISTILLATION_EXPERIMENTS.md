@@ -1715,6 +1715,10 @@ First result, (b) 12bd → E4B at peak 1e-6 (`distill_12bd_lr1e6_medium_to_e4b_s
 Reading: the two learning rates give the same student within noise — mean@k differs by ≤ 1.5 pt in either direction (id_medium 35.1 vs 36.6,
 id_hard 20.2 vs 19.9, MATH500 32.9 vs 33.9) and pass@16 by ≤ 4 pt (id_hard 62.3 vs 58.3 in favour of 1e-6). The 0.0935 vs 0.0903 final val-KL gap
 does not show up downstream. (a) 12br → E4B (1e-6) is being evaluated next; (c) 2e-6 follows when it finishes.
+The first attempts at (a) (19:55Z) and at the E4B seed-43 best checkpoint (22:05Z) died in vLLM start-up: a co-tenant took the GPUs between the
+idle check and engine init ("Free memory on device cuda:0 (11.36/79.44 GiB) … less than desired 0.4"), and the driver wrongly logged them as
+done. Fixed (commit 4544533f: retry with a two-reading GPU check, EVAL_DONE only on success) and relaunched 23:33Z as tmux `eval-9_0j-v2` with
+(a), (c), seed 43, seed 44 queued; all 8 local GPUs were held by other users at that time (a 4-GPU allocation hog + a 4-GPU vLLM server).
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
