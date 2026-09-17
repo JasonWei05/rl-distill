@@ -343,7 +343,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-15 11:21Z — math complete for 33/33 models, OOD complete for 29/33. Partial rows are shown as they finish._
+_Updated 2026-09-17 19:50Z — math complete for 34/36 models, OOD complete for 29/36. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -378,8 +378,11 @@ _Updated 2026-09-15 11:21Z — math complete for 33/33 models, OOD complete for 
 | `distill_26b_hard_to_e4b` | distilled | hard | 67.8 / 99.3 | 32.8 / 88.7 | **17.6 / 72.0** | 33.2 / 73.2 | 66.2 / 92.8 |
 | `distill_e4b_hard_to_e4b` | distilled | hard | 38.9 / 81.0 | 19.3 / 55.3 | **15.2 / 46.7** | 16.2 / 48.0 | 43.1 / 78.9 |
 | `distill_12b_medium_to_e4b` | distilled | medium | 68.0 / 96.3 | **32.9 / 82.7** | 19.3 / 65.0 | 33.5 / 67.6 | 69.0 / 93.3 |
+| `distill_12bd_lr1e6_medium_to_e4b_step1000` | distilled | medium | 71.0 / 97.3 | **35.1 / 83.0** | 20.2 / 62.3 | 32.9 / 65.8 | 71.3 / 92.2 |
 | `distill_12bd_medium_to_e4b_step1000` | distilled | medium | 71.3 / 97.0 | **36.6 / 82.3** | 19.9 / 58.3 | 33.9 / 67.2 | 71.3 / 92.4 |
 | `distill_12bd_medium_to_e4b_step300` | distilled | medium | 66.6 / 97.3 | **32.0 / 81.3** | 17.9 / 58.3 | 30.2 / 65.6 | 67.9 / 91.1 |
+| `distill_12br_lr2e6_medium_to_e4b_step1000` | distilled | medium | — | — | — | — | — |
+| `distill_12br_medium_to_e4b_step1000` | distilled | medium | — | — | — | — | — |
 | `distill_26b_medium_to_e4b` | distilled | medium | 71.3 / 99.0 | **37.5 / 89.3** | 20.4 / 69.7 | 34.3 / 71.8 | 67.3 / 92.1 |
 | `distill_e4b_medium_to_e4b` | distilled | medium | 62.2 / 93.7 | **28.5 / 75.7** | 16.2 / 55.0 | 26.1 / 60.2 | 64.1 / 88.6 |
 
@@ -416,8 +419,11 @@ _Updated 2026-09-15 11:21Z — math complete for 33/33 models, OOD complete for 
 | `distill_26b_hard_to_e4b` | 41.4 | 21.7 | 59.8 |
 | `distill_e4b_hard_to_e4b` | 40.3 | 20.7 | 59.5 |
 | `distill_12b_medium_to_e4b` | 39.6 | 14.6 | 58.9 |
+| `distill_12bd_lr1e6_medium_to_e4b_step1000` | — | — | — |
 | `distill_12bd_medium_to_e4b_step1000` | — | — | — |
 | `distill_12bd_medium_to_e4b_step300` | — | — | — |
+| `distill_12br_lr2e6_medium_to_e4b_step1000` | — | — | — |
+| `distill_12br_medium_to_e4b_step1000` | — | — | — |
 | `distill_26b_medium_to_e4b` | 41.4 | 19.2 | 59.6 |
 | `distill_e4b_medium_to_e4b` | 43.7 | 26.3 | 61.1 |
 <!-- results:end -->
@@ -1687,6 +1693,20 @@ W&B project `gemma4-12br-distill-v1`; supervisor tmux `rl-g4-12br-trace-distill-
 ScaleTrain API took ~20 min to accept it). Gives the same 1e-6 vs 2e-6 pair for the 12br teacher
 that (b)/§9.0g gave for the 12bd teacher (there 2e-6 ended lower: 0.0903 vs 0.0935).
 
+**§9.0j step 3 — math suite (§7 protocol, mean@k / pass@k, local 2-GPU runs via `local_jobs/eval_9_0j_math.sh`; rows in §8).**
+First result, (b) 12bd → E4B at peak 1e-6 (`distill_12bd_lr1e6_medium_to_e4b_step1000`, evaluated 18:35–19:50Z on GPUs 0,1):
+
+| student | id_easy | id_medium | id_hard | MATH500 | GSM8K |
+|---|---|---|---|---|---|
+| (b) 12bd → E4B, 1e-6, step 1000 | 71.0 / 97.3 | 35.1 / 83.0 | 20.2 / 62.3 | 32.9 / 65.8 | 71.3 / 92.2 |
+| §9.0g 12bd → E4B, 2e-6, step 1000 | 71.3 / 97.0 | 36.6 / 82.3 | 19.9 / 58.3 | 33.9 / 67.2 | 71.3 / 92.4 |
+| §4 control: untrained-12B RL (step 120) → E4B | 68.0 / 96.3 | 32.9 / 82.7 | 19.3 / 65.0 | 33.5 / 67.6 | 69.0 / 93.3 |
+| E4B RL medium (teacher-free reference) | 62.2 / 94.3 | 29.1 / 71.3 | 17.2 / 58.3 | 26.5 / 61.6 | 65.4 / 88.9 |
+| E4B base | 29.6 / 89.3 | 8.6 / 60.3 | 4.2 / 38.0 | 10.9 / 50.6 | 26.4 / 72.6 |
+
+Reading: the two learning rates give the same student within noise — mean@k differs by ≤ 1.5 pt in either direction (id_medium 35.1 vs 36.6,
+id_hard 20.2 vs 19.9, MATH500 32.9 vs 33.9) and pass@16 by ≤ 4 pt (id_hard 62.3 vs 58.3 in favour of 1e-6). The 0.0935 vs 0.0903 final val-KL gap
+does not show up downstream. (a) 12br → E4B (1e-6) is being evaluated next; (c) 2e-6 follows when it finishes.
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
