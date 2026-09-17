@@ -343,7 +343,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-17 19:50Z — math complete for 34/36 models, OOD complete for 29/36. Partial rows are shown as they finish._
+_Updated 2026-09-17 22:06Z — math complete for 34/38 models, OOD complete for 29/38. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -359,6 +359,8 @@ _Updated 2026-09-17 19:50Z — math complete for 34/36 models, OOD complete for 
 | `rl_e4b_easy` | rl | easy | **69.9 / 95.3** | 32.8 / 77.3 | 19.2 / 56.0 | 31.5 / 63.6 | 69.5 / 88.9 |
 | `rl_e4b_hard` | rl | hard | 39.9 / 79.3 | 20.0 / 56.7 | **15.4 / 47.7** | 16.7 / 48.0 | 43.0 / 77.4 |
 | `rl_e4b_medium` | rl | medium | 62.2 / 94.3 | **29.1 / 71.3** | 17.2 / 58.3 | 26.5 / 61.6 | 65.4 / 88.9 |
+| `rl_e4b_medium_s43` | rl | medium | — | — | — | — | — |
+| `rl_e4b_medium_s44` | rl | medium | — | — | — | — | — |
 | `distill_12b_easy_to_e2b` | distilled | easy | **41.5 / 84.3** | 13.4 / 61.3 | 7.8 / 44.3 | 15.8 / 52.6 | 31.5 / 67.2 |
 | `distill_26b_easy_to_e2b` | distilled | easy | **40.7 / 84.3** | 13.4 / 61.3 | 6.4 / 36.3 | 15.5 / 46.2 | 31.4 / 66.3 |
 | `distill_e2b_easy_to_e2b` | distilled | easy | **38.9 / 79.3** | 16.9 / 59.7 | 7.7 / 40.0 | 15.9 / 47.2 | 32.4 / 65.1 |
@@ -400,6 +402,8 @@ _Updated 2026-09-17 19:50Z — math complete for 34/36 models, OOD complete for 
 | `rl_e4b_easy` | 44.0 | 20.2 | 60.7 |
 | `rl_e4b_hard` | 40.2 | 24.2 | 59.4 |
 | `rl_e4b_medium` | 43.9 | 26.3 | 61.3 |
+| `rl_e4b_medium_s43` | — | — | — |
+| `rl_e4b_medium_s44` | — | — | — |
 | `distill_12b_easy_to_e2b` | 27.1 | 20.7 | 48.4 |
 | `distill_26b_easy_to_e2b` | 27.3 | 26.3 | 48.6 |
 | `distill_e2b_easy_to_e2b` | 28.0 | 20.2 | 48.4 |
@@ -1667,13 +1671,14 @@ expect ~10–12 h on 2). Registrations: direction `12b_medium_r140_to_e4b` in `g
   (`--completion-s3-uri … --expected-completion-step 1000 --expected-completion-world-size 4`), so a COMPLETED job without a receipt is
   relaunched and resumes from S3 (trace shards + distill checkpoints).
 
-**Both §9.0j distillations finished 2026-09-17.**
+**All three §9.0j distillations finished 2026-09-17.**
 
 | run | teacher | LR | val top-128 KL: step 0 → 100 → 500 → 1000 | student mass @1000 | wall clock | S3 |
 |---|---|---|---|---|---|---|
 | (b) 12bd → E4B, low LR (local, 4 GPUs) | RL'd distilled 12B, step 190 | 1e-6 → 1e-7 | 0.323 → 0.122 → 0.0976 → **0.0935** | 0.9989 | 01:50–07:35Z (~5.7 h, 15–20 s/step) | `gemma4-12bd-distill-ckpts-v1/12bd-medium-to-e4b-bs128-s1000-lr1e-6/` |
 | §9.0g reference (same traces) | same | 2e-6 → 2e-7 | 0.323 → ~0.30 → ~0.19 → 0.0903 | — | — | `…/12bd-medium-to-e4b-bs128-s1000-lr2e-6/` |
 | (a) 12br → E4B (ScaleTrain 4 GPUs) | resumed untrained-12B RL, step 140 | 1e-6 → 1e-7 | 0.274 → 0.114 → 0.0936 → **0.0898** | 0.9985 | 06:39–11:57Z (~5.3 h after the last preemption; 5 preemptions overall) | `gemma4-12br-distill-ckpts-v1/12br-medium-to-e4b-bs128-s1000-lr1e-6/` |
+| (c) 12br → E4B, 2e-6 (ScaleTrain 4 GPUs, dedicated) | same | 2e-6 → 2e-7 | 0.274 → 0.109 → 0.0890 → **0.0851** | 0.9987 | 18:17–23:26Z (~5.1 h, no preemptions) | `gemma4-12br-distill-ckpts-v1/12br-medium-to-e4b-bs128-s1000-lr2e-6/` |
 
 Reading. (b) answers the LR question: at 1e-6 the validation KL falls immediately (0.122 by step 100, where the 2e-6 run was still ≈0.30 in its
 flat stretch) and reaches 0.10 by step 390 — but it then flattens, and the 2e-6 run's late decay overtakes it: **0.0903 (2e-6) vs 0.0935 (1e-6)
@@ -1692,6 +1697,9 @@ borrowing OFF (dedicated capacity, priority high).** Reuses the complete `12br-m
 W&B project `gemma4-12br-distill-v1`; supervisor tmux `rl-g4-12br-trace-distill-lr2e-6`; **`job_dam2sj7n0ur007idquj0`** (submitted 18:15Z — the
 ScaleTrain API took ~20 min to accept it). Gives the same 1e-6 vs 2e-6 pair for the 12br teacher
 that (b)/§9.0g gave for the 12bd teacher (there 2e-6 ended lower: 0.0903 vs 0.0935).
+**Finished 23:26Z: final val KL 0.0851 (vs 0.0898 at 1e-6)** — same ordering as the 12bd pair, and again with no early flat stretch
+(0.109 by step 100, so the §9.0g plateau was specific to that run/teacher, not to the 2e-6 peak). Lowest E4B student KL of the study so far.
+`global_step_1000/huggingface` on S3; math suite queued (`local_jobs/eval_9_0j_math.sh` waits for the completion marker).
 
 **§9.0j step 3 — math suite (§7 protocol, mean@k / pass@k, local 2-GPU runs via `local_jobs/eval_9_0j_math.sh`; rows in §8).**
 First result, (b) 12bd → E4B at peak 1e-6 (`distill_12bd_lr1e6_medium_to_e4b_step1000`, evaluated 18:35–19:50Z on GPUs 0,1):
