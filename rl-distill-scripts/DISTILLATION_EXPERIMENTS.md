@@ -1589,8 +1589,14 @@ expect ~10–12 h on 2). Registrations: direction `12b_medium_r140_to_e4b` in `g
   run-file `scale_train/run_gemma4_12br_trace_and_distill_st.sh` (stage 1: 12br-medium collection with all 4 GPUs as DP workers, per-shard S3
   mirror, skipped once `COMPLETE.json` is on S3; stage 2: `run_gemma4_distill_one.sh` §9 recipe → `gemma4-12br-distill-ckpts-v1/12br-medium-to-e4b-bs128-s1000-lr2e-6`,
   exp `12br-medium-to-e4b-base-bs128-s1000-lr2e-6-st4`, W&B project `gemma4-12br-distill-v1`), supervisor tmux `rl-g4-12br-trace-distill`
-  (`.scale_train_supervisors/g4-12br-trace-distill-20260917/`; no completion receipts — the distill trainer does not write the RL receipt, so a
-  COMPLETED job is taken as finished). The local `trace_12br_medium_dp2.sh` / `distill_12br_medium_to_e4b_gpu4.sh` pair stays as a fallback.
+  (`.scale_train_supervisors/g4-12br-trace-distill-20260917/`). The local `trace_12br_medium_dp2.sh` / `distill_12br_medium_to_e4b_gpu4.sh` pair stays as a fallback.
+  **02:05Z: relaunched as `job_dalklk7n0ur007idqtpg` with peak LR 1e-6 (user: same recipe as (b) — bs 128, 1e-6 → 1e-7, 16 samples, 1000 steps),**
+  so the distill prefix/exp are `…/12br-medium-to-e4b-bs128-s1000-lr1e-6` / `12br-medium-to-e4b-base-bs128-s1000-lr1e-6-st4`. The first job
+  (`job_dalkh9pt1s0g088gt33g`) had been misread by the supervisor as COMPLETED at 01:59Z right after the teacher download (a preemption race:
+  a new pod appeared 6 s before the status poll) and was then cancelled by hand. Fix: the run-file now writes the RL-protocol completion
+  receipt after the step-1000 permanent checkpoint (`full_checkpoint_s3.py complete-run`) and the supervisor requires it
+  (`--completion-s3-uri … --expected-completion-step 1000 --expected-completion-world-size 4`), so a COMPLETED job without a receipt is
+  relaunched and resumes from S3 (trace shards + distill checkpoints).
 
 ### 9.1 Results
 
