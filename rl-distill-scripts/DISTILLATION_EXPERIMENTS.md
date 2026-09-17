@@ -675,6 +675,14 @@ snapshot and `best_hf/` is published at the end). Seed 43 = **job_dakdierns19g08
 each, priority high); supervisors tmux `rl-g4-e4b-s43-medi` / `rl-g4-e4b-s44-medi`, state `.scale_train_supervisors/g4-e4b-s4{3,4}-medi-20260915/`.
 The other four seed-43 runs stay paused.
 
+**2026-09-17 01:27Z — E4B seeds 43/44 relaunched with the fast update layout.** Both had been running the original E4B layout
+(`MICRO_BATCH_SIZE_PER_GPU=1`, 4096-token cap, resident vLLM): update_actor ≈ 1450 s of a ≈ 1520 s step (256 serial micro-steps per GPU),
+i.e. ~26 min/step and 4.3 h per validation. `launch_gemma4_rl_band_seed.sh` now gives E4B `mbs 4 / 8192 cap / OFFLOAD=True / VLLM_SLEEP_MODE=True`
+(the 12B recipe validated on 4 GPUs in §9.0h; gradient-neutral under the global token-mean loss; E2B already ran mbs 8 / 12288). The two jobs
+were cancelled by name and the supervisors relaunched them within 90 s (seed 43 → `job_dalk4c1t1s0g088gt32g`, running at 01:28Z; seed 44 →
+`job_dalk4c1t1s0g07hmc430`, queued), resuming from the last rolling checkpoints (seed 43: step 95, best 0.315 @ 70; seed 44: step 65, best
+0.300 @ 60). Expect update_actor to drop to ~100–250 s.
+
 ### 9.0c Reverse KL of the distilled students vs the E4B base (launched 2026-09-10 16:4xZ; final results 2026-09-11 07:02Z)
 
 `reverse_kl_topk.py` (run-file `scale_train/run_gemma4_reverse_kl_st.sh`, 1 GPU, borrowing off): sample the *student* on 128
