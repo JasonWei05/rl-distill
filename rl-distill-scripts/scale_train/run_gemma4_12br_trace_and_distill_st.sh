@@ -78,5 +78,12 @@ echo "ST_12BR stage2: distill start $(date -u +%FT%TZ) s3=${REMOTE_CHECKPOINT_S3
 export TEACHER_SPEC STUDENT DISTILL_GPU_IDS="${GPU_IDS_CSV}"
 bash rl-distill-scripts/scale_train/run_gemma4_distill_one.sh
 status=$?
+# Durable completion receipt (RL protocol) so the supervisor can distinguish a finished run from a preempted pod that was
+# misread as COMPLETED: verifies the step-1000 permanent checkpoint on S3 and writes run_complete.json next to it.
+if [ "${status}" -eq 0 ]; then
+  "${VENV}/bin/python" rl-distill-scripts/full_checkpoint_s3.py complete-run --s3-uri "${REMOTE_CHECKPOINT_S3_URI}" \
+    --expected-step "${TOTAL_TRAINING_STEPS}" --expected-world-size "${n_gpus}" --model google/gemma-4-E4B --difficulty medium --seed 42 \
+    --wandb-run-id "${EXP_NAME}" --hf-repo "s3-only" --receipt-path /tmp/12br_run_complete.json || status=$?
+fi
 echo "ST_12BR_DONE spec=${TEACHER_SPEC} student=${STUDENT} exit=${status} $(date -u +%FT%TZ)"
 exit "${status}"
