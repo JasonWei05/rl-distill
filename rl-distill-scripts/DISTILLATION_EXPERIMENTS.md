@@ -703,6 +703,11 @@ relaunched 07:53Z (`job_dalpomnn0ur007idqu60`): the marker appears in the driver
 that killed it) at ~210–250 s/step. Seed 43 relaunched 06:39Z (`job_dalom5fn0ur007idqu30`, bundle 63e22397 — gated hook) cleared its own crash
 step 130 and runs on; if it crashes again its next relaunch gets 91b125c0. Earlier "confirmations" (steps 103, 116) were luck: the failure is
 batch-dependent, so only the marker proves the switch is live.
+**Seed 43 finished 11:16Z** (`job_dalom5fn0ur007idqu30`): early stop at step 170 after five misses (vals 130–170 = 0.299 / 0.314 / 0.294 /
+0.316 / 0.301), **best 0.3175 @ 120**; best HF export published to `s3://scale-ml/genai/rl-distill/gemma4-difficulty-s43-20260910/gemma4-e4b-medium/best_hf/`,
+completion receipt at step 170, supervisor verified both (`COMPLETED_RECEIPTS`). Caveat for the seed table: this best is the re-sampled step-120
+validation after the 04:11Z preemption (the first sample of step 120 scored 0.313, which would have ended the run at best 0.315 @ 70); seed 42's
+E4B medium best was 0.34 @ 90 (§1). Seed 44 continues (best 0.335 @ 150, 0 misses).
 
 ### 9.0c Reverse KL of the distilled students vs the E4B base (launched 2026-09-10 16:4xZ; final results 2026-09-11 07:02Z)
 
