@@ -5,5 +5,6 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ENV_VARS="TEACHER_SPEC=12br-medium,STUDENT=e4b,LR=${LR:-1e-6},TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS:-1000}"
 echo "LAUNCH_ENV ${ENV_VARS}"
-exec bash launch_st_with_code.sh --gpus-per-instance "${GPUS_PER_INSTANCE:-4}" --priority high --allow-borrowing --active-deadline-hours 240 \
-  --run-file run_gemma4_12br_trace_and_distill_st.sh --job-name "${JOB_NAME:-g4-12br-trace-distill}" --env-vars "${ENV_VARS}" "$@"
+BORROW_FLAG="--allow-borrowing"; [ "${ALLOW_BORROWING:-true}" = false ] && BORROW_FLAG=""   # ALLOW_BORROWING=false -> dedicated (non-preemptible) capacity
+exec bash launch_st_with_code.sh --gpus-per-instance "${GPUS_PER_INSTANCE:-4}" --priority high ${BORROW_FLAG} --active-deadline-hours 240 \
+  --run-file run_gemma4_12br_trace_and_distill_st.sh --job-name "${JOB_NAME:-g4-12br-trace-distill-lr${LR:-1e-6}}" --env-vars "${ENV_VARS}" "$@"
