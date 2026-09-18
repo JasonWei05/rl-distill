@@ -1583,7 +1583,7 @@ usual benign tail). **Net effect of the patience-4 resume:** the untrained-12B m
 beat it. Wall clock on the 4-GPU pod: 50 steps in 6.9 h (~6.3 min/step + 5 validations/saves). The `rl_12b_medium` teacher in §1/§8 still
 refers to step 120 (Hub pin); the step-140 export is S3-only (`global_step_140/actor/huggingface/`, and `best_hf/`).
 
-### 9.0i RL on the tail-bucket on-policy student, step 50 (prepared 2026-09-16 ~20:40Z, NOT launched)
+### 9.0i RL on the tail-bucket on-policy student, step 50 (finished 2026-09-18: best 0.444 @ 100, early stop 200 after a patience-10 resume)
 
 **Why.** Of the on-policy checkpoints measured offline (§9.0f table), the tail-bucket run's step 50 has the lowest reverse KL to the E4B
 base teacher (0.0713 nats/token; forward 0.0937), so it is the natural student to put through the §9.0 RL recipe and compare with the
@@ -1629,6 +1629,11 @@ cursor + early-stopping history: best 0.444 @ 100, 5 misses), recomputes the tri
 non-improving validations in a row (i.e. at step 200 at the earliest) or at the 400-step cap. Rationale: train accuracy was still rising when
 patience 5 fired. Submission took 9 min — the ScaleTrain API was unresponsive (a `get job` timed out at 60 s) before accepting it. Supervisor
 tmux `rl-g4-12b-bkt50-rl-med`, state `.scale_train_supervisors/g4-12b-bkt50-rl-med-20260917-resume/`.
+
+**Resume result (early stop at step 200, 2026-09-18 00:15Z; no preemptions, ~7.5 min/step incl. S3 saves).** Validations 160–200:
+0.421 / 0.423 / 0.430 / 0.420 / 0.428 — ten misses in a row against the 0.444 @ 100 best, so the extra 50 steps changed nothing:
+**final best 0.444 @ 100**. The plateau is real, not a patience artefact: 100 steps at 0.41–0.44 versus the off-policy-init run's climb to
+0.497 @ 190. Best HF export unchanged (step 100); step-200 receipt under the same prefixes.
 
 ### 9.0j Two distillation re-runs into E4B base (prepared 2026-09-17 ~01:45Z, NOT launched; both local)
 
