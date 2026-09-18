@@ -1752,7 +1752,7 @@ seed ranges 4.6 / 5.0 / 2.6 / 2.9 / 3.0 points — every distilled E4B student b
 (0.0851 vs 0.0898); pass@16 is a wash (within 1–2 points, (a) slightly ahead). So for the 12br teacher the 2e-6 peak wins on both KL and
 accuracy, whereas for the 12bd teacher the two LRs tied — the difference between the pairs is the (c) run's absence of the §9.0g plateau.
 
-### 9.0k RL-on-tail-bucket 12B (§9.0i step 100) → E4B base, 3000×16 traces, peak 2e-6 (launched 2026-09-18 01:5xZ)
+### 9.0k RL-on-tail-bucket 12B (§9.0i step 100) → E4B base, 3000×16 traces, peak 2e-6 (finished 2026-09-18: val KL 0.0836; math eval pending)
 
 **Why.** Third 12B RL teacher for the same E4B-base student recipe: the §9.0i run (RL on the tail-bucket on-policy student, best val 0.444 @ 100)
 is a weaker teacher than 12bd (0.497) and 12br (0.527), so its student tells whether the E4B student's math scores track teacher accuracy, or
@@ -1767,6 +1767,18 @@ W&B project `gemma4-12bo-distill-v1`, exp `12bo-medium-to-e4b-base-bs128-s1000-l
 and the ST run-file/launcher/supervisor (`TEACHER_SPEC=12bo-medium`); eval registry tag `distill_12bo_lr2e6_medium_to_e4b_step1000`
 (commit 8a418100). One 4-GPU ScaleTrain job, borrowing OFF, priority high (as (c)); supervisor tmux `rl-g4-12bo-trace-distill-lr2e-6`,
 state `.scale_train_supervisors/g4-12bo-trace-distill-lr2e-6-20260918/`. Math suite on the final export follows via `local_jobs/eval_9_0j_math.sh`.
+
+**Finished 2026-09-18 08:55Z (`job_dam9ldnn0ur00886hcl0`, no preemptions).** Stage 1 collected 3000×16 + 300×1 traces in 2 h 16 min
+(02:00–04:16Z, 4 TP1 engines); stage 2 took 4 h 38 min (~17 s/step). Val top-128 KL 0.2455 → 0.0985 (100) → 0.0879 (500) → **0.0836 (1000)**.
+The lower start (0.246 vs 0.274 for 12br) and lower end are not a "better" distillation — this teacher is closer to the E4B base (it came from
+the E4B-taught on-policy student and stopped at val 0.444), so the KL is measured against an easier target; the math suite is the comparison
+that matters. `global_step_1000/huggingface` on S3; eval queued (tmux `eval-12bo`).
+
+| run | teacher (val) | val KL: 0 → 100 → 500 → 1000 |
+|---|---|---|
+| (c) 12br → E4B, 2e-6 | untrained-12B RL resume, 0.527 | 0.274 → 0.109 → 0.0890 → 0.0851 |
+| §9.0g 12bd → E4B, 2e-6 | RL'd E4B-distilled 12B, 0.497 | 0.323 → ~0.30 → ~0.19 → 0.0903 |
+| 12bo → E4B, 2e-6 (this) | RL'd tail-bucket on-policy 12B, 0.444 | 0.246 → 0.099 → 0.0879 → 0.0836 |
 
 ### 9.1 Results
 
