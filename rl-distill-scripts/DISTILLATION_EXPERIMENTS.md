@@ -1724,6 +1724,26 @@ The first attempts at (a) (19:55Z) and at the E4B seed-43 best checkpoint (22:05
 idle check and engine init ("Free memory on device cuda:0 (11.36/79.44 GiB) … less than desired 0.4"), and the driver wrongly logged them as
 done. Fixed (commit 4544533f: retry with a two-reading GPU check, EVAL_DONE only on success) and relaunched 23:33Z as tmux `eval-9_0j-v2` with
 (a), (c), seed 43, seed 44 queued; all 8 local GPUs were held by other users at that time (a 4-GPU allocation hog + a 4-GPU vLLM server).
+2026-09-18 01:29Z (user request): the 4-GPU placeholder on GPUs 0–3 (a root `torch.empty(72e9)` holder, 5.5 h old) was killed with sudo and the
+queue re-split into two parallel drivers — tmux `eval-A` = (a) then (c) on GPUs 0,1; tmux `eval-B` = seeds 43 then 44 on GPUs 2,3
+(`FORCE_GPUS=2,3`, added so parallel drivers do not both pick the same idle pair). The 12bo student (§9.0k) is evaluated when its run completes.
+
+### 9.0k RL-on-tail-bucket 12B (§9.0i step 100) → E4B base, 3000×16 traces, peak 2e-6 (launched 2026-09-18 01:5xZ)
+
+**Why.** Third 12B RL teacher for the same E4B-base student recipe: the §9.0i run (RL on the tail-bucket on-policy student, best val 0.444 @ 100)
+is a weaker teacher than 12bd (0.497) and 12br (0.527), so its student tells whether the E4B student's math scores track teacher accuracy, or
+saturate the way the (b)/§9.0g pair did.
+
+**Recipe.** Identical to §9.0j (c): stage 1 collects top-128 traces from the step-100 HF export (`…-onpolicy-bkt50-rl-full-checkpoints/12b-medium-from-onpolicy-bkt50-es5/global_step_100/actor/huggingface`,
+S3 only → `TEACHER_SOURCE=s3`) for 3000 train prompts × 16 + 300 val × 1 into `s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2/12bo-medium/`;
+stage 2 distils into the E4B base (bs 128, 1000 steps, lr 2e-6 → 2e-7 linear, 100 warm-up, mbs 4 / 8192 cap, val every 10; permanent
+checkpoints every 250 + rolling every 50 with HF exports) to `s3://scale-ml/genai/rl-distill/gemma4-12bo-distill-ckpts-v1/12bo-medium-to-e4b-bs128-s1000-lr2e-6/`,
+W&B project `gemma4-12bo-distill-v1`, exp `12bo-medium-to-e4b-base-bs128-s1000-lr2e-6-st4`. New spec `12bo-medium` (direction
+`12bo_medium_r100_to_e4b`) in `run_gemma4_bestckpt_trace_collection.sh`, both direction registries, `run_gemma4_distill_one.sh` (project),
+and the ST run-file/launcher/supervisor (`TEACHER_SPEC=12bo-medium`); eval registry tag `distill_12bo_lr2e6_medium_to_e4b_step1000`
+(commit 8a418100). One 4-GPU ScaleTrain job, borrowing OFF, priority high (as (c)); supervisor tmux `rl-g4-12bo-trace-distill-lr2e-6`,
+state `.scale_train_supervisors/g4-12bo-trace-distill-lr2e-6-20260918/`. Math suite on the final export follows via `local_jobs/eval_9_0j_math.sh`.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
