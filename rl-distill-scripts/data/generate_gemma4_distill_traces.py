@@ -88,6 +88,8 @@ DIRECTIONS = (
     "12bd_medium_to_e4b",
     # Untrained-12B medium RL after the patience-4 resume (best step 140, §9.0h) -> E4B base student, 16 samples.
     "12b_medium_r140_to_e4b",
+    # RL on the tail-bucket on-policy-distilled 12B (§9.0i, best step 100) -> E4B base student, 16 samples.
+    "12bo_medium_r100_to_e4b",
 )
 SPLITS = ("train", "validation")
 

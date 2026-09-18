@@ -41,7 +41,7 @@ for tag in $TAGS; do
   until aws s3 ls "$cu" >/dev/null 2>&1; do echo "$(date -u +%FT%TZ) $tag: waiting for $cu"; sleep 600; done
   attempt=0
   while :; do
-    attempt=$((attempt+1)); gpus="$(wait_for_gpus "$GPUS_PER_MODEL" "$tag")"
+    attempt=$((attempt+1)); gpus="${FORCE_GPUS:-$(wait_for_gpus "$GPUS_PER_MODEL" "$tag")}"   # FORCE_GPUS=2,3 pins (parallel drivers)
     echo "$(date -u +%FT%TZ) EVAL $tag phases=math gpus=$gpus attempt=$attempt"
     if env -u CUDA_VISIBLE_DEVICES MODEL_TAG="$tag" EVAL_PHASES=math GPU_COUNT="$GPUS_PER_MODEL" PACKED_PHYSICAL_GPU_IDS="$gpus" PREPARE_SHARED_ASSETS=false \
         RESULT_ROOT_OVERRIDE="$STUDY/results/$tag" MODEL_WORK_ROOT="$STUDY/work/$tag" \

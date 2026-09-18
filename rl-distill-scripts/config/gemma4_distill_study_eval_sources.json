@@ -676,7 +676,7 @@
     },
     {
       "tag": "distill_12bd_medium_to_e4b_step300",
-      "display_name": "Distilled E4B base <- RL'd distilled 12B medium teacher (\u00a79.0 step 190), off-policy \u00a79 recipe, step_000300 of 1000",
+      "display_name": "Distilled E4B base <- RL'd distilled 12B medium teacher (§9.0 step 190), off-policy §9 recipe, step_000300 of 1000",
       "category": "distilled",
       "architecture": "gemma-4-E4B",
       "trained_on": "medium",
@@ -698,7 +698,7 @@
     },
     {
       "tag": "distill_12bd_medium_to_e4b_step1000",
-      "display_name": "Distilled E4B base <- RL'd distilled 12B medium teacher (\u00a79.0 step 190), off-policy \u00a79 recipe, final step_001000",
+      "display_name": "Distilled E4B base <- RL'd distilled 12B medium teacher (§9.0 step 190), off-policy §9 recipe, final step_001000",
       "category": "distilled",
       "architecture": "gemma-4-E4B",
       "trained_on": "medium",
@@ -720,7 +720,7 @@
     },
     {
       "tag": "distill_12bd_lr1e6_medium_to_e4b_step1000",
-      "display_name": "Distilled E4B base <- RL'd distilled 12B medium teacher (\u00a79.0 step 190), \u00a79 recipe at peak LR 1e-6 (\u00a79.0j b), final step_001000",
+      "display_name": "Distilled E4B base <- RL'd distilled 12B medium teacher (§9.0 step 190), §9 recipe at peak LR 1e-6 (§9.0j b), final step_001000",
       "category": "distilled",
       "architecture": "gemma-4-E4B",
       "trained_on": "medium",
@@ -742,7 +742,7 @@
     },
     {
       "tag": "distill_12br_medium_to_e4b_step1000",
-      "display_name": "Distilled E4B base <- resumed untrained-12B RL medium teacher (\u00a79.0h step 140), 3000x16 traces, peak LR 1e-6 (\u00a79.0j a), final step_001000",
+      "display_name": "Distilled E4B base <- resumed untrained-12B RL medium teacher (§9.0h step 140), 3000x16 traces, peak LR 1e-6 (§9.0j a), final step_001000",
       "category": "distilled",
       "architecture": "gemma-4-E4B",
       "trained_on": "medium",
@@ -764,7 +764,7 @@
     },
     {
       "tag": "distill_12br_lr2e6_medium_to_e4b_step1000",
-      "display_name": "Distilled E4B base <- resumed untrained-12B RL medium teacher (\u00a79.0h step 140), 3000x16 traces, peak LR 2e-6 (\u00a79.0j c), final step_001000",
+      "display_name": "Distilled E4B base <- resumed untrained-12B RL medium teacher (§9.0h step 140), 3000x16 traces, peak LR 2e-6 (§9.0j c), final step_001000",
       "category": "distilled",
       "architecture": "gemma-4-E4B",
       "trained_on": "medium",
@@ -779,6 +779,28 @@
         "type": "s3_hf_export",
         "uri": "s3://scale-ml/genai/rl-distill/gemma4-12br-distill-ckpts-v1/12br-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/huggingface/",
         "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-12br-distill-ckpts-v1/12br-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_12bo_lr2e6_medium_to_e4b_step1000",
+      "display_name": "Distilled E4B base <- RL-on-tail-bucket-on-policy 12B medium teacher (§9.0i step 100, val 0.444), 3000x16 traces, peak LR 2e-6 (§9.0k), final step_001000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-12bo-distill-ckpts-v1/12bo-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-12bo-distill-ckpts-v1/12bo-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/_REMOTE_COMPLETE.json",
         "expected_global_step": 1000,
         "base_repo": "google/gemma-4-E4B",
         "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
