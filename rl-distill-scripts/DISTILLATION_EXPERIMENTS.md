@@ -343,7 +343,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-18 02:46Z — math complete for 36/39 models, OOD complete for 29/39. Partial rows are shown as they finish._
+_Updated 2026-09-18 03:56Z — math complete for 37/39 models, OOD complete for 29/39. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -360,7 +360,7 @@ _Updated 2026-09-18 02:46Z — math complete for 36/39 models, OOD complete for 
 | `rl_e4b_hard` | rl | hard | 39.9 / 79.3 | 20.0 / 56.7 | **15.4 / 47.7** | 16.7 / 48.0 | 43.0 / 77.4 |
 | `rl_e4b_medium` | rl | medium | 62.2 / 94.3 | **29.1 / 71.3** | 17.2 / 58.3 | 26.5 / 61.6 | 65.4 / 88.9 |
 | `rl_e4b_medium_s43` | rl | medium | 66.8 / 96.7 | **31.1 / 78.3** | 17.7 / 60.0 | 28.1 / 64.2 | 64.7 / 90.4 |
-| `rl_e4b_medium_s44` | rl | medium | — | — | — | — | — |
+| `rl_e4b_medium_s44` | rl | medium | 66.5 / 95.3 | **34.1 / 77.0** | 19.8 / 60.7 | 29.4 / 60.6 | 67.7 / 91.6 |
 | `distill_12b_easy_to_e2b` | distilled | easy | **41.5 / 84.3** | 13.4 / 61.3 | 7.8 / 44.3 | 15.8 / 52.6 | 31.5 / 67.2 |
 | `distill_26b_easy_to_e2b` | distilled | easy | **40.7 / 84.3** | 13.4 / 61.3 | 6.4 / 36.3 | 15.5 / 46.2 | 31.4 / 66.3 |
 | `distill_e2b_easy_to_e2b` | distilled | easy | **38.9 / 79.3** | 16.9 / 59.7 | 7.7 / 40.0 | 15.9 / 47.2 | 32.4 / 65.1 |
@@ -1738,12 +1738,15 @@ Results so far (02:47Z; mean@k / pass@k):
 | (b) 12bd → E4B, 1e-6, step 1000 | 71.0 / 97.3 | 35.1 / 83.0 | 20.2 / 62.3 | 32.9 / 65.8 | 71.3 / 92.2 |
 | §9.0g 12bd → E4B, 2e-6, step 1000 | 71.3 / 97.0 | 36.6 / 82.3 | 19.9 / 58.3 | 33.9 / 67.2 | 71.3 / 92.4 |
 | E4B RL medium seed 43 best (step 120, val 0.3175) | 66.8 / 96.7 | 31.1 / 78.3 | 17.7 / 60.0 | 28.1 / 64.2 | 64.7 / 90.4 |
+| E4B RL medium seed 44 best (step 160, val 0.3404) | 66.5 / 95.3 | 34.1 / 77.0 | 19.8 / 60.7 | 29.4 / 60.6 | 67.7 / 91.6 |
 | E4B RL medium seed 42 best (step 90, §8 reference) | 62.2 / 94.3 | 29.1 / 71.3 | 17.2 / 58.3 | 26.5 / 61.6 | 65.4 / 88.9 |
 
 Reading: (a), the student of the better untrained-12B RL teacher (val 0.527), is the strongest E4B student on every in-distribution band and on
 MATH500 — +1–2 mean@k points and +3–6 pass@16 points over the 12bd students, so here the teacher's accuracy does show up downstream (unlike the
 1e-6 vs 2e-6 pair, which was noise). Seed 43 of E4B RL sits 2–5 mean@k points above seed 42 despite a lower val (0.3175 vs 0.34), i.e. the seed
 spread of E4B RL is of the same order as the gap between it and its val score; still ~6 points below every distilled student on id_easy/id_medium.
+Seed 44 (03:56Z) lands between: 3-seed E4B RL mean@k = 65.2 / 31.4 / 18.2 / 28.0 / 65.9 (id_easy / id_medium / id_hard / MATH500 / GSM8K),
+seed ranges 4.6 / 5.0 / 2.6 / 2.9 / 3.0 points — every distilled E4B student beats the best seed on every set except id_hard pass@16.
 
 ### 9.0k RL-on-tail-bucket 12B (§9.0i step 100) → E4B base, 3000×16 traces, peak 2e-6 (launched 2026-09-18 01:5xZ)
 
