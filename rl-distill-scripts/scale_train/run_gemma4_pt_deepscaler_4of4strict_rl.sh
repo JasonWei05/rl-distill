@@ -159,6 +159,10 @@ MICRO_BATCH_SIZE_PER_GPU="${MICRO_BATCH_SIZE_PER_GPU:-1}"
 # sequence into an OOM-sized logits tensor.  A nonzero ceiling keeps the
 # configured microbatch for short samples but emits long samples as singletons.
 MAX_PADDED_TOKENS_PER_MICROBATCH="${MAX_PADDED_TOKENS_PER_MICROBATCH:-0}"
+# The old-logprob / ref passes have no backward, so they can take a much larger micro-batch than the update
+# (E4B sweep 2026-09-18: forward-only 24 seqs / 49k tokens = 39 GiB, 2.7x faster; the update OOMs above 8 / 16k).
+INFER_MICRO_BATCH_SIZE_PER_GPU="${INFER_MICRO_BATCH_SIZE_PER_GPU:-${MICRO_BATCH_SIZE_PER_GPU}}"
+INFER_MAX_PADDED_TOKENS_PER_MICROBATCH="${INFER_MAX_PADDED_TOKENS_PER_MICROBATCH:-${MAX_PADDED_TOKENS_PER_MICROBATCH}}"
 # FSDP2's native CPU offload policy keeps parameter shards, gradients, and Adam
 # state on CPU between layer computations.  Unlike manual optimizer offload, it
 # also avoids the first-step GPU allocation spike when Adam moments are created.
@@ -508,6 +512,10 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       +ray_kwargs.ray_init.runtime_env.env_vars.VLLM_USE_FLASHINFER_SAMPLER="'0'" \
       +ray_kwargs.ray_init.runtime_env.env_vars.VERL_FSDP2_LOCAL_LOAD="'1'" \
       +ray_kwargs.ray_init.runtime_env.env_vars.TORCH_CUDNN_SDPA_ENABLED="'${TORCH_CUDNN_SDPA_ENABLED:-1}'" \
+      `# VERL_GEMMA4_CUDNN_SDPA / VERL_GEMMA4_EVAL_CUDNN_SDPA: the FSDP engine (_set_gemma4_cudnn_sdpa) forces cuDNN SDPA ON for every` \
+      `# Gemma 4 train forward unless VERL_GEMMA4_CUDNN_SDPA=0 -- TORCH_CUDNN_SDPA_ENABLED alone never reaches update_actor.` \
+      +ray_kwargs.ray_init.runtime_env.env_vars.VERL_GEMMA4_CUDNN_SDPA="'${VERL_GEMMA4_CUDNN_SDPA:-1}'" \
+      +ray_kwargs.ray_init.runtime_env.env_vars.VERL_GEMMA4_EVAL_CUDNN_SDPA="'${VERL_GEMMA4_EVAL_CUDNN_SDPA:-${VERL_GEMMA4_CUDNN_SDPA:-1}}'" \
       +ray_kwargs.ray_init.runtime_env.env_vars.VERL_SKIP_VLLM_MM_WEIGHT_RELOAD="'${VERL_SKIP_VLLM_MM_WEIGHT_RELOAD}'" \
       "+ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROLLOUT_EXTRA_STOP='${VERL_ROLLOUT_EXTRA_STOP}'" \
       actor_rollout_ref.model.use_remove_padding=False \
@@ -522,8 +530,8 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       ++actor_rollout_ref.actor.fsdp_config.entropy_checkpointing=True \
       ++actor_rollout_ref.actor.fsdp_config.offload_policy="${FSDP_CPU_OFFLOAD_POLICY}" \
       ++actor_rollout_ref.actor.fsdp_config.max_padded_tokens_per_microbatch="${MAX_PADDED_TOKENS_PER_MICROBATCH}" \
-      ++actor_rollout_ref.actor.fsdp_config.infer_max_padded_tokens_per_microbatch="${MAX_PADDED_TOKENS_PER_MICROBATCH}" \
-      ++actor_rollout_ref.ref.fsdp_config.infer_max_padded_tokens_per_microbatch="${MAX_PADDED_TOKENS_PER_MICROBATCH}" \
+      ++actor_rollout_ref.actor.fsdp_config.infer_max_padded_tokens_per_microbatch="${INFER_MAX_PADDED_TOKENS_PER_MICROBATCH}" \
+      ++actor_rollout_ref.ref.fsdp_config.infer_max_padded_tokens_per_microbatch="${INFER_MAX_PADDED_TOKENS_PER_MICROBATCH}" \
       actor_rollout_ref.actor.router_replay.mode="${ROUTER_REPLAY_MODE}" \
       actor_rollout_ref.actor.fsdp_config.router_replay.mode="${ROUTER_REPLAY_MODE}" \
       actor_rollout_ref.rollout.enable_rollout_routing_replay="${ENABLE_ROLLOUT_ROUTING_REPLAY}" \
@@ -538,8 +546,8 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       actor_rollout_ref.ref.log_prob_use_dynamic_bsz=False \
       actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=False \
       actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu="${MICRO_BATCH_SIZE_PER_GPU}" \
-      actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu="${MICRO_BATCH_SIZE_PER_GPU}" \
-      actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu="${MICRO_BATCH_SIZE_PER_GPU}" \
+      actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu="${INFER_MICRO_BATCH_SIZE_PER_GPU}" \
+      actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu="${INFER_MICRO_BATCH_SIZE_PER_GPU}" \
       `# vLLM sleep mode. VLLM_SLEEP_MODE=False (default): engine stays resident and weight-sync loads into` \
       `# the live engine -- chosen when cumem sleep/wake was fragile (wake_up OOM once Adam states lived on` \
       `# GPU; cumem invalid-argument on E4B). VLLM_SLEEP_MODE=True: level-1 sleep parks the bf16 weights in` \
