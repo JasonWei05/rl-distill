@@ -343,7 +343,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-17 22:06Z — math complete for 34/38 models, OOD complete for 29/38. Partial rows are shown as they finish._
+_Updated 2026-09-18 02:46Z — math complete for 36/39 models, OOD complete for 29/39. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -359,7 +359,7 @@ _Updated 2026-09-17 22:06Z — math complete for 34/38 models, OOD complete for 
 | `rl_e4b_easy` | rl | easy | **69.9 / 95.3** | 32.8 / 77.3 | 19.2 / 56.0 | 31.5 / 63.6 | 69.5 / 88.9 |
 | `rl_e4b_hard` | rl | hard | 39.9 / 79.3 | 20.0 / 56.7 | **15.4 / 47.7** | 16.7 / 48.0 | 43.0 / 77.4 |
 | `rl_e4b_medium` | rl | medium | 62.2 / 94.3 | **29.1 / 71.3** | 17.2 / 58.3 | 26.5 / 61.6 | 65.4 / 88.9 |
-| `rl_e4b_medium_s43` | rl | medium | — | — | — | — | — |
+| `rl_e4b_medium_s43` | rl | medium | 66.8 / 96.7 | **31.1 / 78.3** | 17.7 / 60.0 | 28.1 / 64.2 | 64.7 / 90.4 |
 | `rl_e4b_medium_s44` | rl | medium | — | — | — | — | — |
 | `distill_12b_easy_to_e2b` | distilled | easy | **41.5 / 84.3** | 13.4 / 61.3 | 7.8 / 44.3 | 15.8 / 52.6 | 31.5 / 67.2 |
 | `distill_26b_easy_to_e2b` | distilled | easy | **40.7 / 84.3** | 13.4 / 61.3 | 6.4 / 36.3 | 15.5 / 46.2 | 31.4 / 66.3 |
@@ -383,8 +383,9 @@ _Updated 2026-09-17 22:06Z — math complete for 34/38 models, OOD complete for 
 | `distill_12bd_lr1e6_medium_to_e4b_step1000` | distilled | medium | 71.0 / 97.3 | **35.1 / 83.0** | 20.2 / 62.3 | 32.9 / 65.8 | 71.3 / 92.2 |
 | `distill_12bd_medium_to_e4b_step1000` | distilled | medium | 71.3 / 97.0 | **36.6 / 82.3** | 19.9 / 58.3 | 33.9 / 67.2 | 71.3 / 92.4 |
 | `distill_12bd_medium_to_e4b_step300` | distilled | medium | 66.6 / 97.3 | **32.0 / 81.3** | 17.9 / 58.3 | 30.2 / 65.6 | 67.9 / 91.1 |
+| `distill_12bo_lr2e6_medium_to_e4b_step1000` | distilled | medium | — | — | — | — | — |
 | `distill_12br_lr2e6_medium_to_e4b_step1000` | distilled | medium | — | — | — | — | — |
-| `distill_12br_medium_to_e4b_step1000` | distilled | medium | — | — | — | — | — |
+| `distill_12br_medium_to_e4b_step1000` | distilled | medium | 72.6 / 98.0 | **37.0 / 86.3** | 20.9 / 68.0 | 34.4 / 68.0 | 71.2 / 92.6 |
 | `distill_26b_medium_to_e4b` | distilled | medium | 71.3 / 99.0 | **37.5 / 89.3** | 20.4 / 69.7 | 34.3 / 71.8 | 67.3 / 92.1 |
 | `distill_e4b_medium_to_e4b` | distilled | medium | 62.2 / 93.7 | **28.5 / 75.7** | 16.2 / 55.0 | 26.1 / 60.2 | 64.1 / 88.6 |
 
@@ -426,6 +427,7 @@ _Updated 2026-09-17 22:06Z — math complete for 34/38 models, OOD complete for 
 | `distill_12bd_lr1e6_medium_to_e4b_step1000` | — | — | — |
 | `distill_12bd_medium_to_e4b_step1000` | — | — | — |
 | `distill_12bd_medium_to_e4b_step300` | — | — | — |
+| `distill_12bo_lr2e6_medium_to_e4b_step1000` | — | — | — |
 | `distill_12br_lr2e6_medium_to_e4b_step1000` | — | — | — |
 | `distill_12br_medium_to_e4b_step1000` | — | — | — |
 | `distill_26b_medium_to_e4b` | 41.4 | 19.2 | 59.6 |
@@ -1727,6 +1729,21 @@ done. Fixed (commit 4544533f: retry with a two-reading GPU check, EVAL_DONE only
 2026-09-18 01:29Z (user request): the 4-GPU placeholder on GPUs 0–3 (a root `torch.empty(72e9)` holder, 5.5 h old) was killed with sudo and the
 queue re-split into two parallel drivers — tmux `eval-A` = (a) then (c) on GPUs 0,1; tmux `eval-B` = seeds 43 then 44 on GPUs 2,3
 (`FORCE_GPUS=2,3`, added so parallel drivers do not both pick the same idle pair). The 12bo student (§9.0k) is evaluated when its run completes.
+
+Results so far (02:47Z; mean@k / pass@k):
+
+| student | id_easy | id_medium | id_hard | MATH500 | GSM8K |
+|---|---|---|---|---|---|
+| (a) 12br → E4B, 1e-6, step 1000 | **72.6 / 98.0** | **37.0 / 86.3** | **20.9 / 68.0** | **34.4 / 68.0** | 71.2 / 92.6 |
+| (b) 12bd → E4B, 1e-6, step 1000 | 71.0 / 97.3 | 35.1 / 83.0 | 20.2 / 62.3 | 32.9 / 65.8 | 71.3 / 92.2 |
+| §9.0g 12bd → E4B, 2e-6, step 1000 | 71.3 / 97.0 | 36.6 / 82.3 | 19.9 / 58.3 | 33.9 / 67.2 | 71.3 / 92.4 |
+| E4B RL medium seed 43 best (step 120, val 0.3175) | 66.8 / 96.7 | 31.1 / 78.3 | 17.7 / 60.0 | 28.1 / 64.2 | 64.7 / 90.4 |
+| E4B RL medium seed 42 best (step 90, §8 reference) | 62.2 / 94.3 | 29.1 / 71.3 | 17.2 / 58.3 | 26.5 / 61.6 | 65.4 / 88.9 |
+
+Reading: (a), the student of the better untrained-12B RL teacher (val 0.527), is the strongest E4B student on every in-distribution band and on
+MATH500 — +1–2 mean@k points and +3–6 pass@16 points over the 12bd students, so here the teacher's accuracy does show up downstream (unlike the
+1e-6 vs 2e-6 pair, which was noise). Seed 43 of E4B RL sits 2–5 mean@k points above seed 42 despite a lower val (0.3175 vs 0.34), i.e. the seed
+spread of E4B RL is of the same order as the gap between it and its val score; still ~6 points below every distilled student on id_easy/id_medium.
 
 ### 9.0k RL-on-tail-bucket 12B (§9.0i step 100) → E4B base, 3000×16 traces, peak 2e-6 (launched 2026-09-18 01:5xZ)
 
