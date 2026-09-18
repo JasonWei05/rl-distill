@@ -1801,6 +1801,19 @@ and the weakest student, because the KL is measured against an easier, base-like
 below it on MATH500, and it is roughly tied with the best E4B RL seed (ahead on id_easy/MATH500/GSM8K, behind on id_medium/id_hard mean@k) —
 i.e. distilling from a 0.444 teacher buys about what a lucky RL seed buys, while the 0.527 teacher buys a clear +5–7 over any seed.
 
+**Why the RL-logged "pass@16" (`val-core/math/acc/best@16/mean`) is not pass@16 (2026-09-18).** The §9.0i run's step-0 validation logged
+best@16 = 0.501 for the same step-50 on-policy student whose offline ×32 protocol gave pass@16 = 61.9 (§9.0f), while mean@16 (0.097) matched
+pass@1 (9.6). Checked and ruled out via the W&B `val/generations` table: same 300 questions (92/92 sampled prompts found in `id_medium`), same
+12-shot template, same T 1.0 / top-p 1.0, no duplicate completions among a question's samples, 2/100 outputs with a fabricated extra turn.
+The cause is verl's metric: `verl/trainer/ppo/metric_utils.py::bootstrap_metric` draws the 16 "samples" **with replacement** from the 16
+actual responses (`np.random.choice(n, size=(1000, 16), replace=True)`) and reports the mean max, so a question with c correct contributes
+1 − (1 − c/16)^16 instead of 1{c > 0}: one correct sample counts 0.64, not 1. A with-replacement draw of 16 from 16 has ≈ 10.3 distinct
+members, so the logged number behaves like pass@10 — interpolating the offline curve (pass@8 44.9, pass@16 61.9) gives ≈ 50, matching the
+0.501. Consequences: every RL-logged best@N in this doc (all bands, all seeds) is biased low by the same construction and is comparable only
+with other RL-logged best@N, never with the §7/§8/§9.1 offline pass@k; mean@16 is exact. The logged curve for the §9.0i run
+(mean@16 / best@16): 0 → 0.097 / 0.501, 50 → 0.356 / 0.802, **100 → 0.444 / 0.808**, 150 → 0.413 / 0.739, 200 → 0.429 / 0.745 —
+coverage decays with the accuracy plateau.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
