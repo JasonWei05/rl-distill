@@ -343,7 +343,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-18 04:01Z — math complete for 38/39 models, OOD complete for 29/39. Partial rows are shown as they finish._
+_Updated 2026-09-18 10:11Z — math complete for 39/39 models, OOD complete for 29/39. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -383,7 +383,7 @@ _Updated 2026-09-18 04:01Z — math complete for 38/39 models, OOD complete for 
 | `distill_12bd_lr1e6_medium_to_e4b_step1000` | distilled | medium | 71.0 / 97.3 | **35.1 / 83.0** | 20.2 / 62.3 | 32.9 / 65.8 | 71.3 / 92.2 |
 | `distill_12bd_medium_to_e4b_step1000` | distilled | medium | 71.3 / 97.0 | **36.6 / 82.3** | 19.9 / 58.3 | 33.9 / 67.2 | 71.3 / 92.4 |
 | `distill_12bd_medium_to_e4b_step300` | distilled | medium | 66.6 / 97.3 | **32.0 / 81.3** | 17.9 / 58.3 | 30.2 / 65.6 | 67.9 / 91.1 |
-| `distill_12bo_lr2e6_medium_to_e4b_step1000` | distilled | medium | — | — | — | — | — |
+| `distill_12bo_lr2e6_medium_to_e4b_step1000` | distilled | medium | 67.7 / 97.0 | **33.0 / 81.7** | 19.1 / 62.0 | 30.2 / 64.6 | 68.8 / 91.8 |
 | `distill_12br_lr2e6_medium_to_e4b_step1000` | distilled | medium | 73.6 / 97.3 | **38.8 / 85.0** | 21.7 / 67.3 | 36.0 / 67.2 | 74.0 / 93.2 |
 | `distill_12br_medium_to_e4b_step1000` | distilled | medium | 72.6 / 98.0 | **37.0 / 86.3** | 20.9 / 68.0 | 34.4 / 68.0 | 71.2 / 92.6 |
 | `distill_26b_medium_to_e4b` | distilled | medium | 71.3 / 99.0 | **37.5 / 89.3** | 20.4 / 69.7 | 34.3 / 71.8 | 67.3 / 92.1 |
@@ -1715,6 +1715,7 @@ First result, (b) 12bd → E4B at peak 1e-6 (`distill_12bd_lr1e6_medium_to_e4b_s
 |---|---|---|---|---|---|
 | (b) 12bd → E4B, 1e-6, step 1000 | 71.0 / 97.3 | 35.1 / 83.0 | 20.2 / 62.3 | 32.9 / 65.8 | 71.3 / 92.2 |
 | §9.0g 12bd → E4B, 2e-6, step 1000 | 71.3 / 97.0 | 36.6 / 82.3 | 19.9 / 58.3 | 33.9 / 67.2 | 71.3 / 92.4 |
+| §9.0k 12bo → E4B, 2e-6, step 1000 (teacher val 0.444) | 67.7 / 97.0 | 33.0 / 81.7 | 19.1 / 62.0 | 30.2 / 64.6 | 68.8 / 91.8 |
 | §4 control: untrained-12B RL (step 120) → E4B | 68.0 / 96.3 | 32.9 / 82.7 | 19.3 / 65.0 | 33.5 / 67.6 | 69.0 / 93.3 |
 | E4B RL medium (teacher-free reference) | 62.2 / 94.3 | 29.1 / 71.3 | 17.2 / 58.3 | 26.5 / 61.6 | 65.4 / 88.9 |
 | E4B base | 29.6 / 89.3 | 8.6 / 60.3 | 4.2 / 38.0 | 10.9 / 50.6 | 26.4 / 72.6 |
@@ -1738,6 +1739,7 @@ Results so far (02:47Z; mean@k / pass@k):
 | (a) 12br → E4B, 1e-6, step 1000 | 72.6 / **98.0** | 37.0 / **86.3** | 20.9 / **68.0** | 34.4 / **68.0** | 71.2 / 92.6 |
 | (b) 12bd → E4B, 1e-6, step 1000 | 71.0 / 97.3 | 35.1 / 83.0 | 20.2 / 62.3 | 32.9 / 65.8 | 71.3 / 92.2 |
 | §9.0g 12bd → E4B, 2e-6, step 1000 | 71.3 / 97.0 | 36.6 / 82.3 | 19.9 / 58.3 | 33.9 / 67.2 | 71.3 / 92.4 |
+| §9.0k 12bo → E4B, 2e-6, step 1000 (teacher val 0.444) | 67.7 / 97.0 | 33.0 / 81.7 | 19.1 / 62.0 | 30.2 / 64.6 | 68.8 / 91.8 |
 | E4B RL medium seed 43 best (step 120, val 0.3175) | 66.8 / 96.7 | 31.1 / 78.3 | 17.7 / 60.0 | 28.1 / 64.2 | 64.7 / 90.4 |
 | E4B RL medium seed 44 best (step 160, val 0.3404) | 66.5 / 95.3 | 34.1 / 77.0 | 19.8 / 60.7 | 29.4 / 60.6 | 67.7 / 91.6 |
 | E4B RL medium seed 42 best (step 90, §8 reference) | 62.2 / 94.3 | 29.1 / 71.3 | 17.2 / 58.3 | 26.5 / 61.6 | 65.4 / 88.9 |
@@ -1752,7 +1754,7 @@ seed ranges 4.6 / 5.0 / 2.6 / 2.9 / 3.0 points — every distilled E4B student b
 (0.0851 vs 0.0898); pass@16 is a wash (within 1–2 points, (a) slightly ahead). So for the 12br teacher the 2e-6 peak wins on both KL and
 accuracy, whereas for the 12bd teacher the two LRs tied — the difference between the pairs is the (c) run's absence of the §9.0g plateau.
 
-### 9.0k RL-on-tail-bucket 12B (§9.0i step 100) → E4B base, 3000×16 traces, peak 2e-6 (finished 2026-09-18: val KL 0.0836; math eval pending)
+### 9.0k RL-on-tail-bucket 12B (§9.0i step 100) → E4B base, 3000×16 traces, peak 2e-6 (finished 2026-09-18: val KL 0.0836; math 67.7 / 33.0 / 19.1 / 30.2 / 68.8)
 
 **Why.** Third 12B RL teacher for the same E4B-base student recipe: the §9.0i run (RL on the tail-bucket on-policy student, best val 0.444 @ 100)
 is a weaker teacher than 12bd (0.497) and 12br (0.527), so its student tells whether the E4B student's math scores track teacher accuracy, or
@@ -1779,6 +1781,25 @@ that matters. `global_step_1000/huggingface` on S3; eval queued (tmux `eval-12bo
 | (c) 12br → E4B, 2e-6 | untrained-12B RL resume, 0.527 | 0.274 → 0.109 → 0.0890 → 0.0851 |
 | §9.0g 12bd → E4B, 2e-6 | RL'd E4B-distilled 12B, 0.497 | 0.323 → ~0.30 → ~0.19 → 0.0903 |
 | 12bo → E4B, 2e-6 (this) | RL'd tail-bucket on-policy 12B, 0.444 | 0.246 → 0.099 → 0.0879 → 0.0836 |
+
+**Math suite (08:59–10:11Z, GPUs 0,1; mean@k / pass@k):**
+
+| student | teacher val | id_easy | id_medium | id_hard | MATH500 | GSM8K |
+|---|---|---|---|---|---|---|
+| (c) 12br → E4B, 2e-6 | 0.527 | 73.6 / 97.3 | 38.8 / 85.0 | 21.7 / 67.3 | 36.0 / 67.2 | 74.0 / 93.2 |
+| §9.0g 12bd → E4B, 2e-6 | 0.497 | 71.3 / 97.0 | 36.6 / 82.3 | 19.9 / 58.3 | 33.9 / 67.2 | 71.3 / 92.4 |
+| 12bo → E4B, 2e-6 (this) | 0.444 | 67.7 / 97.0 | 33.0 / 81.7 | 19.1 / 62.0 | 30.2 / 64.6 | 68.8 / 91.8 |
+| §4 control: untrained-12B RL step 120 → E4B (8 samples) | 0.521 | 68.0 / 96.3 | 32.9 / 82.7 | 19.3 / 65.0 | 33.5 / 67.6 | 69.0 / 93.3 |
+| E4B RL medium, best of 3 seeds (s44) | — | 66.5 / 95.3 | 34.1 / 77.0 | 19.8 / 60.7 | 29.4 / 60.6 | 67.7 / 91.6 |
+
+Reading. **Student mean@k tracks teacher validation accuracy monotonically on every set**: 12br (0.527) > 12bd (0.497) > 12bo (0.444)
+gives (c) > §9.0g > 12bo by 2–3 points per step on id_easy/id_medium/MATH500/GSM8K, with the 12bo student 5–6 points behind (c)
+everywhere except id_hard. So the E4B student does not saturate at the teacher's level within this range — a better 12B teacher is worth
+having, single seeds notwithstanding. Corollary: the final val KL is not a cross-teacher predictor — the 12bo run had the *lowest* KL (0.0836)
+and the weakest student, because the KL is measured against an easier, base-like teacher; it only ranks students of the same teacher
+(§9.0j (a) vs (c)). The 12bo student lands on the §4 control (same teacher lineage, 8-sample traces) on the ID bands and GSM8K but 3 points
+below it on MATH500, and it is roughly tied with the best E4B RL seed (ahead on id_easy/MATH500/GSM8K, behind on id_medium/id_hard mean@k) —
+i.e. distilling from a 0.444 teacher buys about what a lucky RL seed buys, while the 0.527 teacher buys a clear +5–7 over any seed.
 
 ### 9.1 Results
 
