@@ -1871,6 +1871,25 @@ supervisors tmux `rl-g4-e4b-s4{5,6,7}-medi`, state `.scale_train_supervisors/g4-
 Caveat for comparisons with seeds 42–44: the attention backend changes the actor's log-probabilities slightly (the engine docstring's reason
 for the default), which shows up as a small `rollout_corr/*` shift, not as a recipe change.
 
+### 9.0m RL on the E4B-base-distilled 26B-A4B student (launched 2026-09-19 03:23Z) — the 26B twin of §9.0, plus the first cuDNN-SDPA-off test on 26B
+
+**Why.** The §9.0 run took the 12B student distilled off-policy from the E4B base and RL'd it (best 0.497 @ 190, below the untrained-12B
+RL's 0.527). The 26B-A4B student of the same recipe (§9.1: `JWei05/Distill-gemma4-e4b-base-medium-to-26b-base/step_001000`, val forward KL
+0.076, reverse 0.092, pass@k on the teacher's curve) was never RL'd. Reference: RL on the untrained 26B-A4B medium reached 0.6725 @ 140.
+
+**Recipe.** `scale_train/launch_gemma4_26b_distilled_rl_medium.sh` (+ `start_gemma4_26b_distilled_rl_supervisor.sh`, commit a3ccca48), cloned from the
+12B distilled-init launcher: init = the student export @ `faacc50e` (the run-file's `GEMMA4_INIT_MODEL_REPO` path, which adds the base's
+`processor_config.json`), architecture `google/gemma-4-26B-A4B` @ `24548b62`, DAPO medium recipe unchanged (GRPO n=16, **64 prompts / mini 32**,
+lr 1e-6, 20 warmup, 4k/8k, patience 5 on `val-core/math/acc/mean@16` every 10 steps, 400-step cap), `ROUTER_REPLAY_MODE=R3`. Memory layout =
+the fast one-node 26B layout from `RESUME_GEMMA4_26B_A4B_LOCAL.md` (439 s/step on 2026-09-03 vs 2157 s for the sweep recipe): 8×H100 FSDP2 DP8,
+mbs 4 / 8192-token cap, `FSDP_CPU_OFFLOAD_POLICY=False` + phase-level `OFFLOAD=True`, vLLM sleep mode, `GEN_TP=1`, rollout util 0.10 + 3 GiB KV.
+**New: `VERL_GEMMA4_CUDNN_SDPA=0` (+ eval, + `TORCH_CUDNN_SDPA_ENABLED=0`)** — the §9.0l finding applied to 26B-A4B for the first time (its
+text config is `gemma4_text`, so the engine toggle applies); `CUDNN_SDPA=1` on the launcher reverts. Expect the update phase (110 s of the
+439 s step under cuDNN) to shrink; the first steps' `timing_s/*` are the measurement. One 8-GPU ScaleTrain job, borrowing on, priority high,
+supervisor tmux `rl-g4-26b-distill-rl-med` (relaunch on cancel/failure, rolling checkpoint every 5 steps restored on every relaunch);
+S3 `s3://scale-ml/genai/rl-distill/gemma4-26b-from-e4bbase-distill-rl{,-full-checkpoints}/…26b-a4b-medium-from-e4bbase-distill-es5`,
+W&B `rl-distill/DAPO` `g4ds26b-26b-a4b-medium-from-e4bbase-distill-es5-s42-v1`, S3-only artifacts. Job id and first timings below once the pod starts.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
