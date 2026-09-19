@@ -1946,6 +1946,8 @@ night were not preempted once in 15 h — whole-node borrowing is what gets recl
 complete permanent step-30 checkpoint). Options put to the user: borrowing off (≈ 14 h of compute once admitted; dedicated 8-GPU queue historically
 7–13 h), or stay on borrowing with `ROLLING_CHECKPOINT_FREQ=2` (durable progress inside the window, but the 10-min upload then costs as much as
 the compute → days). Not changed pending the decision.
+Re-admitted 21:52Z (5th pod); this window held: step-35 rolling checkpoint complete on S3 at 22:41Z, **step 40 val 0.324** (12B distilled-init
+at step 40: 0.306) — first durable progress past step 30 after ~14 h of borrowing churn.
 
 ### 9.1 Results
 
