@@ -1890,6 +1890,23 @@ supervisor tmux `rl-g4-26b-distill-rl-med` (relaunch on cancel/failure, rolling 
 S3 `s3://scale-ml/genai/rl-distill/gemma4-26b-from-e4bbase-distill-rl{,-full-checkpoints}/…26b-a4b-medium-from-e4bbase-distill-es5`,
 W&B `rl-distill/DAPO` `g4ds26b-26b-a4b-medium-from-e4bbase-distill-es5-s42-v1`, S3-only artifacts. Job id and first timings below once the pod starts.
 
+**First job `job_dan06cr256m007g29010` (pod 03:45Z, cuDNN SDPA OFF): step-0 val 0.081** (= the student's offline pass@1 8.6 %). Steps 1–5:
+
+| step | gen | old-logprob | update_actor | step |
+|---|---|---|---|---|
+| 1 | 61 s | 41 s | 143 s | 267 s |
+| 2 | 53 | 40 | 129 | 247 |
+| 3 | 54 | 40 | 129 | 248 |
+| 4 | 37 | 40 | 125 | 227 |
+| 5 | 29 | 40 | 125 | 217 |
+
+Against the cuDNN-on reference layout (same knobs, 2026-09-03, untrained-26B hard run at step 51: gen 267 / old-logprob 42 / update 110 /
+step 439 s) the forward-only pass is identical and the **update is ~15–30 % slower without cuDNN** (125–143 vs 110 s), the opposite of the
+E4B result — on the MoE 26B-A4B the fused cuDNN attention backward outweighs its per-shape plan cost. Generation is faster only because the
+student's responses are short at step 0. To get a same-run A/B, the job was cancelled after the step-5 rolling checkpoint completed on S3
+(04:25Z) and the supervisor restarted with `CUDNN_SDPA=1` (`SUP_TAG=-cudnn-on`): the relaunch restores step 5 and steps 6–10 give the
+cuDNN-on timings on adjacent batches.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
