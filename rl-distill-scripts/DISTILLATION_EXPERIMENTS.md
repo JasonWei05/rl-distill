@@ -1929,6 +1929,17 @@ wins on the 26B's shapes and its plan-compilation overhead is small relative to 
 launcher default is now `CUDNN_SDPA=1` for 26B; keep `VERL_GEMMA4_CUDNN_SDPA=0` for E4B. Per-step budget on one borrowing node: ~4 min
 (gen 55 / old-logprob 41 / update 118 s at the student's current ~300-token responses), i.e. ~13–14 h for 200 steps if not preempted.
 
+**Preemption loop (2026-09-19 08:00Z →).** Validation 0.081 (0) → 0.090 (10) → 0.119 (20) → **0.202 (30)** (12B distilled-init at step 30: 0.230),
+then no durable progress: the borrowed 8-GPU node was reclaimed at 08:04Z (during the step-35 rolling upload, 25/26 shards landed), re-admitted
+08:56Z → restored step 30 → reclaimed 09:44Z (again mid-upload of step 35: a 305 GB rolling checkpoint takes ~10 min), re-admitted 10:39Z
+(pod never left ContainerCreating), re-admitted 16:15Z and **preempted 2 min later** — Kueue events: `EvictedDueToPreempted … Preempted to
+accommodate a workload`, then `Pending: topology "h100-network" doesn't allow to fit any of 1 pod(s)`. Each borrowed window has been ≤ 50 min
+(startup + restore ≈ 15 min, 5 steps ≈ 20 min, upload ≈ 10 min), so the run re-does steps 31–35 every time. The 4-GPU E4B jobs launched the same
+night were not preempted once in 15 h — whole-node borrowing is what gets reclaimed. The supervisor keeps the job queued (resume from the
+complete permanent step-30 checkpoint). Options put to the user: borrowing off (≈ 14 h of compute once admitted; dedicated 8-GPU queue historically
+7–13 h), or stay on borrowing with `ROLLING_CHECKPOINT_FREQ=2` (durable progress inside the window, but the 10-min upload then costs as much as
+the compute → days). Not changed pending the decision.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
