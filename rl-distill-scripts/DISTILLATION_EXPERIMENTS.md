@@ -1907,6 +1907,13 @@ student's responses are short at step 0. To get a same-run A/B, the job was canc
 (04:25Z) and the supervisor restarted with `CUDNN_SDPA=1` (`SUP_TAG=-cudnn-on`): the relaunch restores step 5 and steps 6–10 give the
 cuDNN-on timings on adjacent batches.
 
+**A/B result (second job, cuDNN SDPA ON, pod 04:44Z, restored step 5):** step 6 = 126.6 s update (post-restart warm-up), steps 7–8 = **118 s**
+update / 41 s old-logprob / 237–239 s step, against 125–129 s / 40 s / 217–248 s for steps 2–6 with cuDNN off on adjacent batches. So on the
+MoE 26B-A4B **cuDNN SDPA is ~7 % faster on the update and neutral on the forward**, the reverse of E4B (§9.0l) — the fused attention backward
+wins on the 26B's shapes and its plan-compilation overhead is small relative to the expert MLPs. The run continues with cuDNN ON and the
+launcher default is now `CUDNN_SDPA=1` for 26B; keep `VERL_GEMMA4_CUDNN_SDPA=0` for E4B. Per-step budget on one borrowing node: ~4 min
+(gen 55 / old-logprob 41 / update 118 s at the student's current ~300-token responses), i.e. ~13–14 h for 200 steps if not preempted.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`

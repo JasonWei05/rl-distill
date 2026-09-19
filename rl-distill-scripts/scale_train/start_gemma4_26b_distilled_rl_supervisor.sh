@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 IMG="${ST_IMAGE:-692474966980.dkr.ecr.us-west-2.amazonaws.com/scale_train/shared/training/tmp:20260829-002920.cd13c11a-e0f3-4f65-a74b-0e0c5d72d58a}"
-RUN_TAG="${RUN_TAG:-from-e4bbase-distill-es5}"; CUDNN_SDPA="${CUDNN_SDPA:-0}"
+RUN_TAG="${RUN_TAG:-from-e4bbase-distill-es5}"; CUDNN_SDPA="${CUDNN_SDPA:-1}"
 S3_BASE="${S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-26b-from-e4bbase-distill-rl}"
 name="g4-26b-distill-rl-med"; sup=".scale_train_supervisors/${name}-$(date -u +%Y%m%d)${SUP_TAG:-}"; mkdir -p "${sup}/pod-logs"; rm -f "${sup}/STOP"
 tmux kill-session -t "rl-${name}" 2>/dev/null || true

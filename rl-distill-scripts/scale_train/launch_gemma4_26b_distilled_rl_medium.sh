@@ -6,7 +6,7 @@
 # Memory layout = the fast one-node 26B-A4B layout from RESUME_GEMMA4_26B_A4B_LOCAL.md (2026-09-03: 439 s/step vs 2157 s):
 # 8 GPUs FSDP2 DP8, mbs 4 / 8192-token padded cap, FSDP_CPU_OFFLOAD_POLICY=False + phase-level OFFLOAD=True, vLLM sleep mode,
 # GEN_TP=1, rollout util 0.10 + 3 GiB KV, R3 router replay. NEW (2026-09-19, §9.0l): VERL_GEMMA4_CUDNN_SDPA=0 — the cuDNN SDPA
-# backend the engine forces on for Gemma 4 train forwards cost 3x on E4B; first test on 26B-A4B (set CUDNN_SDPA=1 to revert).
+# backend the engine forces on for Gemma 4 train forwards cost ~25% on E4B; on 26B-A4B the A/B (§9.0m) found cuDNN ON faster -> default 1.
 #   bash launch_gemma4_26b_distilled_rl_medium.sh            # whole node (p5.48xlarge, 8 GPUs), borrowing on, priority high
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -15,7 +15,7 @@ INIT_REVISION="${INIT_REVISION:-faacc50ec67a5688beef8770ee489be0bfe8bc52}"   # c
 INIT_SUBFOLDER="${INIT_SUBFOLDER:-step_001000}"
 RUN_TAG="${RUN_TAG:-from-e4bbase-distill-es5}"     # -> run name DAPO-gemma4-26b-a4b-PT-DeepScaleR-gemma26b-medium-seed42-${RUN_TAG}
 S3_BASE="${S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-26b-from-e4bbase-distill-rl}"
-CUDNN_SDPA="${CUDNN_SDPA:-0}"
+CUDNN_SDPA="${CUDNN_SDPA:-1}"   # 2026-09-19 A/B on this run: cuDNN ON is ~7% faster on 26B-A4B (118 vs 125-129 s update); E4B is the opposite
 ENV_VARS="GEMMA4_MODEL=google/gemma-4-26B-A4B,GEMMA4_MODEL_REVISION=24548b62aa021d562695c04aaf7758a1ea47990b"
 ENV_VARS+=",GEMMA4_INIT_MODEL_REPO=${INIT_REPO},GEMMA4_INIT_MODEL_REVISION=${INIT_REVISION},GEMMA4_INIT_MODEL_SUBFOLDER=${INIT_SUBFOLDER}"
 ENV_VARS+=",DIFFICULTY_DATASET_SOURCE=gemma4_26b_bands,DIFFICULTY_DATASET=medium,DIFFICULTY_DATASET_REPO=JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k,DIFFICULTY_DATASET_REVISION=a0ba3c3dc07c7bc27e901670ceb1a0b0ceeaa8db"
