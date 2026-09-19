@@ -1814,6 +1814,63 @@ with other RL-logged best@N, never with the §7/§8/§9.1 offline pass@k; mean@1
 (mean@16 / best@16): 0 → 0.097 / 0.501, 50 → 0.356 / 0.802, **100 → 0.444 / 0.808**, 150 → 0.413 / 0.739, 200 → 0.429 / 0.745 —
 coverage decays with the accuracy plateau.
 
+### 9.0l E4B RL update-phase micro-batch sweep and the cuDNN SDPA finding (2026-09-18/19) — seeds 45–47 at 4× batch
+
+**Why.** Three more E4B medium RL seeds were requested with the prompt batch and PPO mini-batch raised 4× (64 → 256 prompts, 32 → 128), and
+the per-step cost had to come down first: on the seed-44 pod (4 GPUs, mbs 4 / 8192-token cap) a step took ~235 s, of which `update_actor`
+was 156–173 s (73 %), `old_log_prob` 34 s (15 %) and generation 17 s. So the question was how large the update micro-batch can go on E4B
+before the 262k-vocab logits OOM, and whether that is where the time goes at all.
+
+**Harness.** `gemma4_e4b_microbatch_sweep.py` + `local_jobs/e4b_microbatch_sweep.sh`: the real verl `TrainingWorker` (FSDP2) under
+torchrun on 4 local H100s with the pod's exact update-phase layout (fp32 sharded weights + Adam + grads resident, `PROD_LAYOUT=1`; the
+memory baseline after load is 7.52 GiB, the pod's "After FSDP" figure). One optimizer step = 128 sequences per GPU (the 64 × 16 / 4 GPU / 2
+mini-batch value), 12-shot prompt of 1577 tokens, response lengths log-normal with mean 351 / max 1300 (the medium-band RL runs), plus an
+"8k worst case" with every response at the cap. Both production passes are timed: old-logprob (forward, entropy on) and the update
+(fwd + bwd), the update three times (first exposure to the shapes, then with Adam states materialised). Peaks are the max over ranks.
+
+| layout (mbs × padded cap) | micro-batches | old-logprob, cuDNN SDPA on | old-logprob, off | update first pass, on | first pass, off | update steady, on | steady, off |
+|---|---|---|---|---|---|---|---|
+| **4 × 8192 (previous)** | 35 | 23.6 GiB / 65 s | 23.6 / **15 s** | 36.2 / 192 s | 36.2 / **64 s** | 50.1 / 55 s | 50.1 / 65 s |
+| **8 × 16384 (new)** | 17 | 24.7 / 37 s | 24.7 / **14 s** | 42.8 / 113 s | 42.8 / **58 s** | 56.8 / 46 s | 56.8 / 55 s |
+| 12 × 24576 | 12 | — | 27.2 / 14 s | cuDNN INTERNAL_ERROR | 49.5 / 55 s | — | OOM at 62 GiB |
+| 16 × 32768 | 9 | 31.1 / 28 s | 31.1 / 15 s | 56.1 / 83 s | 56.1 / 52 s | OOM at 67 GiB | OOM at 67 GiB |
+| 24 × 49152 | 6 | 39.1 / 24 s | 39.1 / 15 s | OOM at 58 GiB | OOM at 58 GiB | — | — |
+| 32 × 65536 | 5 | 47.1 / 23 s | not run | OOM (28 GiB logits alloc) | not run | — | — |
+| 4 × 8192, 8k worst case | 128 singletons | 23.9 / 98 s | 23.9 / 99 s | 37.6 / 382 s | 37.6 / 586 s | 51.6 / 392 s | 51.6 / 616 s |
+| 8 × 16384, 8k worst case | 128 singletons | 23.9 / 98 s | (identical: singletons) | 37.6 / 383 s | — | 51.6 / 386 s | — |
+
+Times are per 128-sequence optimizer step per GPU, including FSDP all-gathers; ~80 GiB cards, ~74 GiB usable.
+
+**Findings.**
+1. **The attention backend, not the micro-batch, was the bottleneck.** `verl/workers/engine/fsdp/transformer_impl.py::_set_gemma4_cudnn_sdpa`
+   forces PyTorch's cuDNN SDPA backend ON for every Gemma 4 train/eval forward unless `VERL_GEMMA4_CUDNN_SDPA=0` (default `1`, kept so
+   distillation targets match the traces). The `TORCH_CUDNN_SDPA_ENABLED=0` hook added on 2026-09-17 (§9.0b) therefore never reached
+   `update_actor`; the seed-43/44 runs trained with cuDNN SDPA throughout. cuDNN compiles an execution plan per attention shape, and an RL
+   batch of variable-length padded micro-batches presents dozens of new shapes every step: the forward-only pass takes 65 s with cuDNN vs
+   15 s without, and the first update pass 192 s vs 64 s; only when the identical batch is replayed (steady rows) does cuDNN's cached plan
+   win (55 vs 65 s) — a regime RL never sees. On long fixed-shape singletons cuDNN is genuinely faster (382 vs 586 s), so a run whose
+   responses approach the 8k cap should revisit this. It is also the crash: the 12 × 24576 layout dies with `CUDNN_STATUS_INTERNAL_ERROR`
+   near the memory limit under cuDNN and runs cleanly without it (the §9.0b `mha_graph.execute` failures were the same backend).
+2. **Micro-batch size barely matters once cuDNN is off:** 4 → 8 sequences saves ~10 % on the update (64 → 58 s) and nothing on the forward.
+   Memory is the constraint: the update needs ~14 GiB more once Adam is resident, so 8 × 16384 (56.8 GiB) is the largest safe layout and
+   12 × 24576 already OOMs. The padded-token cap protects the long tail: the 8k worst case peaks at 51.6 GiB regardless of mbs.
+3. The forward-only pass tolerates much larger micro-batches (24 × 49152 = 39 GiB), so the run-file now has separate
+   `INFER_MICRO_BATCH_SIZE_PER_GPU` / `INFER_MAX_PADDED_TOKENS_PER_MICROBATCH`; with cuDNN off there is no speed gain from using them, so the
+   seeds below keep one layout for both passes.
+4. Expected step time at the old batch: update ~170 s → ~60 s, old-logprob 34 → ~15 s, i.e. ~235 s → ~110 s per step (generation unchanged).
+
+**Launch (2026-09-19 00:23Z, user request): E4B medium seeds 45, 46, 47**, `start_gemma4_rl_seed_supervisors.sh` × 3 (borrowing on, priority
+high, 4 GPUs, `--relaunch-on-cancel --relaunch-on-failure`, rolling resumable checkpoint every 5 steps, restore-latest on every relaunch).
+Recipe = the seed-42/43/44 medium recipe except: `TRAIN_PROMPT_BSZ=256 TRAIN_PROMPT_MINI_BSZ=128` (4×; still 2 optimizer steps per RL
+step, 512 sequences per optimizer step per GPU), `GEN_PROMPT_BSZ=256`, update layout `MICRO_BATCH_SIZE_PER_GPU=8 MAX_PADDED_TOKENS_PER_MICROBATCH=16384`,
+`VERL_GEMMA4_CUDNN_SDPA=0 VERL_GEMMA4_EVAL_CUDNN_SDPA=0` (+ `TORCH_CUDNN_SDPA_ENABLED=0`), OFFLOAD + vLLM sleep, lr 1e-6 unchanged, patience 5
+on `val-core/math/acc/mean@16` every 10 steps, 400-step cap (3000 prompts / 256 = ~12 steps per epoch, so validation is ≈ every 0.85 epoch
+and the cap is ~34 epochs — early stopping is expected to end the runs). Names: jobs `g4-e4b-s4{5,6,7}-medi`, W&B `rl-distill/DAPO`
+`g4ds26b-e4b-medium-s4{5,6,7}-bs256-v1`, run suffix `bs256-es5`, S3 `s3://scale-ml/genai/rl-distill/gemma4-e4b-bs256-s<seed>-20260919{,-full-checkpoints}/e4b-medium`,
+supervisors tmux `rl-g4-e4b-s4{5,6,7}-medi`, state `.scale_train_supervisors/g4-e4b-s4<seed>-medi-20260919-bs256/`. Code: commit 2d42dc68.
+Caveat for comparisons with seeds 42–44: the attention backend changes the actor's log-probabilities slightly (the engine docstring's reason
+for the default), which shows up as a small `rollout_corr/*` shift, not as a recipe change.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
