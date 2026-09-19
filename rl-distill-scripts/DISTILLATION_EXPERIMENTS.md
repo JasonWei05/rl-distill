@@ -1882,9 +1882,16 @@ the sweep's prediction of ~110 s per 128 sequences per GPU held).** No preemptio
 | 30 (7.7k) | 0.256 | 0.260 | 0.265 | step 120: 0.28–0.33 |
 | 40 (10.2k) | 0.297 | 0.297 | 0.300 | step 160: 0.29–0.34 |
 | 50 (12.8k) | 0.318 | 0.326 | 0.316 | (the 64-prompt runs had early-stopped by 150–210: bests 0.300 / 0.316 / 0.340) |
+| 60 (15.4k) | 0.334 | 0.360 | 0.346 | — |
+| 70 (17.9k) | 0.350 | 0.368 | 0.348 | — |
+| 80 (20.5k) | 0.375 | 0.371 | 0.368 | — |
+| 90 (23.0k) | 0.361 (miss) | 0.394 | 0.382 | — |
+| 100 (25.6k) | 0.378 | **0.404** | 0.396 | — |
 
 Reading so far: per prompt consumed the 4× runs lag the 64-prompt runs early (fewer optimizer steps per prompt) but by step 50 they have
 reached the 64-prompt seeds' *best* values with zero misses and a much tighter seed spread (0.01 vs 0.04), and are still climbing.
+By step 100 (~20 h, 25.6k prompts ≈ 8.5 epochs) all three are at 0.38–0.40, i.e. **+4–6 points over the best 64-prompt seed (0.340)**, with a
+single miss so far (seed 45 at step 90). The 4× batch is not just noise reduction: it reaches a higher plateau than the smaller batch did.
 
 ### 9.0m RL on the E4B-base-distilled 26B-A4B student (launched 2026-09-19 03:23Z) — the 26B twin of §9.0, plus the first cuDNN-SDPA-off test on 26B
 
