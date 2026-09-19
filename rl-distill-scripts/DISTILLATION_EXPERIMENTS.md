@@ -1871,6 +1871,21 @@ supervisors tmux `rl-g4-e4b-s4{5,6,7}-medi`, state `.scale_train_supervisors/g4-
 Caveat for comparisons with seeds 42–44: the attention backend changes the actor's log-probabilities slightly (the engine docstring's reason
 for the default), which shows up as a small `rollout_corr/*` shift, not as a recipe change.
 
+**Progress (validation mean@16; pods started 00:53Z, ~12 min/step = gen 80–90 s, old-logprob ~104 s, update 470–530 s per 256×16 step;
+the sweep's prediction of ~110 s per 128 sequences per GPU held).** No preemptions in the first 10 h.
+
+| step (prompts seen) | seed 45 | seed 46 | seed 47 | 64-prompt seeds 42/43/44 at the same prompt count |
+|---|---|---|---|---|
+| 0 | 0.091 | 0.083 | 0.086 | 0.08–0.09 |
+| 10 (2.6k) | 0.098 | 0.098 | 0.099 | step 40: 0.26–0.43 (12B) / 0.26–0.29 |
+| 20 (5.1k) | 0.172 | 0.194 | 0.203 | step 80: 0.30–0.31 |
+| 30 (7.7k) | 0.256 | 0.260 | 0.265 | step 120: 0.28–0.33 |
+| 40 (10.2k) | 0.297 | 0.297 | 0.300 | step 160: 0.29–0.34 |
+| 50 (12.8k) | 0.318 | 0.326 | 0.316 | (the 64-prompt runs had early-stopped by 150–210: bests 0.300 / 0.316 / 0.340) |
+
+Reading so far: per prompt consumed the 4× runs lag the 64-prompt runs early (fewer optimizer steps per prompt) but by step 50 they have
+reached the 64-prompt seeds' *best* values with zero misses and a much tighter seed spread (0.01 vs 0.04), and are still climbing.
+
 ### 9.0m RL on the E4B-base-distilled 26B-A4B student (launched 2026-09-19 03:23Z) — the 26B twin of §9.0, plus the first cuDNN-SDPA-off test on 26B
 
 **Why.** The §9.0 run took the 12B student distilled off-policy from the E4B base and RL'd it (best 0.497 @ 190, below the untrained-12B
