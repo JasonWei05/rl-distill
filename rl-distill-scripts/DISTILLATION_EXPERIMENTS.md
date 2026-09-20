@@ -343,7 +343,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-20 13:56Z — math complete for 41/42 models, OOD complete for 29/42. Partial rows are shown as they finish._
+_Updated 2026-09-20 13:58Z — math complete for 42/42 models, OOD complete for 29/42. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -361,7 +361,7 @@ _Updated 2026-09-20 13:56Z — math complete for 41/42 models, OOD complete for 
 | `rl_e4b_medium` | rl | medium | 62.2 / 94.3 | **29.1 / 71.3** | 17.2 / 58.3 | 26.5 / 61.6 | 65.4 / 88.9 |
 | `rl_e4b_medium_bs256_s45` | rl | medium | 70.4 / 89.3 | **36.9 / 68.3** | 22.5 / 53.3 | 30.8 / 55.0 | 72.8 / 86.8 |
 | `rl_e4b_medium_bs256_s46` | rl | medium | 72.4 / 92.0 | **39.9 / 71.0** | 20.7 / 52.3 | 31.2 / 56.4 | 72.7 / 88.7 |
-| `rl_e4b_medium_bs256_s47` | rl | medium | — | — | — | — | — |
+| `rl_e4b_medium_bs256_s47` | rl | medium | 73.9 / 94.3 | **41.1 / 80.0** | 22.9 / 56.7 | 34.6 / 62.8 | 73.0 / 90.7 |
 | `rl_e4b_medium_s43` | rl | medium | 66.8 / 96.7 | **31.1 / 78.3** | 17.7 / 60.0 | 28.1 / 64.2 | 64.7 / 90.4 |
 | `rl_e4b_medium_s44` | rl | medium | 66.5 / 95.3 | **34.1 / 77.0** | 19.8 / 60.7 | 29.4 / 60.6 | 67.7 / 91.6 |
 | `distill_12b_easy_to_e2b` | distilled | easy | **41.5 / 84.3** | 13.4 / 61.3 | 7.8 / 44.3 | 15.8 / 52.6 | 31.5 / 67.2 |
@@ -1911,6 +1911,9 @@ Seed 46 early-stopped at step 150 too (misses at 110–150), **best 0.404 @ 100*
 |---|---|---|---|---|---|
 | seed 45, 4× batch, best step 100 (val 0.378) | 70.4 / 89.3 | 36.9 / 68.3 | 22.5 / 53.3 | 30.8 / 55.0 | 72.8 / 86.8 |
 | seed 46, 4× batch, best step 100 (val 0.404) | 72.4 / 92.0 | 39.9 / 71.0 | 20.7 / 52.3 | 31.2 / 56.4 | 72.7 / 88.7 |
+| seed 47, 4× batch, best step 130 (val 0.404) | 73.9 / 94.3 | **41.1 / 80.0** | 22.9 / 56.7 | 34.6 / 62.8 | 73.0 / 90.7 |
+| **4× seeds, mean of 3** | **72.2 / 91.9** | **39.3 / 73.1** | **22.0 / 54.1** | **32.2 / 58.1** | **72.8 / 88.7** |
+| 4× seeds, sd | 1.8 / 2.5 | 2.2 / 6.1 | 1.2 / 2.3 | 2.1 / 4.2 | 0.2 / 2.0 |
 | 64-prompt seeds 42/43/44, mean of 3 | 65.2 / 95.4 | 31.4 / 75.5 | 18.2 / 59.7 | 28.0 / 62.1 | 65.9 / 90.3 |
 | best 64-prompt seed on each column | 66.8 / 96.7 | 34.1 / 78.3 | 19.8 / 60.7 | 29.4 / 64.2 | 67.7 / 91.6 |
 
@@ -1919,7 +1922,14 @@ everywhere)** but **lowers pass@k on every set (−4 to −7)**: id_medium 68.3 
 batch sharpens the policy (higher accuracy per sample, lower sample diversity), the same mode-seeking signature the on-policy distillation
 showed (§9.0f). For a *teacher* whose value is single-sample accuracy this is a gain; for coverage-type uses (pass@k, trace diversity for
 distillation) the 64-prompt runs are better. Seed 46 (13:56Z) reproduces it: mean@k +5 to +8 over the 3-seed 64-prompt mean on every set
-(id_medium 39.9 — the highest E4B RL value in the study), pass@k −2 to −7 on every set. Seed 47 next.
+(id_medium 39.9 — the highest E4B RL value in the study), pass@k −2 to −7 on every set. Seed 47 (13:59Z, best at step 130 rather than 100)
+is the strongest of all E4B RL runs on mean@k (41.1 id_medium, 34.6 MATH500) and *keeps* pass@k: 80.0 / 62.8 / 90.7 on id_medium / MATH500 /
+GSM8K vs the 64-prompt mean 75.5 / 62.1 / 90.3, only id_easy (94.3 vs 95.4) and id_hard (56.7 vs 59.7) below. **3-seed 4× means: mean@k
+72.2 / 39.3 / 22.0 / 32.2 / 72.8 vs 65.2 / 31.4 / 18.2 / 28.0 / 65.9 for the 64-prompt seeds (+7.0 / +7.9 / +3.9 / +4.2 / +6.9);
+pass@k 91.9 / 73.1 / 54.1 / 58.1 / 88.7 vs 95.4 / 75.5 / 59.7 / 62.1 / 90.3 (−3.5 / −2.4 / −5.6 / −4.0 / −1.6).** So the 4× batch
+is a clear mean@k win at every difficulty and a modest pass@k loss whose size depends on the seed (the later-peaking seed 47 loses least).
+Against the distilled E4B students (§9.0j, all pass@16 ≥ 82 on id_medium): the 4× RL seeds still trail on coverage but seed 47's mean@k
+(41.1) exceeds every distilled student (best 38.8, from the untrained-12B RL teacher at 2e-6).
 
 Seed 47 early-stopped at step 180 (misses at 140–180: 0.393 / 0.403 / 0.393 / 0.392 / —), **best 0.404 @ 130**. **All three 4× seeds done:
 bests 0.378 / 0.404 / 0.404 (mean 0.395, sd 0.015) vs the 64-prompt seeds' 0.300 / 0.316 / 0.340 (mean 0.319) — +7.6 points on validation
