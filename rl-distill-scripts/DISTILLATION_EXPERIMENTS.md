@@ -1897,6 +1897,7 @@ best 0.378 @ 100**; seed 46 is at 4 misses (0.392 / 0.393 / 0.385 / 0.387 after 
 missed at 140 (0.393). Steps 110–150 ≈ 28k–38k prompts ≈ 9–13 epochs of the 3000-prompt band.
 Seed 45 COMPLETED 05:42Z (best_hf + receipt on S3, `s3://…/gemma4-e4b-bs256-s45-20260919/gemma4-e4b-medium/best_hf/`); math suite queued
 locally as registry tag `rl_e4b_medium_bs256_s45` (tmux `eval-bs256`).
+Seed 46 early-stopped at step 150 too (misses at 110–150), **best 0.404 @ 100**; registry tag `rl_e4b_medium_bs256_s46`, same eval queue.
 
 ### 9.0m RL on the E4B-base-distilled 26B-A4B student (launched 2026-09-19 03:23Z) — the 26B twin of §9.0, plus the first cuDNN-SDPA-off test on 26B
 

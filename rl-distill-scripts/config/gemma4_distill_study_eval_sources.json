@@ -851,6 +851,28 @@
       }
     },
     {
+      "tag": "rl_e4b_medium_bs256_s46",
+      "display_name": "E4B RL medium 4x batch (256x16, mini 128) seed 46 best (step 100, val 0.404)",
+      "category": "rl",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-e4b-bs256-s46-20260919/gemma4-e4b-medium/best_hf/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-e4b-bs256-s46-20260919/gemma4-e4b-medium/best_hf/_REMOTE_COMPLETE.json",
+        "expected_global_step": 100,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
       "tag": "rl_e4b_medium_s44",
       "display_name": "E4B RL medium seed 44 best (step 160, val 0.3404)",
       "category": "rl",
