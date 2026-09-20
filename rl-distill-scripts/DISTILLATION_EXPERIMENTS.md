@@ -2002,6 +2002,10 @@ Admissions 8–11 (07:11Z, 07:47Z, 08:52Z, 10:47Z): the 9th restored the step-75
 0.524 was reproducible), the 11th restored step 80 and reached **step 90 val 0.552** (permanent checkpoint on S3, 12:4xZ) — past the
 untrained-12B RL best (0.527), 12 points short of the untrained-26B reference (0.6725 @ 140), 0 misses. Trajectory so far:
 0.081 → 0.090 → 0.119 → 0.202 → 0.324 → 0.413 → 0.469 → 0.493 → 0.520 → 0.552 (steps 0–90).
+The 11th window held (10:47Z → still running at 17:xxZ, 6+ h): 0.569 (100) → 0.579 (110) → **0.594 (120)** → 0.591 (130, miss) → 0.597 (140),
+all permanent checkpoints on S3. At step 140 the untrained-26B medium RL was at its best 0.6725, so the distilled-init 26B trails it by
+~7.6 points — the same ordering as the 12B pair (distilled-init 0.497 vs untrained 0.527), with a similar gap. The curve is flattening
+(+0.3 points over steps 120–140) but has not triggered early stopping (1 miss max so far).
 
 ### 9.1 Results
 
