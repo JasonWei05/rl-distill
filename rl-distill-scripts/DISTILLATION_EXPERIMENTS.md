@@ -1895,6 +1895,8 @@ single miss so far (seed 45 at step 90). The 4× batch is not just noise reducti
 After step 100 the seeds plateau: seed 45 missed at 110/120/130/140/150 (0.367 / 0.349 / 0.357 / 0.355 / —) and **early-stopped at step 150,
 best 0.378 @ 100**; seed 46 is at 4 misses (0.392 / 0.393 / 0.385 / 0.387 after its 0.404 @ 100); seed 47 set a new best 0.404 @ 130 then
 missed at 140 (0.393). Steps 110–150 ≈ 28k–38k prompts ≈ 9–13 epochs of the 3000-prompt band.
+Seed 45 COMPLETED 05:42Z (best_hf + receipt on S3, `s3://…/gemma4-e4b-bs256-s45-20260919/gemma4-e4b-medium/best_hf/`); math suite queued
+locally as registry tag `rl_e4b_medium_bs256_s45` (tmux `eval-bs256`).
 
 ### 9.0m RL on the E4B-base-distilled 26B-A4B student (launched 2026-09-19 03:23Z) — the 26B twin of §9.0, plus the first cuDNN-SDPA-off test on 26B
 
