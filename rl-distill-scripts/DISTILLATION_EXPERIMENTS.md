@@ -1917,6 +1917,10 @@ batch sharpens the policy (higher accuracy per sample, lower sample diversity), 
 showed (§9.0f). For a *teacher* whose value is single-sample accuracy this is a gain; for coverage-type uses (pass@k, trace diversity for
 distillation) the 64-prompt runs are better. Seed 46 next.
 
+Seed 47 early-stopped at step 180 (misses at 140–180: 0.393 / 0.403 / 0.393 / 0.392 / —), **best 0.404 @ 130**. **All three 4× seeds done:
+bests 0.378 / 0.404 / 0.404 (mean 0.395, sd 0.015) vs the 64-prompt seeds' 0.300 / 0.316 / 0.340 (mean 0.319) — +7.6 points on validation
+mean@16, ~35–45 h wall clock each on 4 borrowed GPUs (no preemptions).** Registry tag `rl_e4b_medium_bs256_s47`, queued for the math suite.
+
 ### 9.0m RL on the E4B-base-distilled 26B-A4B student (launched 2026-09-19 03:23Z) — the 26B twin of §9.0, plus the first cuDNN-SDPA-off test on 26B
 
 **Why.** The §9.0 run took the 12B student distilled off-policy from the E4B base and RL'd it (best 0.497 @ 190, below the untrained-12B
