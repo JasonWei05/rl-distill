@@ -2038,6 +2038,10 @@ on. **Global step restarts at 0 — add 140 to compare with the original curve.*
 one 8-GPU job, borrowing on, priority high (shares the borrowable whole-node pool with §9.0m); supervisor tmux `rl-g4-26b-med-ws140`.
 Caveat: a fresh optimizer on RL'd weights is not the same trajectory as the crashed run — the first ~20 steps may dip before the new Adam
 moments settle; judge the continuation from step ~20 (= original 160) on.
+Queue: the borrowing job (`job_dao2te82ummg08flsmr0`, 19:08Z) sat QUEUED for 4.5 h (Kueue: no whole H100 node to borrow while §9.0m holds
+one). 23:5xZ (user): a **second copy with borrowing OFF** was launched (`ALLOW_BORROWING=false`, job name `g4-26b-med-ws140-nb`, supervisor
+`rl-g4-26b-med-ws140-nb`), same prefixes/W&B id; an arbiter watches both and, when either copy first reaches a Running pod, STOPs the other
+supervisor and cancels its job so only one ever writes the prefix.
 
 ### 9.1 Results
 
