@@ -1948,6 +1948,10 @@ complete permanent step-30 checkpoint). Options put to the user: borrowing off (
 the compute → days). Not changed pending the decision.
 Re-admitted 21:52Z (5th pod); this window held: step-35 rolling checkpoint complete on S3 at 22:41Z, **step 40 val 0.324** (12B distilled-init
 at step 40: 0.306) — first durable progress past step 30 after ~14 h of borrowing churn.
+The 5th window lasted 4.5 h (21:52Z → 02:24Z, ~4 min/step): **val 0.324 (40) → 0.413 (50) → 0.469 (60) → 0.493 (70)**, permanent checkpoints
+through step 70 on S3. Against the 12B distilled-init run (0.306 / 0.340 / 0.381 / 0.397 at the same steps; final best 0.497 @ 190) the
+26B-A4B student is +2 / +7 / +9 / +10 points and has matched that run's final best in 70 steps; the untrained-26B medium RL reference is
+0.6725 @ 140. Preempted again 02:24Z; supervisor re-queued the job.
 
 ### 9.1 Results
 
