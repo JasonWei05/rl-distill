@@ -343,7 +343,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-20 08:53Z — math complete for 40/41 models, OOD complete for 29/41. Partial rows are shown as they finish._
+_Updated 2026-09-20 13:56Z — math complete for 41/42 models, OOD complete for 29/42. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -360,7 +360,8 @@ _Updated 2026-09-20 08:53Z — math complete for 40/41 models, OOD complete for 
 | `rl_e4b_hard` | rl | hard | 39.9 / 79.3 | 20.0 / 56.7 | **15.4 / 47.7** | 16.7 / 48.0 | 43.0 / 77.4 |
 | `rl_e4b_medium` | rl | medium | 62.2 / 94.3 | **29.1 / 71.3** | 17.2 / 58.3 | 26.5 / 61.6 | 65.4 / 88.9 |
 | `rl_e4b_medium_bs256_s45` | rl | medium | 70.4 / 89.3 | **36.9 / 68.3** | 22.5 / 53.3 | 30.8 / 55.0 | 72.8 / 86.8 |
-| `rl_e4b_medium_bs256_s46` | rl | medium | — | — | — | — | — |
+| `rl_e4b_medium_bs256_s46` | rl | medium | 72.4 / 92.0 | **39.9 / 71.0** | 20.7 / 52.3 | 31.2 / 56.4 | 72.7 / 88.7 |
+| `rl_e4b_medium_bs256_s47` | rl | medium | — | — | — | — | — |
 | `rl_e4b_medium_s43` | rl | medium | 66.8 / 96.7 | **31.1 / 78.3** | 17.7 / 60.0 | 28.1 / 64.2 | 64.7 / 90.4 |
 | `rl_e4b_medium_s44` | rl | medium | 66.5 / 95.3 | **34.1 / 77.0** | 19.8 / 60.7 | 29.4 / 60.6 | 67.7 / 91.6 |
 | `distill_12b_easy_to_e2b` | distilled | easy | **41.5 / 84.3** | 13.4 / 61.3 | 7.8 / 44.3 | 15.8 / 52.6 | 31.5 / 67.2 |
@@ -407,6 +408,7 @@ _Updated 2026-09-20 08:53Z — math complete for 40/41 models, OOD complete for 
 | `rl_e4b_medium` | 43.9 | 26.3 | 61.3 |
 | `rl_e4b_medium_bs256_s45` | — | — | — |
 | `rl_e4b_medium_bs256_s46` | — | — | — |
+| `rl_e4b_medium_bs256_s47` | — | — | — |
 | `rl_e4b_medium_s43` | — | — | — |
 | `rl_e4b_medium_s44` | — | — | — |
 | `distill_12b_easy_to_e2b` | 27.1 | 20.7 | 48.4 |
@@ -1908,6 +1910,7 @@ Seed 46 early-stopped at step 150 too (misses at 110–150), **best 0.404 @ 100*
 | model | id_easy | id_medium | id_hard | MATH500 | GSM8K |
 |---|---|---|---|---|---|
 | seed 45, 4× batch, best step 100 (val 0.378) | 70.4 / 89.3 | 36.9 / 68.3 | 22.5 / 53.3 | 30.8 / 55.0 | 72.8 / 86.8 |
+| seed 46, 4× batch, best step 100 (val 0.404) | 72.4 / 92.0 | 39.9 / 71.0 | 20.7 / 52.3 | 31.2 / 56.4 | 72.7 / 88.7 |
 | 64-prompt seeds 42/43/44, mean of 3 | 65.2 / 95.4 | 31.4 / 75.5 | 18.2 / 59.7 | 28.0 / 62.1 | 65.9 / 90.3 |
 | best 64-prompt seed on each column | 66.8 / 96.7 | 34.1 / 78.3 | 19.8 / 60.7 | 29.4 / 64.2 | 67.7 / 91.6 |
 
@@ -1915,7 +1918,8 @@ Reading (one seed so far): the 4× batch raises **mean@k on every set (+3 to +7 
 everywhere)** but **lowers pass@k on every set (−4 to −7)**: id_medium 68.3 vs 75.5, id_hard 53.3 vs 59.7, MATH500 55.0 vs 62.1. The larger
 batch sharpens the policy (higher accuracy per sample, lower sample diversity), the same mode-seeking signature the on-policy distillation
 showed (§9.0f). For a *teacher* whose value is single-sample accuracy this is a gain; for coverage-type uses (pass@k, trace diversity for
-distillation) the 64-prompt runs are better. Seed 46 next.
+distillation) the 64-prompt runs are better. Seed 46 (13:56Z) reproduces it: mean@k +5 to +8 over the 3-seed 64-prompt mean on every set
+(id_medium 39.9 — the highest E4B RL value in the study), pass@k −2 to −7 on every set. Seed 47 next.
 
 Seed 47 early-stopped at step 180 (misses at 140–180: 0.393 / 0.403 / 0.393 / 0.392 / —), **best 0.404 @ 130**. **All three 4× seeds done:
 bests 0.378 / 0.404 / 0.404 (mean 0.395, sd 0.015) vs the 64-prompt seeds' 0.300 / 0.316 / 0.340 (mean 0.319) — +7.6 points on validation
