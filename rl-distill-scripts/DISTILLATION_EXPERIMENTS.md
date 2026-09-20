@@ -1892,6 +1892,9 @@ Reading so far: per prompt consumed the 4× runs lag the 64-prompt runs early (f
 reached the 64-prompt seeds' *best* values with zero misses and a much tighter seed spread (0.01 vs 0.04), and are still climbing.
 By step 100 (~20 h, 25.6k prompts ≈ 8.5 epochs) all three are at 0.38–0.40, i.e. **+4–6 points over the best 64-prompt seed (0.340)**, with a
 single miss so far (seed 45 at step 90). The 4× batch is not just noise reduction: it reaches a higher plateau than the smaller batch did.
+After step 100 the seeds plateau: seed 45 missed at 110/120/130/140/150 (0.367 / 0.349 / 0.357 / 0.355 / —) and **early-stopped at step 150,
+best 0.378 @ 100**; seed 46 is at 4 misses (0.392 / 0.393 / 0.385 / 0.387 after its 0.404 @ 100); seed 47 set a new best 0.404 @ 130 then
+missed at 140 (0.393). Steps 110–150 ≈ 28k–38k prompts ≈ 9–13 epochs of the 3000-prompt band.
 
 ### 9.0m RL on the E4B-base-distilled 26B-A4B student (launched 2026-09-19 03:23Z) — the 26B twin of §9.0, plus the first cuDNN-SDPA-off test on 26B
 
@@ -1952,6 +1955,10 @@ The 5th window lasted 4.5 h (21:52Z → 02:24Z, ~4 min/step): **val 0.324 (40) �
 through step 70 on S3. Against the 12B distilled-init run (0.306 / 0.340 / 0.381 / 0.397 at the same steps; final best 0.497 @ 190) the
 26B-A4B student is +2 / +7 / +9 / +10 points and has matched that run's final best in 70 steps; the untrained-26B medium RL reference is
 0.6725 @ 140. Preempted again 02:24Z; supervisor re-queued the job.
+6th admission 03:48Z was killed 4 min later mid-restore ("Workload no longer fits after processing another workload"); 7th admission 04:22Z
+restored step 70 and reached **step 80 val 0.524** — above the 12B distilled-init final (0.497) and level with the untrained-12B RL best
+(0.527) — before being preempted again at 05:39Z (window 77 min). The step-80 permanent upload was cut at 13/26 shards, so the resume point
+is step 70 again: with ~10-min uploads of a 305 GB checkpoint, each short borrowing window loses the last 5–10 steps.
 
 ### 9.1 Results
 
