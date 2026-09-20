@@ -21,7 +21,7 @@ if [[ ! -s $SHARED_DATA_ROOT/math_eval_manifest.json ]]; then
   "$PY" rl-distill-scripts/data/prepare_gemma4_rl_distill_eval_data.py --output-dir "$SHARED_DATA_ROOT" --overwrite
 fi
 pick_free_gpus() { local want="$1" idx uuid used free=() busy; busy="$(nvidia-smi --query-compute-apps=gpu_uuid --format=csv,noheader 2>/dev/null | sort -u || true)"
-  while IFS=', ' read -r idx uuid used; do [ "${used}" -lt 2048 ] && ! grep -qx "${uuid}" <<<"${busy}" && free+=("${idx}"); done < <(nvidia-smi --query-gpu=index,uuid,memory.used --format=csv,noheader,nounits)
+  while IFS=', ' read -r idx uuid used; do [ "${used}" -lt 2048 ] && ! grep -qx "${uuid}" <<<"${busy}" && ! grep -qxE "${AVOID_GPUS:-__none__}" <<<"${idx}" && free+=("${idx}"); done < <(nvidia-smi --query-gpu=index,uuid,memory.used --format=csv,noheader,nounits)   # AVOID_GPUS='0|1' excludes indices (parallel drivers)
   local IFS=,; echo "${free[*]:0:${want}}"; }
 completion_uri() { "$PY" - "$1" <<'PY'
 import json, sys
