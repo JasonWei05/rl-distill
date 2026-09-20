@@ -2007,6 +2007,38 @@ all permanent checkpoints on S3. At step 140 the untrained-26B medium RL was at 
 ~7.6 points — the same ordering as the 12B pair (distilled-init 0.497 vs untrained 0.527), with a similar gap. The curve is flattening
 (+0.3 points over steps 120–140) but has not triggered early stopping (1 miss max so far).
 
+### 9.0n Resume of the untrained-26B-A4B medium RL (launched 2026-09-20, user request: "it never plateaued")
+
+The sweep's untrained-26B medium run (W&B `g4ds26b-26b-a4b-medium-s42-v1`) reached 0.656 @ 90 on ScaleTrain, was moved off-cluster at step 90
+(2026-09-03), climbed to **0.6725 @ 140** there and crashed at step 146 with no miss streak (patience 3 at the time; vals 100–140:
+0.650 / 0.654 / 0.670 / 0.667 / 0.6725). The off-cluster continuation pushed only weight-only HF exports (`…-26b-bands-es5/step_000120..140`),
+so the newest **full** checkpoint reachable is the S3 permanent **step 90** (`gemma4-difficulty-s42-20260819-full-checkpoints/26b-a4b-medium/`,
+8 model + 8 optim + 8 extra shards, `data.pt`, early-stopping state best 0.656 @ 90 / patience 2 / 0 misses). This resume therefore restores
+step 90 and re-does 91+ (~56 steps ≈ 4 h of compute to get back to the crash point). Launcher `scale_train/launch_gemma4_26b_medium_resume.sh`
++ `start_gemma4_26b_medium_resume_supervisor.sh`: identical recipe (GRPO n=16, 64 / 32, lr 1e-6, seed 42, R3, 400 cap, run suffix
+`26b-bands-es5`), **patience 5 migrated from the saved 2**, fast one-node layout + cuDNN SDPA on, rolling checkpoint every 5 into the same S3
+prefix, new W&B id `g4ds26b-26b-a4b-medium-s42-resume90-v1` (re-logging into the original id would drop steps ≤ 146). One 8-GPU job,
+borrowing on, priority high — note it competes with §9.0m's job for the same borrowable whole nodes. Supervisor tmux `rl-g4-26b-med-resume`.
+If the off-cluster box still holds a full step-140 checkpoint (~305 GB), uploading it to the prefix above (with a marker) would skip the redo.
+
+### 9.0n Warm-start continuation of the untrained-26B-A4B medium RL from its step-140 export (launched 2026-09-20, user request)
+
+The sweep's untrained-26B medium run (W&B `g4ds26b-26b-a4b-medium-s42-v1`) reached 0.656 @ 90 on ScaleTrain, was moved off-cluster at step 90,
+climbed to **0.6725 @ 140** (vals 100–140: 0.650 / 0.654 / 0.670 / 0.667 / 0.6725, no miss streak) and crashed at step 146. The off-cluster
+continuation kept only weight-only HF exports (steps 120/130/140 in `…-26b-bands-es5`); the newest full checkpoint (Adam + dataloader cursor) is
+the S3 permanent step 90. Rather than redo 91–140 (~4 h), the user chose to **warm-start from the step-140 weights**:
+`scale_train/launch_gemma4_26b_medium_ws140.sh` + `start_gemma4_26b_medium_ws140_supervisor.sh` — init `GEMMA4_INIT_MODEL_REPO=…-26b-bands-es5
+@ 4da4c943 / step_000140`, **fresh Adam with a 10-step warm-up** (`ACTOR_LR_WARMUP_STEPS=10`, vs 20 from scratch) in place of the lost moments,
+**`DATALOADER_SKIP_BATCHES=140`** so the seeded `StatefulDataLoader` is fast-forwarded to where step 140 left it (filter_groups off → 1 step =
+1 batch of 64 prompts; the step-90 `data.pt` shows 44 batches into epoch 2 = 46 batches/epoch with drop-last, so 140 batches = 3 epochs + 2),
+`TOTAL_TRAINING_STEPS=260` (the remaining budget of the 400 cap), patience 5 with fresh history (initial validation of the step-140 weights
+should reproduce ≈ 0.67). Everything else is the original recipe (GRPO n=16, 64 / 32, lr 1e-6, seed 42, R3), fast one-node layout, cuDNN SDPA
+on. **Global step restarts at 0 — add 140 to compare with the original curve.** New prefixes so restore-latest cannot pick up the old step 90:
+`gemma4-difficulty-s42-20260819{-full-checkpoints/26b-a4b-medium-ws140, /gemma4-26b-a4b-medium-ws140}`; W&B `g4ds26b-26b-a4b-medium-s42-ws140-v1`;
+one 8-GPU job, borrowing on, priority high (shares the borrowable whole-node pool with §9.0m); supervisor tmux `rl-g4-26b-med-ws140`.
+Caveat: a fresh optimizer on RL'd weights is not the same trajectory as the crashed run — the first ~20 steps may dip before the new Adam
+moments settle; judge the continuation from step ~20 (= original 160) on.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
