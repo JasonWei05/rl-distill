@@ -1984,6 +1984,10 @@ through step 70 on S3. Against the 12B distilled-init run (0.306 / 0.340 / 0.381
 restored step 70 and reached **step 80 val 0.524** — above the 12B distilled-init final (0.497) and level with the untrained-12B RL best
 (0.527) — before being preempted again at 05:39Z (window 77 min). The step-80 permanent upload was cut at 13/26 shards, so the resume point
 is step 70 again: with ~10-min uploads of a 305 GB checkpoint, each short borrowing window loses the last 5–10 steps.
+Admissions 8–11 (07:11Z, 07:47Z, 08:52Z, 10:47Z): the 9th restored the step-75 rolling checkpoint and re-banked step 80 (val 0.520, so the
+0.524 was reproducible), the 11th restored step 80 and reached **step 90 val 0.552** (permanent checkpoint on S3, 12:4xZ) — past the
+untrained-12B RL best (0.527), 12 points short of the untrained-26B reference (0.6725 @ 140), 0 misses. Trajectory so far:
+0.081 → 0.090 → 0.119 → 0.202 → 0.324 → 0.413 → 0.469 → 0.493 → 0.520 → 0.552 (steps 0–90).
 
 ### 9.1 Results
 
