@@ -2015,6 +2015,9 @@ fragmentation; if it recurs, add `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:Tr
 `ROLLOUT_GPU_MEMORY_UTILIZATION` below 0.10.
 01:28Z (user): rather than wait out the backoff, the supervisor was restarted (`SUP_TAG=-r2`, state `…/g4-26b-distill-rl-med-20260921-r2/`) so the
 borrowing job was resubmitted immediately; it restores step 215 on admission.
+01:35Z (user): moved to **borrowing OFF** — the resubmitted borrowing job (`job_dao8gk02ummg07h9jn20`) was cancelled before admission and the
+run relaunched as `g4-26b-distill-rl-med-nb` (dedicated capacity, supervisor `rl-g4-26b-distill-rl-med-nb`, state `…-nb-20260921/`), same
+prefixes/W&B run; both 26B runs are now on dedicated nodes.
 
 ### 9.0n Resume of the untrained-26B-A4B medium RL (launched 2026-09-20, user request: "it never plateaued")
 
