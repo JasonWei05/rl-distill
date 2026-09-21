@@ -2103,6 +2103,9 @@ the §7 math suite with the datasets data-parallel across the 2 GPUs, same knobs
 `gemma4-distill-study-evals-v1/<tag>/` syncs the results locally and rebuilds §8. The local step-1000 drivers were retired. Progress at
 launch: 26bd at step ~760 (val KL 0.129 → 0.119 → 0.116 → 0.116 → 0.114 → 0.111 → 0.110 at 100…700), 26bw at step ~420
 (0.121 → 0.115 → 0.109 → 0.105 at 100…400; 11.7 s/step on 8 GPUs vs 17.4 on 4).
+18:33Z (user, "need these ASAP"): a **duplicate controller on borrowing** (`ALLOW_BORROWING=true`, jobs suffixed `-brw`, tmux
+`eval-ckpt-controller-brw`, own state file) submits the same six evals on preemptible capacity; both controllers share the per-tag S3
+result prefix, so whichever job finishes first supplies the row and the other controller marks the tag done instead of submitting.
 
 ### 9.1 Results
 
