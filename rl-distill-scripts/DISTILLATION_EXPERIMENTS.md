@@ -2134,6 +2134,7 @@ this way). **First result (borrowing pod, 36 min wall):**
 | 26bw (warm-started untrained-26B RL teacher, val 0.694) → E4B, **step 500** | 73.0 / 98.0 | 39.1 / **90.0** | 21.3 / **70.7** | 34.5 / **69.6** | 69.5 / 91.7 |
 | 26bw → E4B, **step 700** | 75.4 / 98.0 | 40.1 / **88.0** | 23.0 / **73.0** | **37.3 / 72.6** | 70.2 / 92.8 |
 | 26bw → E4B, **step 750** | 75.2 / **99.0** | 40.1 / **89.7** | 22.0 / **73.0** | 36.4 / 72.4 | 69.9 / 92.5 |
+| 26bw → E4B, **step 1000 (final)** | 76.3 / 98.3 | 42.0 / **90.7** | 23.5 / 70.7 | 37.7 / 72.0 | 71.6 / 92.3 |
 | previous best E4B student: (c) 12br → E4B 2e-6, step 1000 | 73.6 / 97.3 | 38.8 / 85.0 | 21.7 / 67.3 | 36.0 / 67.2 | 74.0 / 93.2 |
 
 Already at step 500 the 26B-teacher student beats the best 12B-teacher student on every in-distribution mean@k (+2.1 / +1.3 / +2.9) and on
@@ -2159,6 +2160,17 @@ RL seeds, but milder: the final 26bd student still matches or beats the 12B-teac
 **0.0998 @ 1000** (26bd final 0.1094 — the untrained-lineage teacher is matched more closely in KL yet its student scores lower on mean@k).
 Step-1000 checkpoint complete on S3 at 20:10Z; both controllers submitted `distill_26bw_lr2e6_medium_to_e4b_step1000_n8` at 20:15Z
 (`g4ev-26bw-step1000-n8` job_daop0qo2ummg08flsp2g dedicated, `-brw` job_daop0qo2ummg07h9jo20 borrowing).
+**26bw step 1000, final (20:50Z, both pods 34 min):** 76.3 / 42.0 / 23.5 / 37.7 / 71.6 mean@k — a late jump of +1.1 / +1.9 / +1.5 / +1.3 / +1.7
+over step 750 during the last quarter of the LR decay, with pass@k held (id_medium **90.7**, the study's highest E4B coverage; id_hard 70.7,
+MATH500 72.0). Against the final 26bd student: −1.3 / −0.6 / −1.1 / −0.5 / −1.8 mean@k, but +1.0 / +6.0 / +2.7 / +1.6 / +0.1 pass@k.
+
+**§9.0o summary (all seven rows in).** Both 26B-teacher students beat every 12B-teacher student and every E4B RL seed on in-distribution
+mean@k, in teacher-accuracy order on mean@k (26bd teacher 0.638 → student 42.6 id_medium; 26bw teacher 0.694 → 42.0; 12B teacher 0.527 → 38.8;
+E4B RL 4× seeds 0.395 → 39.3 mean of 3). The lineage split persists to the end: the distilled-lineage teacher (26bd) gives the sharper student,
+the untrained-lineage teacher (26bw) the broader one (pass@16 90.7 vs 84.7 on id_medium), despite the 26bw student having the lower val KL
+(0.0998 vs 0.1094). Mean@k was still rising at step 1000 for both, so 1000 steps under-trains at this data size; a longer or second-epoch run
+is the obvious next knob. All checkpoints (250/500/750/1000 + 50-step HF exports) and eval traces are on S3 under the `gemma4-26b{d,w}-distill-
+ckpts-v1` and `gemma4-distill-study-evals-v1` prefixes; RL teachers stopped, all ScaleTrain jobs for this section terminal.
 
 ### 9.1 Results
 
