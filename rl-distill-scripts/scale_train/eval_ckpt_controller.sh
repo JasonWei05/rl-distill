@@ -9,7 +9,7 @@
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 export AWS_PROFILE=ml-worker
-TAGS="${TAGS:-distill_26bd_lr2e6_medium_to_e4b_step500 distill_26bd_lr2e6_medium_to_e4b_step750 distill_26bd_lr2e6_medium_to_e4b_step1000 distill_26bw_lr2e6_medium_to_e4b_step500 distill_26bw_lr2e6_medium_to_e4b_step750 distill_26bw_lr2e6_medium_to_e4b_step1000_n8}"
+TAGS="${TAGS:-distill_26bd_lr2e6_medium_to_e4b_step500 distill_26bd_lr2e6_medium_to_e4b_step750 distill_26bd_lr2e6_medium_to_e4b_step1000 distill_26bw_lr2e6_medium_to_e4b_step500 distill_26bw_lr2e6_medium_to_e4b_step700 distill_26bw_lr2e6_medium_to_e4b_step750 distill_26bw_lr2e6_medium_to_e4b_step1000_n8}"
 RESULT_S3_ROOT="${RESULT_S3_ROOT:-s3://scale-ml/genai/rl-distill/gemma4-distill-study-evals-v1}"
 ALLOW_BORROWING="${ALLOW_BORROWING:-false}"; BORROW_FLAG=""; SUFFIX=""; [ "$ALLOW_BORROWING" = true ] && { BORROW_FLAG="--allow-borrowing"; SUFFIX="-brw"; }
 STUDY="${STUDY:-/tmp/gemma4_distill_study_eval}"; STATE="${STATE:-${STUDY}/ckpt_eval_controller${SUFFIX}.state}"; mkdir -p "${STUDY}/results" "$(dirname "$STATE")"; touch "$STATE"
