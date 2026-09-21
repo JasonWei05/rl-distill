@@ -2074,6 +2074,18 @@ then the §7 math suite on the step-1000 exports. Specs `26bd-medium` (distilled
 launches both trace+distill supervisors, starts the eval driver). State at planning time: distilled-init best 0.629 @ 240; warm-start best
 0.694 @ run-step 30 (= original 170).
 
+**Executed 09:48Z.** Final RL states: distilled-init (§9.0m) reached step 280, **best 0.638 @ 250** (misses 3), stopped by cancel
+(`job_dao8pug2ummg08flsn9g`); warm-start (§9.0n) reached run-step 80 = original 220 with 5 misses (it was early-stopping on its own),
+**best 0.694 @ run-step 30 = original 170**, cancelled (`job_daoelk3256m007g292t0`). Teachers = those two permanent checkpoints'
+`actor/huggingface`. Launched: `g4-26bd-trace-distill-lr2e-6` and `g4-26bw-trace-distill-lr2e-6` (4 GPUs each, dedicated, priority high;
+supervisors `rl-g4-26b{d,w}-trace-distill-lr2e-6`); stage 1 trace collection (TP 2, two engines), stage 2 distillation, then the local
+eval driver (tmux `eval-26b-students`) waits for each `global_step_1000/_REMOTE_COMPLETE.json`.
+
+| teacher | RL init | best val (step) | student prefix |
+|---|---|---|---|
+| 26bd | E4B-base-distilled 26B-A4B (§9.1 student) | 0.638 (250) | `gemma4-26bd-distill-ckpts-v1/26bd-medium-to-e4b-bs128-s1000-lr2e-6` |
+| 26bw | untrained 26B-A4B, warm-started from step 140 | 0.694 (170 orig.) | `gemma4-26bw-distill-ckpts-v1/26bw-medium-to-e4b-bs128-s1000-lr2e-6` |
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
