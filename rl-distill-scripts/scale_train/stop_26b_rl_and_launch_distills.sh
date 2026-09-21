@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 export AWS_PROFILE=ml-worker
-declare -A SUP=( [26bd]=g4-26b-distill-rl-med-nb-20260921 [26bw]=g4-26b-med-ws140-nb-20260920 )
+declare -A SUP=( [26bd]=g4-26b-distill-rl-med-nb-20260921 [26bw]=g4-26b-med-ws140-nb-20260921-r2 )   # ws140 relaunched 08:3xZ after its weight-sync OOM
 declare -A TMUX=( [26bd]=rl-g4-26b-distill-rl-med-nb [26bw]=rl-g4-26b-med-ws140-nb )
 declare -A CKPT=( [26bd]=s3://scale-ml/genai/rl-distill/gemma4-26b-from-e4bbase-distill-rl-full-checkpoints/26b-a4b-medium-from-e4bbase-distill-es5
                   [26bw]=s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-20260819-full-checkpoints/26b-a4b-medium-ws140 )
@@ -24,9 +24,11 @@ done
 # --- stop the RL runs: STOP file, kill supervisor, cancel job, wait for pods to go
 for k in 26bd 26bw; do
   d=".scale_train_supervisors/${SUP[$k]}"; touch "$d/STOP"; tmux kill-session -t "${TMUX[$k]}" 2>/dev/null || true
-  j="$(grep -aoE 'job_id=job_[a-z0-9]+' "$d/supervisor.out" | tail -1 | cut -d= -f2)"
-  [ -n "$j" ] && env -u AWS_PROFILE timeout 120 scale-train cancel job "$j" 2>&1 | grep -iE "cancel" | head -1
-  echo "STOPPED ${k}: supervisor ${TMUX[$k]} job ${j:-?}"
+  for j in $(cat .scale_train_supervisors/${SUP[$k]%-r2}*/supervisor.out 2>/dev/null | grep -aoE 'job_id=job_[a-z0-9]+' | cut -d= -f2 | sort -u); do
+    st="$(env -u AWS_PROFILE timeout 120 scale-train get job "$j" 2>/dev/null | grep -oE "status: [A-Z_]+" | head -1)"
+    case "$st" in *QUEUED*|*IN_PROGRESS*|*PENDING*|*RUNNING*) env -u AWS_PROFILE timeout 120 scale-train cancel job "$j" 2>&1 | grep -iE "cancel" | head -1 ;; *) echo "  $j already $st" ;; esac
+  done
+  echo "STOPPED ${k}: supervisor ${TMUX[$k]}"
 done
 # --- launch the two distillations (each its own 4-GPU job, dedicated capacity, priority high; recipe fixed in the ST run-file)
 for k in 26bd 26bw; do
