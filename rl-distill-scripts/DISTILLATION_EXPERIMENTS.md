@@ -2094,6 +2094,16 @@ separate prefix `…-lr2e-6-n8` because rolling checkpoints are world-size speci
 `distill_26bw_lr2e6_medium_to_e4b_step1000_n8`. An arbiter cancels the 4-GPU 26bw job the moment the 8-GPU pod is Running and re-scopes the
 eval driver (26bd alone + a separate driver for the n8 student). Same recipe: global batch 128 (16/GPU × 8), lr 2e-6 → 2e-7, 1000 steps.
 
+**Checkpoint evals moved to ScaleTrain (18:15Z, user request).** Instead of one local eval per final export, each student is evaluated at
+steps **500, 750 and 1000** by its own 2-GPU ScaleTrain job (dedicated capacity, priority high; run-file `run_gemma4_eval_one_model_st.sh` =
+the §7 math suite with the datasets data-parallel across the 2 GPUs, same knobs as the local §9.0j/§9.0l evals). `scale_train/eval_ckpt_controller.sh`
+(tmux `eval-ckpt-controller`, state `/tmp/gemma4_distill_study_eval/ckpt_eval_controller.state`) polls the six registry tags
+(`distill_26b{d,w}_lr2e6_medium_to_e4b_step{500,750}`, `…26bd…step1000`, `…26bw…step1000_n8`): submits a job when a checkpoint's
+`_REMOTE_COMPLETE.json` appears, resubmits up to 3× if a job dies, and on `RUN_COMPLETE.json` under
+`gemma4-distill-study-evals-v1/<tag>/` syncs the results locally and rebuilds §8. The local step-1000 drivers were retired. Progress at
+launch: 26bd at step ~760 (val KL 0.129 → 0.119 → 0.116 → 0.116 → 0.114 → 0.111 → 0.110 at 100…700), 26bw at step ~420
+(0.121 → 0.115 → 0.109 → 0.105 at 100…400; 11.7 s/step on 8 GPUs vs 17.4 on 4).
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
