@@ -2130,12 +2130,18 @@ this way). **First result (borrowing pod, 36 min wall):**
 |---|---|---|---|---|---|
 | 26bd (distilled-init 26B RL teacher, val 0.638) → E4B, **step 500** | **75.7 / 98.3** | **40.1 / 83.3** | **24.6 / 70.0** | **36.5 / 68.8** | 71.7 / 91.9 |
 | 26bd → E4B, **step 750** | **76.6 / 98.3** | **42.0 / 86.3** | 24.6 / 68.7 | **36.8 / 69.2** | 72.4 / 92.2 |
+| 26bw (warm-started untrained-26B RL teacher, val 0.694) → E4B, **step 500** | 73.0 / 98.0 | 39.1 / **90.0** | 21.3 / **70.7** | 34.5 / **69.6** | 69.5 / 91.7 |
 | previous best E4B student: (c) 12br → E4B 2e-6, step 1000 | 73.6 / 97.3 | 38.8 / 85.0 | 21.7 / 67.3 | 36.0 / 67.2 | 74.0 / 93.2 |
 
 Already at step 500 the 26B-teacher student beats the best 12B-teacher student on every in-distribution mean@k (+2.1 / +1.3 / +2.9) and on
 id_hard pass@k (+2.7), trailing only on GSM8K — consistent with the teacher-accuracy ordering (0.638 vs 0.527).
 Step 750 (19:11Z) improves further on id_easy/id_medium/MATH500 mean@k (+0.9 / +1.9 / +0.3) and id_medium pass@16 (86.3, the highest
 E4B value in the study); id_hard is flat. 42.0 id_medium mean@k also exceeds the best 4×-batch E4B RL seed (41.1).
+26bw step 500 (19:22Z): the *higher*-val teacher's student is 1–3 points **lower on mean@k** than the 26bd student at the same step
+(73.0 / 39.1 / 21.3 / 34.5 vs 75.7 / 40.1 / 24.6 / 36.5) but **higher on pass@k everywhere** (id_medium 90.0 vs 83.3 — the highest coverage of
+any E4B model in the study). The two 26B teachers differ in lineage (the 26bd teacher was itself distilled from the E4B base before RL, so its
+distribution is closer to the student's; the 26bw teacher is the untrained 26B RL'd, more diverse), and that shows up as a sharpness-vs-
+coverage split in the students rather than as a uniform ordering by teacher accuracy.
 
 ### 9.1 Results
 
