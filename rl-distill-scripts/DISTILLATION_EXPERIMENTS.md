@@ -2155,6 +2155,10 @@ student's while holding a 3–4 point pass@k lead on id_medium / id_hard / MATH5
 over step 750 and the study's best E4B mean@k on every in-distribution set and MATH500 (vs the best 12B-teacher student: +4.0 / +3.8 / +2.9 /
 +2.2; GSM8K −0.6). pass@k drifts down (id_easy 97.3, id_medium 84.7, id_hard 68.0) — the same sharpening-vs-coverage trade seen in the 4×-batch
 RL seeds, but milder: the final 26bd student still matches or beats the 12B-teacher student on pass@k everywhere except GSM8K.
+**26bw distill finished 20:10Z** (8-GPU `-n8` copy, pod Completed 20:12Z): val KL 0.121 → 0.115 → 0.109 → 0.105 → 0.1008 (900) →
+**0.0998 @ 1000** (26bd final 0.1094 — the untrained-lineage teacher is matched more closely in KL yet its student scores lower on mean@k).
+Step-1000 checkpoint complete on S3 at 20:10Z; both controllers submitted `distill_26bw_lr2e6_medium_to_e4b_step1000_n8` at 20:15Z
+(`g4ev-26bw-step1000-n8` job_daop0qo2ummg08flsp2g dedicated, `-brw` job_daop0qo2ummg07h9jo20 borrowing).
 
 ### 9.1 Results
 
