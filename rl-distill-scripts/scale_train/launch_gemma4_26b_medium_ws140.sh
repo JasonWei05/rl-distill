@@ -28,6 +28,9 @@ ENV_VARS+=",ROLLOUT_ENFORCE_EAGER=False,ROUTER_REPLAY_MODE=R3,ROUTER_Z_LOSS_COEF
 # fast one-node 26B-A4B layout (RESUME_GEMMA4_26B_A4B_LOCAL.md) + cuDNN SDPA switch
 ENV_VARS+=",FSDP_CPU_OFFLOAD_POLICY=False,OFFLOAD=True,VLLM_SLEEP_MODE=True,MAX_PADDED_TOKENS_PER_MICROBATCH=8192,MICRO_BATCH_SIZE_PER_GPU=4,ROLLOUT_GPU_MEMORY_UTILIZATION=0.10,VERL_SKIP_VLLM_MM_WEIGHT_RELOAD=1,VLLM_KV_CACHE_MEMORY_BYTES=3221225472"
 ENV_VARS+=",VERL_GEMMA4_CUDNN_SDPA=${CUDNN_SDPA},VERL_GEMMA4_EVAL_CUDNN_SDPA=${CUDNN_SDPA},TORCH_CUDNN_SDPA_ENABLED=${CUDNN_SDPA}"
+# 2026-09-21: both 26B runs died with a CUDA OOM in actor_rollout_update_weights after 8-14 h in one process (vLLM awake 51.6 GiB + trainer
+# 27 GiB on one card, <1 GiB margin at weight sync; allocator fragmentation ate it). expandable_segments removes the fragmentation.
+ENV_VARS+=",PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 # S3-only artifacts (user policy since 2026-09-15): permanent S3 checkpoints carry the HF snapshot, best_hf/ published at the end
 ENV_VARS+=",HF_PUSH_ENABLE=${HF_PUSH_ENABLE:-False},HF_PUSH_REQUIRED=False"
 # resumable checkpoints every 5 steps + durable completion markers
