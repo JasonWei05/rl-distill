@@ -2013,6 +2013,8 @@ at every sync and allocator fragmentation over a long-lived process ate it (all 
 the supervisor relaunches after its 900 s backoff from the complete step-215 rolling checkpoint (4 steps lost). A fresh process resets the
 fragmentation; if it recurs, add `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` (forwarded to the workers by the run-file) or lower
 `ROLLOUT_GPU_MEMORY_UTILIZATION` below 0.10.
+01:28Z (user): rather than wait out the backoff, the supervisor was restarted (`SUP_TAG=-r2`, state `…/g4-26b-distill-rl-med-20260921-r2/`) so the
+borrowing job was resubmitted immediately; it restores step 215 on admission.
 
 ### 9.0n Resume of the untrained-26B-A4B medium RL (launched 2026-09-20, user request: "it never plateaued")
 
