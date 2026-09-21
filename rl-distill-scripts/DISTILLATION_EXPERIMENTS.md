@@ -2130,6 +2130,7 @@ this way). **First result (borrowing pod, 36 min wall):**
 |---|---|---|---|---|---|
 | 26bd (distilled-init 26B RL teacher, val 0.638) → E4B, **step 500** | **75.7 / 98.3** | **40.1 / 83.3** | **24.6 / 70.0** | **36.5 / 68.8** | 71.7 / 91.9 |
 | 26bd → E4B, **step 750** | **76.6 / 98.3** | **42.0 / 86.3** | 24.6 / 68.7 | **36.8 / 69.2** | 72.4 / 92.2 |
+| 26bd → E4B, **step 1000 (final)** | **77.6** / 97.3 | **42.6** / 84.7 | **24.6** / 68.0 | **38.2** / 70.4 | 73.4 / 92.2 |
 | 26bw (warm-started untrained-26B RL teacher, val 0.694) → E4B, **step 500** | 73.0 / 98.0 | 39.1 / **90.0** | 21.3 / **70.7** | 34.5 / **69.6** | 69.5 / 91.7 |
 | 26bw → E4B, **step 700** | 75.4 / 98.0 | 40.1 / **88.0** | 23.0 / **73.0** | **37.3 / 72.6** | 70.2 / 92.8 |
 | 26bw → E4B, **step 750** | 75.2 / **99.0** | 40.1 / **89.7** | 22.0 / **73.0** | 36.4 / 72.4 | 69.9 / 92.5 |
@@ -2150,6 +2151,10 @@ MATH500 (72.6, the study's highest E4B MATH500 pass@k); id_medium pass@16 eased 
 26bw step 750 (20:01Z): flat vs step 700 on mean@k (75.2 / 40.1 / 22.0 / 36.4 — id_hard −1.0, within the ±1-point eval noise seen between
 adjacent checkpoints), pass@k up on id_easy (99.0) and id_medium (89.7). The 26bw student's mean@k has plateaued ~2 points below the 26bd
 student's while holding a 3–4 point pass@k lead on id_medium / id_hard / MATH500.
+**26bd step 1000, final (20:04Z):** mean@k keeps climbing through the LR decay — 77.6 / 42.6 / 24.6 / 38.2 / 73.4, +1.0 / +0.6 / 0 / +1.4 / +1.0
+over step 750 and the study's best E4B mean@k on every in-distribution set and MATH500 (vs the best 12B-teacher student: +4.0 / +3.8 / +2.9 /
++2.2; GSM8K −0.6). pass@k drifts down (id_easy 97.3, id_medium 84.7, id_hard 68.0) — the same sharpening-vs-coverage trade seen in the 4×-batch
+RL seeds, but milder: the final 26bd student still matches or beats the 12B-teacher student on pass@k everywhere except GSM8K.
 
 ### 9.1 Results
 
