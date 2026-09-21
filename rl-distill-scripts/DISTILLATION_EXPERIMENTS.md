@@ -2086,6 +2086,14 @@ eval driver (tmux `eval-26b-students`) waits for each `global_step_1000/_REMOTE_
 | 26bd | E4B-base-distilled 26B-A4B (§9.1 student) | 0.638 (250) | `gemma4-26bd-distill-ckpts-v1/26bd-medium-to-e4b-bs128-s1000-lr2e-6` |
 | 26bw | untrained 26B-A4B, warm-started from step 140 | 0.694 (170 orig.) | `gemma4-26bw-distill-ckpts-v1/26bw-medium-to-e4b-bs128-s1000-lr2e-6` |
 
+Timing (13:40Z): 26bd trace collection 86 % done (~4.5 h at TP 2 for 3000×16), 26bw 26 % (its dedicated 4-GPU allocation took 2 h) → 26bw's
+student was projected for ~00:00Z Tue. 13:5xZ (user): an **8-GPU dedicated copy** of the 26bw job was queued (`g4-26bw-trace-distill-lr2e-6-n8`,
+priority high, borrowing off; supervisor `rl-g4-26bw-trace-distill-lr2e-6-n8`). Trace collection resumes from the shared S3 mirror (the generator
+restores existing shards at startup, so whatever the 4-GPU job produced is kept; 4 TP-2 engines instead of 2). The distill stage writes to a
+separate prefix `…-lr2e-6-n8` because rolling checkpoints are world-size specific (an 8-rank restore of 4-rank shards fails); eval tag
+`distill_26bw_lr2e6_medium_to_e4b_step1000_n8`. An arbiter cancels the 4-GPU 26bw job the moment the 8-GPU pod is Running and re-scopes the
+eval driver (26bd alone + a separate driver for the n8 student). Same recipe: global batch 128 (16/GPU × 8), lr 2e-6 → 2e-7, 1000 steps.
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
