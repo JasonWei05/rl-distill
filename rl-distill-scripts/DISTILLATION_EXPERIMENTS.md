@@ -2132,6 +2132,7 @@ this way). **First result (borrowing pod, 36 min wall):**
 | 26bd → E4B, **step 750** | **76.6 / 98.3** | **42.0 / 86.3** | 24.6 / 68.7 | **36.8 / 69.2** | 72.4 / 92.2 |
 | 26bw (warm-started untrained-26B RL teacher, val 0.694) → E4B, **step 500** | 73.0 / 98.0 | 39.1 / **90.0** | 21.3 / **70.7** | 34.5 / **69.6** | 69.5 / 91.7 |
 | 26bw → E4B, **step 700** | 75.4 / 98.0 | 40.1 / **88.0** | 23.0 / **73.0** | **37.3 / 72.6** | 70.2 / 92.8 |
+| 26bw → E4B, **step 750** | 75.2 / **99.0** | 40.1 / **89.7** | 22.0 / **73.0** | 36.4 / 72.4 | 69.9 / 92.5 |
 | previous best E4B student: (c) 12br → E4B 2e-6, step 1000 | 73.6 / 97.3 | 38.8 / 85.0 | 21.7 / 67.3 | 36.0 / 67.2 | 74.0 / 93.2 |
 
 Already at step 500 the 26B-teacher student beats the best 12B-teacher student on every in-distribution mean@k (+2.1 / +1.3 / +2.9) and on
@@ -2146,6 +2147,9 @@ coverage split in the students rather than as a uniform ordering by teacher accu
 26bw step 700 (19:52Z, borrowing pod): mean@k rises 2.4 / 1.0 / 1.7 / 2.8 points over its step 500 (75.4 / 40.1 / 23.0 / 37.3), closing
 most of the gap to the 26bd student at step 750 (id_medium mean@k now equal at 40.1 vs 42.0), while pass@k stays ahead on id_hard (73.0) and
 MATH500 (72.6, the study's highest E4B MATH500 pass@k); id_medium pass@16 eased 90.0 → 88.0. GSM8K 70.2 / 92.8.
+26bw step 750 (20:01Z): flat vs step 700 on mean@k (75.2 / 40.1 / 22.0 / 36.4 — id_hard −1.0, within the ±1-point eval noise seen between
+adjacent checkpoints), pass@k up on id_easy (99.0) and id_medium (89.7). The 26bw student's mean@k has plateaued ~2 points below the 26bd
+student's while holding a 3–4 point pass@k lead on id_medium / id_hard / MATH500.
 
 ### 9.1 Results
 
