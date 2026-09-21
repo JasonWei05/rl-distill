@@ -2055,6 +2055,20 @@ one). 23:5xZ (user): a **second copy with borrowing OFF** was launched (`ALLOW_B
 `rl-g4-26b-med-ws140-nb`), same prefixes/W&B id; an arbiter watches both and, when either copy first reaches a Running pod, STOPs the other
 supervisor and cancels its job so only one ever writes the prefix.
 
+### 9.0o Two 26B-A4B RL teachers → E4B base (planned 2026-09-21 04:48Z; RL stop at 09:47Z)
+
+**Plan (user).** Run both 26B medium RL jobs (§9.0m distilled-init, §9.0n warm-started untrained) for 5 more hours (deadline **09:47:35Z**),
+keeping them alive (fix + resume from the latest checkpoint on any failure). At the deadline stop both, take each run's best-validation
+checkpoint (from its `validation_early_stopping.json`; best steps are multiples of 10, so the permanent checkpoint with `actor/huggingface`
+exists) and distil each into the E4B base with the standing recipe: 3000 × 16 top-128 traces + 300 val × 1, batch 128, lr 2e-6 → 2e-7 linear,
+100 warm-up, 1000 steps, validation every 10, one 4-GPU ScaleTrain job per teacher (dedicated capacity, priority high, as §9.0j c / §9.0k),
+then the §7 math suite on the step-1000 exports. Specs `26bd-medium` (distilled-init teacher, prefix `gemma4-26bd-distill-ckpts-v1`) and
+`26bw-medium` (warm-started untrained teacher, prefix `gemma4-26bw-distill-ckpts-v1`); trace collection at TP 2 (two engines on 4 GPUs) since the
+26B-A4B needs ~52 GB; `BEST_STEP_OVERRIDE` carries the stop-time best step; registry tags `distill_26b{d,w}_lr2e6_medium_to_e4b_step1000`
+(commit 56cba733). Orchestration: `scale_train/stop_26b_rl_and_launch_distills.sh` (reads best steps from S3, stops supervisors + cancels jobs,
+launches both trace+distill supervisors, starts the eval driver). State at planning time: distilled-init best 0.629 @ 240; warm-start best
+0.694 @ run-step 30 (= original 170).
+
 ### 9.1 Results
 
 **E4B base, validation ×32 (the target curves; 2026-09-07):** `figures/passk_e4b_base_val32.png`
