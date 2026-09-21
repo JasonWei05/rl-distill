@@ -90,6 +90,9 @@ DIRECTIONS = (
     "12b_medium_r140_to_e4b",
     # RL on the tail-bucket on-policy-distilled 12B (§9.0i, best step 100) -> E4B base student, 16 samples.
     "12bo_medium_r100_to_e4b",
+    # RL'd 26B-A4B teachers stopped at the 5-h mark (§9.0o): distilled-init (26bd) and warm-started untrained (26bw) -> E4B base, 16 samples.
+    "26bd_medium_to_e4b",
+    "26bw_medium_to_e4b",
 )
 SPLITS = ("train", "validation")
 

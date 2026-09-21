@@ -53,7 +53,8 @@ if aws s3 ls "${TRACE_S3_BASE}/${TEACHER_SPEC}/COMPLETE.json" >/dev/null 2>&1; t
   echo "ST_12BR stage1: S3 bundle ${TRACE_S3_BASE}/${TEACHER_SPEC} already complete -> skipping collection"
 else
   echo "ST_12BR stage1: trace collection start $(date -u +%FT%TZ)"
-  TRACE_SPEC="${TEACHER_SPEC}" TEACHER_SOURCE=s3 TRACE_GPU_IDS="${GPU_IDS_CSV}" TENSOR_PARALLEL_SIZE=1 \
+  case "${TEACHER_SPEC}" in 26b*) TRACE_TP=2 ;; *) TRACE_TP=1 ;; esac   # 26B-A4B (~52 GB bf16) needs TP2 -> 2 engines on 4 GPUs
+  TRACE_SPEC="${TEACHER_SPEC}" TEACHER_SOURCE=s3 TRACE_GPU_IDS="${GPU_IDS_CSV}" TENSOR_PARALLEL_SIZE="${TRACE_TP}" BEST_STEP_OVERRIDE="${BEST_STEP_OVERRIDE:-}" \
     TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" VALIDATION_SAMPLES_PER_QUESTION=1 TRACE_S3_MIRROR_ENABLE=true \
     bash rl-distill-scripts/scale_train/run_gemma4_bestckpt_trace_collection.sh
   echo "ST_12BR stage1: trace collection done $(date -u +%FT%TZ)"
@@ -67,11 +68,11 @@ export MICRO_BATCH_SIZE_PER_GPU="${MICRO_BATCH_SIZE_PER_GPU:-4}" MAX_PADDED_TOKE
 export FULL_VOCAB_KL_CHUNK_SIZE="${FULL_VOCAB_KL_CHUNK_SIZE:-4096}" VERL_FAIL_ON_NONFINITE_GRAD="${VERL_FAIL_ON_NONFINITE_GRAD:-0}"
 export CHECKPOINT_SAVE_CONTENTS="${CHECKPOINT_SAVE_CONTENTS:-[\"model\",\"optimizer\",\"extra\",\"hf_model\"]}" MAX_CKPT_TO_KEEP="${MAX_CKPT_TO_KEEP:-1}"
 export REMOTE_CHECKPOINT_ENABLE=true ROLLING_CHECKPOINT_FREQ="${ROLLING_CHECKPOINT_FREQ:-50}" ROLLING_HF_EXPORT=true ROLLING_HF_EXPORT_S3=true
-case "${TEACHER_SPEC}" in 12bo-*) CKPT_FAMILY=12bo ;; *) CKPT_FAMILY=12br ;; esac
+case "${TEACHER_SPEC}" in 12bo-*) CKPT_FAMILY=12bo ;; 26bd-*) CKPT_FAMILY=26bd ;; 26bw-*) CKPT_FAMILY=26bw ;; *) CKPT_FAMILY=12br ;; esac
 export REMOTE_CHECKPOINT_S3_URI="${REMOTE_CHECKPOINT_S3_URI:-s3://scale-ml/genai/rl-distill/gemma4-${CKPT_FAMILY}-distill-ckpts-v1/${TEACHER_SPEC}-to-${STUDENT}-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}-lr${LR}}"
 export HF_PUSH_ENABLE=false HF_PUSH_DELETE_LOCAL=false
 export EXP_NAME="${EXP_NAME:-${TEACHER_SPEC}-to-${STUDENT}-base-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}-lr${LR}-st4}"
-case "${TEACHER_SPEC}" in 12bo-*) FAMILY=12bo ;; *) FAMILY=12br ;; esac
+case "${TEACHER_SPEC}" in 12bo-*) FAMILY=12bo ;; 26bd-*) FAMILY=26bd ;; 26bw-*) FAMILY=26bw ;; *) FAMILY=12br ;; esac
 export PROJECT_NAME="${PROJECT_NAME:-gemma4-${FAMILY}-distill-v1}" ALLOW_UNDERSIZED_STUDENT_LAYOUT="${ALLOW_UNDERSIZED_STUDENT_LAYOUT:-true}" FSDP_OFFLOAD="${FSDP_OFFLOAD:-false}"
 REQUIRE_CKPT_DISK_GB="${REQUIRE_CKPT_DISK_GB:-350}"   # two E4B full checkpoints (~130 GB each) + bundle + venv
 free_gb="$(df -BG --output=avail /tmp | tail -1 | tr -dc 0-9)"

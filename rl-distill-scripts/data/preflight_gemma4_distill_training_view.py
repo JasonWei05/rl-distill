@@ -53,6 +53,9 @@ ALLOWED_DIRECTIONS = {
     # Untrained-12B medium RL after the patience-4 resume (best step 140, §9.0h) -> E4B base student, 16 samples.
     "12b_medium_r140_to_e4b",
     "12bo_medium_r100_to_e4b",
+    # RL'd 26B-A4B teachers stopped at the 5-h mark (§9.0o): distilled-init (26bd) and warm-started untrained (26bw) -> E4B base, 16 samples.
+    "26bd_medium_to_e4b",
+    "26bw_medium_to_e4b",
 }
 
 

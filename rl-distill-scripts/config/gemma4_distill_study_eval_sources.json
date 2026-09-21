@@ -807,6 +807,50 @@
       }
     },
     {
+      "tag": "distill_26bw_lr2e6_medium_to_e4b_step1000",
+      "display_name": "Distilled E4B base <- warm-started untrained-26B-A4B RL (§9.0n, stopped at 5 h) teacher, 3000x16 traces, peak LR 2e-6 (§9.0o), final step_001000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-26bw-distill-ckpts-v1/26bw-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-26bw-distill-ckpts-v1/26bw-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_26bd_lr2e6_medium_to_e4b_step1000",
+      "display_name": "Distilled E4B base <- RL on the E4B-base-distilled 26B-A4B (§9.0m, stopped at 5 h) teacher, 3000x16 traces, peak LR 2e-6 (§9.0o), final step_001000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-26bd-distill-ckpts-v1/26bd-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-26bd-distill-ckpts-v1/26bd-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
       "tag": "rl_e4b_medium_s43",
       "display_name": "E4B RL medium seed 43 best (step 120, val 0.3175)",
       "category": "rl",

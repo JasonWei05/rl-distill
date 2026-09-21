@@ -59,6 +59,10 @@ case "${TRACE_SPEC}" in
   12br-medium) RUN_KEY=12b-medium-local4; BAND=medium; BEST_STEP=140; DIRECTION=12b_medium_r140_to_e4b; TEACHER_HF_REPO=""; TEACHER_HF_REVISION="" ;;
   # RL (§9.0i) on the tail-bucket on-policy-distilled 12B student: best step 100 (val 0.444), S3 full checkpoints only -> TEACHER_SOURCE=s3.
   12bo-medium) RUN_KEY=12b-medium-from-onpolicy-bkt50-es5; BAND=medium; BEST_STEP=100; DIRECTION=12bo_medium_r100_to_e4b; TEACHER_HF_REPO=""; TEACHER_HF_REVISION=""; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-12b-from-onpolicy-bkt50-rl-full-checkpoints}" ;;
+  # 2026-09-21 (§9.0o): the two 26B-A4B medium RL teachers stopped at the 5-h mark. BEST_STEP comes from the run's early-stopping state at stop time
+  # (BEST_STEP_OVERRIDE, required); S3 full checkpoints only (TEACHER_SOURCE=s3; permanent every 10 steps carry actor/huggingface). 16 train samples.
+  26bd-medium) RUN_KEY=26b-a4b-medium-from-e4bbase-distill-es5; BAND=medium; BEST_STEP="${BEST_STEP_OVERRIDE:?BEST_STEP_OVERRIDE required for 26bd-medium}"; DIRECTION=26bd_medium_to_e4b; TEACHER_HF_REPO=""; TEACHER_HF_REVISION=""; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-26b-from-e4bbase-distill-rl-full-checkpoints}" ;;
+  26bw-medium) RUN_KEY=26b-a4b-medium-ws140; BAND=medium; BEST_STEP="${BEST_STEP_OVERRIDE:?BEST_STEP_OVERRIDE required for 26bw-medium}"; DIRECTION=26bw_medium_to_e4b; TEACHER_HF_REPO=""; TEACHER_HF_REVISION=""; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-20260819-full-checkpoints}" ;;
   *)
     echo "FATAL: unsupported TRACE_SPEC=${TRACE_SPEC}" >&2
     exit 2
@@ -206,7 +210,7 @@ fi
 
 # --- Source: the band's training + validation data (same as RL) ---
 GLOBAL_SEED="${GLOBAL_SEED:-42}"
-case "${TRACE_SPEC}" in e4b-base-*|12bd-*|12br-*|12bo-*) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" ;; *) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}" ;; esac
+case "${TRACE_SPEC}" in e4b-base-*|12bd-*|12br-*|12bo-*|26bd-*|26bw-*) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" ;; *) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}" ;; esac
 VALIDATION_SAMPLES_PER_QUESTION="${VALIDATION_SAMPLES_PER_QUESTION:-1}"
 PROMPTS_PER_SHARD="${PROMPTS_PER_SHARD:-8}"
 ROW_GROUP_ROWS="${ROW_GROUP_ROWS:-2}"

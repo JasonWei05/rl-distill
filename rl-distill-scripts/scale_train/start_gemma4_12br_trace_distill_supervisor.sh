@@ -12,5 +12,5 @@ name="${NAME:-g4-${TEACHER_SPEC%-medium}-trace-distill-lr${LR}}"; sup=".scale_tr
 tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scripts/scale_train/supervise_borrowing_job.py --name ${name} \
   --relaunch-on-cancel --relaunch-on-failure --max-relaunches 30 --quick-cancel-seconds 300 --max-quick-cancels 2 --failure-backoff-seconds 900 \
   --launch-log ${sup}/launch.log --monitor-log ${sup}/monitor.log --state-file ${sup}/state.json --stop-file ${sup}/STOP --pod-log-dir ${sup}/pod-logs \
-  -- env LR=${LR} ALLOW_BORROWING=${ALLOW_BORROWING} TEACHER_SPEC=${TEACHER_SPEC} bash rl-distill-scripts/scale_train/launch_gemma4_12br_trace_distill_st.sh --image ${IMG} 2>&1 | tee -a ${sup}/supervisor.out"
+  -- env LR=${LR} ALLOW_BORROWING=${ALLOW_BORROWING} TEACHER_SPEC=${TEACHER_SPEC} BEST_STEP_OVERRIDE=${BEST_STEP_OVERRIDE:-} bash rl-distill-scripts/scale_train/launch_gemma4_12br_trace_distill_st.sh --image ${IMG} 2>&1 | tee -a ${sup}/supervisor.out"
 echo "started supervisor rl-${name} (state ${sup})"
