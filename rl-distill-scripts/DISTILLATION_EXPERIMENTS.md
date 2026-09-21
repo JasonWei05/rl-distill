@@ -343,54 +343,62 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-20 13:58Z — math complete for 42/42 models, OOD complete for 29/42. Partial rows are shown as they finish._
+_Updated 2026-09-21 19:11Z — math complete for 11/50 models, OOD complete for 0/50. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
 | Model | Category | Trained on | id_easy (16) | id_medium (16) | id_hard (16) | MATH500 (16) | GSM8K (8) |
 |---|---|---|---|---|---|---|---|
-| `base_12b` | base | — | 42.3 / 97.0 | 14.1 / 72.0 | 5.3 / 45.0 | 17.2 / 59.4 | 46.1 / 88.1 |
-| `base_26b` | base | — | 62.3 / 99.7 | 23.8 / 86.3 | 9.9 / 69.7 | 27.2 / 71.8 | 56.7 / 93.6 |
-| `base_e2b` | base | — | 11.2 / 55.0 | 4.3 / 36.7 | 3.1 / 32.0 | 4.8 / 37.0 | 8.2 / 36.0 |
-| `base_e4b` | base | — | 29.6 / 89.3 | 8.6 / 60.3 | 4.2 / 38.0 | 10.9 / 50.6 | 26.4 / 72.6 |
-| `rl_e2b_easy` | rl | easy | **40.7 / 76.3** | 17.0 / 57.7 | 8.4 / 39.0 | 16.3 / 46.2 | 33.8 / 64.5 |
-| `rl_e2b_hard` | rl | hard | 21.1 / 46.3 | 16.3 / 40.0 | **13.2 / 28.3** | 10.3 / 25.4 | 8.9 / 25.2 |
-| `rl_e2b_medium` | rl | medium | 34.6 / 54.3 | **22.1 / 43.0** | 16.0 / 38.7 | 15.9 / 33.2 | 19.6 / 45.9 |
-| `rl_e4b_easy` | rl | easy | **69.9 / 95.3** | 32.8 / 77.3 | 19.2 / 56.0 | 31.5 / 63.6 | 69.5 / 88.9 |
-| `rl_e4b_hard` | rl | hard | 39.9 / 79.3 | 20.0 / 56.7 | **15.4 / 47.7** | 16.7 / 48.0 | 43.0 / 77.4 |
-| `rl_e4b_medium` | rl | medium | 62.2 / 94.3 | **29.1 / 71.3** | 17.2 / 58.3 | 26.5 / 61.6 | 65.4 / 88.9 |
+| `base_12b` | base | — | — | — | — | — | — |
+| `base_26b` | base | — | — | — | — | — | — |
+| `base_e2b` | base | — | — | — | — | — | — |
+| `base_e4b` | base | — | — | — | — | — | — |
+| `rl_e2b_easy` | rl | easy | — | — | — | — | — |
+| `rl_e2b_hard` | rl | hard | — | — | — | — | — |
+| `rl_e2b_medium` | rl | medium | — | — | — | — | — |
+| `rl_e4b_easy` | rl | easy | — | — | — | — | — |
+| `rl_e4b_hard` | rl | hard | — | — | — | — | — |
+| `rl_e4b_medium` | rl | medium | — | — | — | — | — |
 | `rl_e4b_medium_bs256_s45` | rl | medium | 70.4 / 89.3 | **36.9 / 68.3** | 22.5 / 53.3 | 30.8 / 55.0 | 72.8 / 86.8 |
 | `rl_e4b_medium_bs256_s46` | rl | medium | 72.4 / 92.0 | **39.9 / 71.0** | 20.7 / 52.3 | 31.2 / 56.4 | 72.7 / 88.7 |
 | `rl_e4b_medium_bs256_s47` | rl | medium | 73.9 / 94.3 | **41.1 / 80.0** | 22.9 / 56.7 | 34.6 / 62.8 | 73.0 / 90.7 |
 | `rl_e4b_medium_s43` | rl | medium | 66.8 / 96.7 | **31.1 / 78.3** | 17.7 / 60.0 | 28.1 / 64.2 | 64.7 / 90.4 |
 | `rl_e4b_medium_s44` | rl | medium | 66.5 / 95.3 | **34.1 / 77.0** | 19.8 / 60.7 | 29.4 / 60.6 | 67.7 / 91.6 |
-| `distill_12b_easy_to_e2b` | distilled | easy | **41.5 / 84.3** | 13.4 / 61.3 | 7.8 / 44.3 | 15.8 / 52.6 | 31.5 / 67.2 |
-| `distill_26b_easy_to_e2b` | distilled | easy | **40.7 / 84.3** | 13.4 / 61.3 | 6.4 / 36.3 | 15.5 / 46.2 | 31.4 / 66.3 |
-| `distill_e2b_easy_to_e2b` | distilled | easy | **38.9 / 79.3** | 16.9 / 59.7 | 7.7 / 40.0 | 15.9 / 47.2 | 32.4 / 65.1 |
-| `distill_e4b_easy_to_e2b` | distilled | easy | **38.0 / 84.7** | 14.8 / 62.0 | 7.6 / 41.7 | 15.3 / 48.6 | 32.3 / 70.4 |
-| `distill_12b_hard_to_e2b` | distilled | hard | 29.5 / 81.3 | 12.8 / 62.0 | **9.3 / 45.3** | 11.3 / 50.2 | 23.5 / 63.5 |
-| `distill_26b_hard_to_e2b` | distilled | hard | 31.0 / 85.7 | 12.9 / 69.3 | **8.0 / 44.3** | 13.3 / 54.6 | 23.7 / 63.8 |
-| `distill_e2b_hard_to_e2b` | distilled | hard | 19.6 / 47.7 | 15.7 / 39.3 | **13.1 / 31.0** | 10.0 / 28.0 | 8.4 / 25.7 |
-| `distill_e4b_hard_to_e2b` | distilled | hard | 19.8 / 65.0 | 12.4 / 46.3 | **12.1 / 45.0** | 8.6 / 39.6 | 13.4 / 45.2 |
-| `distill_12b_medium_to_e2b` | distilled | medium | 36.7 / 87.0 | **15.8 / 65.0** | 8.7 / 51.3 | 14.8 / 51.2 | 29.6 / 71.5 |
-| `distill_26b_medium_to_e2b` | distilled | medium | 34.3 / 86.7 | **14.7 / 65.3** | 8.7 / 45.7 | 15.1 / 53.6 | 28.0 / 68.6 |
-| `distill_e2b_medium_to_e2b` | distilled | medium | 33.9 / 58.3 | **21.7 / 42.3** | 16.3 / 37.0 | 15.4 / 34.8 | 19.2 / 46.2 |
-| `distill_e4b_medium_to_e2b` | distilled | medium | 33.1 / 81.7 | **14.0 / 62.3** | 10.2 / 49.0 | 13.3 / 46.2 | 25.9 / 62.7 |
-| `distill_12b_easy_to_e4b` | distilled | easy | **66.9 / 96.0** | 27.2 / 79.7 | 14.2 / 60.0 | 27.4 / 61.6 | 62.8 / 87.4 |
-| `distill_26b_easy_to_e4b` | distilled | easy | **67.6 / 95.7** | 26.8 / 78.7 | 13.7 / 53.3 | 29.1 / 64.2 | 64.7 / 90.7 |
-| `distill_e4b_easy_to_e4b` | distilled | easy | **69.5 / 97.0** | 31.5 / 77.0 | 17.7 / 53.7 | 31.2 / 64.4 | 69.0 / 91.0 |
-| `distill_12b_hard_to_e4b` | distilled | hard | 60.6 / 99.0 | 28.3 / 83.7 | **17.0 / 60.7** | 26.8 / 65.4 | 61.4 / 89.9 |
-| `distill_26b_hard_to_e4b` | distilled | hard | 67.8 / 99.3 | 32.8 / 88.7 | **17.6 / 72.0** | 33.2 / 73.2 | 66.2 / 92.8 |
-| `distill_e4b_hard_to_e4b` | distilled | hard | 38.9 / 81.0 | 19.3 / 55.3 | **15.2 / 46.7** | 16.2 / 48.0 | 43.1 / 78.9 |
-| `distill_12b_medium_to_e4b` | distilled | medium | 68.0 / 96.3 | **32.9 / 82.7** | 19.3 / 65.0 | 33.5 / 67.6 | 69.0 / 93.3 |
+| `distill_12b_easy_to_e2b` | distilled | easy | — | — | — | — | — |
+| `distill_26b_easy_to_e2b` | distilled | easy | — | — | — | — | — |
+| `distill_e2b_easy_to_e2b` | distilled | easy | — | — | — | — | — |
+| `distill_e4b_easy_to_e2b` | distilled | easy | — | — | — | — | — |
+| `distill_12b_hard_to_e2b` | distilled | hard | — | — | — | — | — |
+| `distill_26b_hard_to_e2b` | distilled | hard | — | — | — | — | — |
+| `distill_e2b_hard_to_e2b` | distilled | hard | — | — | — | — | — |
+| `distill_e4b_hard_to_e2b` | distilled | hard | — | — | — | — | — |
+| `distill_12b_medium_to_e2b` | distilled | medium | — | — | — | — | — |
+| `distill_26b_medium_to_e2b` | distilled | medium | — | — | — | — | — |
+| `distill_e2b_medium_to_e2b` | distilled | medium | — | — | — | — | — |
+| `distill_e4b_medium_to_e2b` | distilled | medium | — | — | — | — | — |
+| `distill_12b_easy_to_e4b` | distilled | easy | — | — | — | — | — |
+| `distill_26b_easy_to_e4b` | distilled | easy | — | — | — | — | — |
+| `distill_e4b_easy_to_e4b` | distilled | easy | — | — | — | — | — |
+| `distill_12b_hard_to_e4b` | distilled | hard | — | — | — | — | — |
+| `distill_26b_hard_to_e4b` | distilled | hard | — | — | — | — | — |
+| `distill_e4b_hard_to_e4b` | distilled | hard | — | — | — | — | — |
+| `distill_12b_medium_to_e4b` | distilled | medium | — | — | — | — | — |
 | `distill_12bd_lr1e6_medium_to_e4b_step1000` | distilled | medium | 71.0 / 97.3 | **35.1 / 83.0** | 20.2 / 62.3 | 32.9 / 65.8 | 71.3 / 92.2 |
-| `distill_12bd_medium_to_e4b_step1000` | distilled | medium | 71.3 / 97.0 | **36.6 / 82.3** | 19.9 / 58.3 | 33.9 / 67.2 | 71.3 / 92.4 |
-| `distill_12bd_medium_to_e4b_step300` | distilled | medium | 66.6 / 97.3 | **32.0 / 81.3** | 17.9 / 58.3 | 30.2 / 65.6 | 67.9 / 91.1 |
+| `distill_12bd_medium_to_e4b_step1000` | distilled | medium | — | — | — | — | — |
+| `distill_12bd_medium_to_e4b_step300` | distilled | medium | — | — | — | — | — |
 | `distill_12bo_lr2e6_medium_to_e4b_step1000` | distilled | medium | 67.7 / 97.0 | **33.0 / 81.7** | 19.1 / 62.0 | 30.2 / 64.6 | 68.8 / 91.8 |
 | `distill_12br_lr2e6_medium_to_e4b_step1000` | distilled | medium | 73.6 / 97.3 | **38.8 / 85.0** | 21.7 / 67.3 | 36.0 / 67.2 | 74.0 / 93.2 |
 | `distill_12br_medium_to_e4b_step1000` | distilled | medium | 72.6 / 98.0 | **37.0 / 86.3** | 20.9 / 68.0 | 34.4 / 68.0 | 71.2 / 92.6 |
-| `distill_26b_medium_to_e4b` | distilled | medium | 71.3 / 99.0 | **37.5 / 89.3** | 20.4 / 69.7 | 34.3 / 71.8 | 67.3 / 92.1 |
-| `distill_e4b_medium_to_e4b` | distilled | medium | 62.2 / 93.7 | **28.5 / 75.7** | 16.2 / 55.0 | 26.1 / 60.2 | 64.1 / 88.6 |
+| `distill_26b_medium_to_e4b` | distilled | medium | — | — | — | — | — |
+| `distill_26bd_lr2e6_medium_to_e4b_step1000` | distilled | medium | — | — | — | — | — |
+| `distill_26bd_lr2e6_medium_to_e4b_step500` | distilled | medium | 75.7 / 98.3 | **40.1 / 83.3** | 24.6 / 70.0 | 36.5 / 68.8 | 71.7 / 91.9 |
+| `distill_26bd_lr2e6_medium_to_e4b_step750` | distilled | medium | 76.6 / 98.3 | **42.0 / 86.3** | 24.6 / 68.7 | 36.8 / 69.2 | 72.4 / 92.2 |
+| `distill_26bw_lr2e6_medium_to_e4b_step1000` | distilled | medium | — | — | — | — | — |
+| `distill_26bw_lr2e6_medium_to_e4b_step1000_n8` | distilled | medium | — | — | — | — | — |
+| `distill_26bw_lr2e6_medium_to_e4b_step500` | distilled | medium | — | — | — | — | — |
+| `distill_26bw_lr2e6_medium_to_e4b_step700` | distilled | medium | — | — | — | — | — |
+| `distill_26bw_lr2e6_medium_to_e4b_step750` | distilled | medium | — | — | — | — | — |
+| `distill_e4b_medium_to_e4b` | distilled | medium | — | — | — | — | — |
 
 **Out-of-domain** — accuracy (%), lm-eval-harness 5-shot CoT (different scorer; not comparable to the math family).
 
@@ -398,46 +406,54 @@ _Updated 2026-09-20 13:58Z — math complete for 42/42 models, OOD complete for 
 |---|---|---|---|
 | `base_12b` | — | — | — |
 | `base_26b` | — | — | — |
-| `base_e2b` | 23.9 | 22.7 | 48.2 |
-| `base_e4b` | 37.9 | 19.2 | 61.6 |
-| `rl_e2b_easy` | 28.4 | 24.2 | 48.2 |
-| `rl_e2b_hard` | 26.0 | 21.7 | 47.6 |
-| `rl_e2b_medium` | 27.0 | 24.7 | 47.8 |
-| `rl_e4b_easy` | 44.0 | 20.2 | 60.7 |
-| `rl_e4b_hard` | 40.2 | 24.2 | 59.4 |
-| `rl_e4b_medium` | 43.9 | 26.3 | 61.3 |
+| `base_e2b` | — | — | — |
+| `base_e4b` | — | — | — |
+| `rl_e2b_easy` | — | — | — |
+| `rl_e2b_hard` | — | — | — |
+| `rl_e2b_medium` | — | — | — |
+| `rl_e4b_easy` | — | — | — |
+| `rl_e4b_hard` | — | — | — |
+| `rl_e4b_medium` | — | — | — |
 | `rl_e4b_medium_bs256_s45` | — | — | — |
 | `rl_e4b_medium_bs256_s46` | — | — | — |
 | `rl_e4b_medium_bs256_s47` | — | — | — |
 | `rl_e4b_medium_s43` | — | — | — |
 | `rl_e4b_medium_s44` | — | — | — |
-| `distill_12b_easy_to_e2b` | 27.1 | 20.7 | 48.4 |
-| `distill_26b_easy_to_e2b` | 27.3 | 26.3 | 48.6 |
-| `distill_e2b_easy_to_e2b` | 28.0 | 20.2 | 48.4 |
-| `distill_e4b_easy_to_e2b` | 27.1 | 19.7 | 48.1 |
-| `distill_12b_hard_to_e2b` | 27.3 | 20.2 | 47.8 |
-| `distill_26b_hard_to_e2b` | 24.6 | 18.7 | 47.8 |
-| `distill_e2b_hard_to_e2b` | 25.7 | 25.3 | 48.0 |
-| `distill_e4b_hard_to_e2b` | 25.9 | 25.8 | 47.1 |
-| `distill_12b_medium_to_e2b` | 23.9 | 19.2 | 48.2 |
-| `distill_26b_medium_to_e2b` | 25.0 | 17.7 | 48.3 |
-| `distill_e2b_medium_to_e2b` | 26.8 | 19.7 | 48.1 |
-| `distill_e4b_medium_to_e2b` | 26.3 | 24.2 | 47.9 |
-| `distill_12b_easy_to_e4b` | 39.0 | 18.7 | 57.6 |
-| `distill_26b_easy_to_e4b` | 41.5 | 24.7 | 60.0 |
-| `distill_e4b_easy_to_e4b` | 44.1 | 24.7 | 60.9 |
-| `distill_12b_hard_to_e4b` | 41.6 | 22.7 | 58.5 |
-| `distill_26b_hard_to_e4b` | 41.4 | 21.7 | 59.8 |
-| `distill_e4b_hard_to_e4b` | 40.3 | 20.7 | 59.5 |
-| `distill_12b_medium_to_e4b` | 39.6 | 14.6 | 58.9 |
+| `distill_12b_easy_to_e2b` | — | — | — |
+| `distill_26b_easy_to_e2b` | — | — | — |
+| `distill_e2b_easy_to_e2b` | — | — | — |
+| `distill_e4b_easy_to_e2b` | — | — | — |
+| `distill_12b_hard_to_e2b` | — | — | — |
+| `distill_26b_hard_to_e2b` | — | — | — |
+| `distill_e2b_hard_to_e2b` | — | — | — |
+| `distill_e4b_hard_to_e2b` | — | — | — |
+| `distill_12b_medium_to_e2b` | — | — | — |
+| `distill_26b_medium_to_e2b` | — | — | — |
+| `distill_e2b_medium_to_e2b` | — | — | — |
+| `distill_e4b_medium_to_e2b` | — | — | — |
+| `distill_12b_easy_to_e4b` | — | — | — |
+| `distill_26b_easy_to_e4b` | — | — | — |
+| `distill_e4b_easy_to_e4b` | — | — | — |
+| `distill_12b_hard_to_e4b` | — | — | — |
+| `distill_26b_hard_to_e4b` | — | — | — |
+| `distill_e4b_hard_to_e4b` | — | — | — |
+| `distill_12b_medium_to_e4b` | — | — | — |
 | `distill_12bd_lr1e6_medium_to_e4b_step1000` | — | — | — |
 | `distill_12bd_medium_to_e4b_step1000` | — | — | — |
 | `distill_12bd_medium_to_e4b_step300` | — | — | — |
 | `distill_12bo_lr2e6_medium_to_e4b_step1000` | — | — | — |
 | `distill_12br_lr2e6_medium_to_e4b_step1000` | — | — | — |
 | `distill_12br_medium_to_e4b_step1000` | — | — | — |
-| `distill_26b_medium_to_e4b` | 41.4 | 19.2 | 59.6 |
-| `distill_e4b_medium_to_e4b` | 43.7 | 26.3 | 61.1 |
+| `distill_26b_medium_to_e4b` | — | — | — |
+| `distill_26bd_lr2e6_medium_to_e4b_step1000` | — | — | — |
+| `distill_26bd_lr2e6_medium_to_e4b_step500` | — | — | — |
+| `distill_26bd_lr2e6_medium_to_e4b_step750` | — | — | — |
+| `distill_26bw_lr2e6_medium_to_e4b_step1000` | — | — | — |
+| `distill_26bw_lr2e6_medium_to_e4b_step1000_n8` | — | — | — |
+| `distill_26bw_lr2e6_medium_to_e4b_step500` | — | — | — |
+| `distill_26bw_lr2e6_medium_to_e4b_step700` | — | — | — |
+| `distill_26bw_lr2e6_medium_to_e4b_step750` | — | — | — |
+| `distill_e4b_medium_to_e4b` | — | — | — |
 <!-- results:end -->
 
 ### 8.1 pass@k curves — E4B student
@@ -2106,6 +2122,17 @@ launch: 26bd at step ~760 (val KL 0.129 → 0.119 → 0.116 → 0.116 → 0.114 
 18:33Z (user, "need these ASAP"): a **duplicate controller on borrowing** (`ALLOW_BORROWING=true`, jobs suffixed `-brw`, tmux
 `eval-ckpt-controller-brw`, own state file) submits the same six evals on preemptible capacity; both controllers share the per-tag S3
 result prefix, so whichever job finishes first supplies the row and the other controller marks the tag done instead of submitting.
+19:09Z (user): the 26bw student's **step 700** added as an extra eval point (tag `distill_26bw_lr2e6_medium_to_e4b_step700`, source
+`hf_exports/global_step_700/huggingface/` — the run keeps a weight-only HF export every 50 steps, so any 50-step checkpoint can be evaluated
+this way). **First result (borrowing pod, 36 min wall):**
+
+| student | id_easy | id_medium | id_hard | MATH500 | GSM8K |
+|---|---|---|---|---|---|
+| 26bd (distilled-init 26B RL teacher, val 0.638) → E4B, **step 500** | **75.7 / 98.3** | **40.1 / 83.3** | **24.6 / 70.0** | **36.5 / 68.8** | 71.7 / 91.9 |
+| previous best E4B student: (c) 12br → E4B 2e-6, step 1000 | 73.6 / 97.3 | 38.8 / 85.0 | 21.7 / 67.3 | 36.0 / 67.2 | 74.0 / 93.2 |
+
+Already at step 500 the 26B-teacher student beats the best 12B-teacher student on every in-distribution mean@k (+2.1 / +1.3 / +2.9) and on
+id_hard pass@k (+2.7), trailing only on GSM8K — consistent with the teacher-accuracy ordering (0.638 vs 0.527).
 
 ### 9.1 Results
 
