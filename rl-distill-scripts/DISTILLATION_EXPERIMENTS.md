@@ -2018,6 +2018,11 @@ borrowing job was resubmitted immediately; it restores step 215 on admission.
 01:35Z (user): moved to **borrowing OFF** — the resubmitted borrowing job (`job_dao8gk02ummg07h9jn20`) was cancelled before admission and the
 run relaunched as `g4-26b-distill-rl-med-nb` (dedicated capacity, supervisor `rl-g4-26b-distill-rl-med-nb`, state `…-nb-20260921/`), same
 prefixes/W&B run; both 26B runs are now on dedicated nodes.
+§9.0n run (warm-start) after the move to dedicated capacity (pod 23:56Z): 0.681 (0) → 0.680 → **0.690 (20)** → **0.694 (30)** → 0.689 → 0.692 →
+0.688 → 0.689 (70) — i.e. original steps 140–210; the continuation beat the crashed run's 0.6725 at run-steps 20–30 but has plateaued at
+0.69 since (4 misses at step 70). Died 08:26Z at step 76 with the same weight-sync CUDA OOM as §9.0m (8.5 h in one process). Relaunched
+08:3xZ (supervisor `…-ws140-nb-20260921-r2`) from the complete rolling step 75 with `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
+added to both 26B launchers (commit b2633949); best checkpoint for the §9.0o teacher is run-step 30 (= original 170), permanent on S3.
 
 ### 9.0n Resume of the untrained-26B-A4B medium RL (launched 2026-09-20, user request: "it never plateaued")
 
