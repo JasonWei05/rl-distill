@@ -343,7 +343,7 @@ Re-running it with cross-question batching (64 q × 16 per vLLM call, the queue 
 with identical per-request seeds (70 % of sequences byte-identical; the rest differ by batch-composition numerics).
 
 <!-- results:start -->
-_Updated 2026-09-21 19:11Z — math complete for 11/50 models, OOD complete for 0/50. Partial rows are shown as they finish._
+_Updated 2026-09-21 19:52Z — math complete for 13/50 models, OOD complete for 0/50. Partial rows are shown as they finish._
 
 **Math family** — `mean@k / pass@k` (%), repo `\boxed{}` verifier (= RL reward). Bold = own band.
 
@@ -395,8 +395,8 @@ _Updated 2026-09-21 19:11Z — math complete for 11/50 models, OOD complete for 
 | `distill_26bd_lr2e6_medium_to_e4b_step750` | distilled | medium | 76.6 / 98.3 | **42.0 / 86.3** | 24.6 / 68.7 | 36.8 / 69.2 | 72.4 / 92.2 |
 | `distill_26bw_lr2e6_medium_to_e4b_step1000` | distilled | medium | — | — | — | — | — |
 | `distill_26bw_lr2e6_medium_to_e4b_step1000_n8` | distilled | medium | — | — | — | — | — |
-| `distill_26bw_lr2e6_medium_to_e4b_step500` | distilled | medium | — | — | — | — | — |
-| `distill_26bw_lr2e6_medium_to_e4b_step700` | distilled | medium | — | — | — | — | — |
+| `distill_26bw_lr2e6_medium_to_e4b_step500` | distilled | medium | 73.0 / 98.0 | **39.1 / 90.0** | 21.3 / 70.7 | 34.5 / 69.6 | 69.5 / 91.7 |
+| `distill_26bw_lr2e6_medium_to_e4b_step700` | distilled | medium | 75.4 / 98.0 | **40.1 / 88.0** | 23.0 / 73.0 | 37.3 / 72.6 | 70.2 / 92.8 |
 | `distill_26bw_lr2e6_medium_to_e4b_step750` | distilled | medium | — | — | — | — | — |
 | `distill_e4b_medium_to_e4b` | distilled | medium | — | — | — | — | — |
 
@@ -2131,6 +2131,7 @@ this way). **First result (borrowing pod, 36 min wall):**
 | 26bd (distilled-init 26B RL teacher, val 0.638) → E4B, **step 500** | **75.7 / 98.3** | **40.1 / 83.3** | **24.6 / 70.0** | **36.5 / 68.8** | 71.7 / 91.9 |
 | 26bd → E4B, **step 750** | **76.6 / 98.3** | **42.0 / 86.3** | 24.6 / 68.7 | **36.8 / 69.2** | 72.4 / 92.2 |
 | 26bw (warm-started untrained-26B RL teacher, val 0.694) → E4B, **step 500** | 73.0 / 98.0 | 39.1 / **90.0** | 21.3 / **70.7** | 34.5 / **69.6** | 69.5 / 91.7 |
+| 26bw → E4B, **step 700** | 75.4 / 98.0 | 40.1 / **88.0** | 23.0 / **73.0** | **37.3 / 72.6** | 70.2 / 92.8 |
 | previous best E4B student: (c) 12br → E4B 2e-6, step 1000 | 73.6 / 97.3 | 38.8 / 85.0 | 21.7 / 67.3 | 36.0 / 67.2 | 74.0 / 93.2 |
 
 Already at step 500 the 26B-teacher student beats the best 12B-teacher student on every in-distribution mean@k (+2.1 / +1.3 / +2.9) and on
@@ -2142,6 +2143,9 @@ E4B value in the study); id_hard is flat. 42.0 id_medium mean@k also exceeds the
 any E4B model in the study). The two 26B teachers differ in lineage (the 26bd teacher was itself distilled from the E4B base before RL, so its
 distribution is closer to the student's; the 26bw teacher is the untrained 26B RL'd, more diverse), and that shows up as a sharpness-vs-
 coverage split in the students rather than as a uniform ordering by teacher accuracy.
+26bw step 700 (19:52Z, borrowing pod): mean@k rises 2.4 / 1.0 / 1.7 / 2.8 points over its step 500 (75.4 / 40.1 / 23.0 / 37.3), closing
+most of the gap to the 26bd student at step 750 (id_medium mean@k now equal at 40.1 vs 42.0), while pass@k stays ahead on id_hard (73.0) and
+MATH500 (72.6, the study's highest E4B MATH500 pass@k); id_medium pass@16 eased 90.0 → 88.0. GSM8K 70.2 / 92.8.
 
 ### 9.1 Results
 
