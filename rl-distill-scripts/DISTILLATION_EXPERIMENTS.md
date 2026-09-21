@@ -2006,6 +2006,13 @@ The 11th window held (10:47Z → still running at 17:xxZ, 6+ h): 0.569 (100) →
 all permanent checkpoints on S3. At step 140 the untrained-26B medium RL was at its best 0.6725, so the distilled-init 26B trails it by
 ~7.6 points — the same ordering as the 12B pair (distilled-init 0.497 vs untrained 0.527), with a similar gap. The curve is flattening
 (+0.3 points over steps 120–140) but has not triggered early stopping (1 miss max so far).
+Continued in the same window: 0.616 (150) → 0.620 (160) → 0.621 (170) → 0.617 / 0.613 / 0.613 (180–200, 3 misses) → **0.623 (210)**, misses
+reset. At step 219 (01:16Z, 14 h into the 11th pod) the run died with a CUDA OOM inside `actor_rollout_update_weights`: at weight-sync time the
+awake vLLM engine held 51.6 GiB on GPU 0 and the trainer 27.2 GiB, so a 1.4 GiB allocation failed — the fast layout leaves < 1 GiB of margin
+at every sync and allocator fragmentation over a long-lived process ate it (all earlier windows were ≤ 6.5 h). ScaleTrain marked the job FAILED;
+the supervisor relaunches after its 900 s backoff from the complete step-215 rolling checkpoint (4 steps lost). A fresh process resets the
+fragmentation; if it recurs, add `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` (forwarded to the workers by the run-file) or lower
+`ROLLOUT_GPU_MEMORY_UTILIZATION` below 0.10.
 
 ### 9.0n Resume of the untrained-26B-A4B medium RL (launched 2026-09-20, user request: "it never plateaued")
 
