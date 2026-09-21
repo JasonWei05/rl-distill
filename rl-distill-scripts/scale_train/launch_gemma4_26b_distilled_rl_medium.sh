@@ -33,5 +33,7 @@ ENV_VARS+=",HF_PUSH_ENABLE=${HF_PUSH_ENABLE:-False},HF_PUSH_REQUIRED=False"
 ENV_VARS+=",ROLLING_CHECKPOINT_ENABLED=True,ROLLING_CHECKPOINT_FREQ=5,FULL_CHECKPOINT_S3_URI=${S3_BASE}-full-checkpoints/26b-a4b-medium-${RUN_TAG},RUN_ARTIFACT_S3_URI=${S3_BASE}/gemma4-26b-a4b-medium-${RUN_TAG}"
 ENV_VARS+=",WANDB_RUN_ID=g4ds26b-26b-a4b-medium-${RUN_TAG}-s42-v1,WANDB_RESUME=allow"
 echo "LAUNCH_ENV ${ENV_VARS}"
-exec bash launch_st_with_code.sh --gpus-per-instance 8 --priority high --allow-borrowing --active-deadline-hours 240 \
-  --run-file run_gemma4_pt_deepscaler_4of4strict_rl.sh --job-name "g4-26b-distill-rl-med" --env-vars "${ENV_VARS}" "$@"
+BORROW_FLAG="--allow-borrowing"; JOB_NAME="${JOB_NAME:-g4-26b-distill-rl-med}"
+[ "${ALLOW_BORROWING:-true}" = false ] && { BORROW_FLAG=""; JOB_NAME="${JOB_NAME}-nb"; }   # ALLOW_BORROWING=false -> dedicated (non-preemptible) capacity
+exec bash launch_st_with_code.sh --gpus-per-instance 8 --priority high ${BORROW_FLAG} --active-deadline-hours 240 \
+  --run-file run_gemma4_pt_deepscaler_4of4strict_rl.sh --job-name "${JOB_NAME}" --env-vars "${ENV_VARS}" "$@"
