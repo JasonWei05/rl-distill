@@ -2,8 +2,7 @@
 """One-panel id_medium pass@k summary of the E4B distillation study (§9.0o wrap-up).
 
 Curves (unbiased pass@k, Chen et al. 2021, from the per-sample math-eval traces, 300 questions × 16 samples):
-  E4B base; E4B RL (bs 64, seeds 42/43/44) and E4B RL 4× batch (bs 256, seeds 45/46/47) as seed means with faint 95% CIs
-  (t-distribution, n = 3); and the four 1000-step 2e-6 → 2e-7 distilled students — teacher = untrained-12B RL, off-policy-distilled-12B RL,
+  E4B RL (bs 64, seeds 42/43/44) and E4B RL 4× batch (bs 256, seeds 45/46/47) as seed means with each seed as a faint line; and the four 1000-step 2e-6 → 2e-7 distilled students — teacher = untrained-12B RL, off-policy-distilled-12B RL,
   untrained-26B RL (warm-started run), off-policy-distilled-26B RL.
 
     python rl-distill-scripts/plot_medium_passk_summary.py [--out figures/passk_id_medium_summary.png]
@@ -13,27 +12,25 @@ from __future__ import annotations
 
 import argparse
 import json
-from math import comb, sqrt
+from math import comb
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy import stats
 
 RESULTS = Path("/tmp/gemma4_distill_study_eval/results")
 DATASET = "id_medium"
 SINGLES = [  # (tag, label, color)
-    ("base_e4b", "E4B base (no training)", "0.45"),
     ("distill_12br_lr2e6_medium_to_e4b_step1000", "untrained 12B RL → E4B", "tab:blue"),
     ("distill_12bd_medium_to_e4b_step1000", "off-policy-distilled 12B RL → E4B", "tab:cyan"),
     ("distill_26bw_lr2e6_medium_to_e4b_step1000_n8", "untrained 26B RL → E4B", "tab:red"),
     ("distill_26bd_lr2e6_medium_to_e4b_step1000", "off-policy-distilled 26B RL → E4B", "tab:orange"),
 ]
 GROUPS = [  # (tags, label, color)
-    (["rl_e4b_medium", "rl_e4b_medium_s43", "rl_e4b_medium_s44"], "E4B RL, bs 64 (mean of 3 seeds, 95% CI)", "black"),
-    (["rl_e4b_medium_bs256_s45", "rl_e4b_medium_bs256_s46", "rl_e4b_medium_bs256_s47"], "E4B RL, bs 256 (mean of 3 seeds, 95% CI)", "tab:green"),
+    (["rl_e4b_medium", "rl_e4b_medium_s43", "rl_e4b_medium_s44"], "E4B RL, bs 64 (mean of 3 seeds; faint = each seed)", "black"),
+    (["rl_e4b_medium_bs256_s45", "rl_e4b_medium_bs256_s46", "rl_e4b_medium_bs256_s47"], "E4B RL, bs 256 (mean of 3 seeds; faint = each seed)", "tab:green"),
 ]
 
 
@@ -65,21 +62,21 @@ def main() -> int:
         curves = np.stack([pass_at_k_curve(t) for t in tags])
         ks = np.arange(1, curves.shape[1] + 1)
         mean = curves.mean(axis=0)
-        half = stats.t.ppf(0.975, len(tags) - 1) * curves.std(axis=0, ddof=1) / sqrt(len(tags))
-        ax.fill_between(ks, mean - half, mean + half, color=color, alpha=0.12, lw=0)
+        for curve in curves:
+            ax.plot(ks, curve, color=color, lw=1, alpha=0.3)
         ax.plot(ks, mean, color=color, lw=2, marker="o", ms=3, label=label)
-        print(f"{label}: pass@1 {mean[0]:.1f}±{half[0]:.1f}  pass@16 {mean[-1]:.1f}±{half[-1]:.1f}")
+        print(f"{label}: pass@1 {mean[0]:.1f} (seeds {', '.join(f'{c[0]:.1f}' for c in curves)})  pass@16 {mean[-1]:.1f} (seeds {', '.join(f'{c[-1]:.1f}' for c in curves)})")
     for tag, label, color in SINGLES:
         curve = pass_at_k_curve(tag)
         ks = np.arange(1, len(curve) + 1)
-        ax.plot(ks, curve, color=color, lw=2, marker="o", ms=3, ls="--" if tag == "base_e4b" else "-", label=label)
+        ax.plot(ks, curve, color=color, lw=2, marker="o", ms=3, label=label)
         print(f"{label}: pass@1 {curve[0]:.1f}  pass@16 {curve[-1]:.1f}")
     ax.set_xscale("log", base=2)
     ax.set_xticks(ks)
     ax.set_xticklabels([str(k) for k in ks])
     ax.set_xlabel("k (samples per question)")
     ax.set_ylabel("pass@k (%)")
-    ax.set_title("E4B students on the medium band (300 held-out questions, 16 samples)\nall distilled models: 1000 steps, lr 2e-6 → 2e-7, top-128 KL on 3000×16 teacher traces", fontsize=10)
+    ax.set_title("E4B models on the medium band (300 held-out questions, 16 samples)\nall distilled models: 1000 steps, lr 2e-6 → 2e-7, top-128 KL on 3000×16 teacher traces", fontsize=10)
     ax.grid(alpha=0.3, which="both")
     ax.legend(fontsize=8, loc="lower right")
     fig.tight_layout()

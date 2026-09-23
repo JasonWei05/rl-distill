@@ -2173,9 +2173,10 @@ is the obvious next knob. All checkpoints (250/500/750/1000 + 50-step HF exports
 ckpts-v1` and `gemma4-distill-study-evals-v1` prefixes; RL teachers stopped, all ScaleTrain jobs for this section terminal.
 
 **Summary figure (2026-09-23):** `figures/passk_id_medium_summary.png` (`plot_medium_passk_summary.py`) — id_medium pass@k for k = 1…16, one
-panel: E4B base; E4B RL bs 64 (seeds 42/43/44) and bs 256 (seeds 45/46/47) as seed means with faint 95% CIs (t, n = 3); and the four
-1000-step 2e-6 students (teachers: untrained 12B RL, off-policy-distilled 12B RL, untrained 26B RL (warm-started run), off-policy-distilled 26B RL).
-pass@1 / pass@16: RL bs 64 31.4±6.3 / 75.6±9.2, RL bs 256 39.3±5.3 / 73.1±15.2, base 8.6 / 60.3, 12B-untrained student 38.8 / 85.0,
+panel: E4B RL bs 64 (seeds 42/43/44) and bs 256 (seeds 45/46/47) as seed means with each seed as a faint line (CI bands and the E4B base
+curve dropped for readability, 09-23); and the four 1000-step 2e-6 students (teachers: untrained 12B RL, off-policy-distilled 12B RL, untrained
+26B RL (warm-started run), off-policy-distilled 26B RL). pass@1 / pass@16: RL bs 64 31.4 / 75.6 (seeds 29.1–34.1 / 71.3–78.3), RL bs 256
+39.3 / 73.1 (seeds 36.9–41.1 / 68.3–80.0), E4B base (not plotted) 8.6 / 60.3, 12B-untrained student 38.8 / 85.0,
 12B-distilled student 36.6 / 82.3, 26B-untrained student 42.0 / 90.7, 26B-distilled student 42.6 / 84.7. Every distilled student sits above
 both RL means from k ≈ 4 onward; the 26B-untrained student is above everything at every k.
 
