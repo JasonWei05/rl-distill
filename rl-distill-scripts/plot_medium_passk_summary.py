@@ -2,7 +2,7 @@
 """One-panel id_medium pass@k summary of the E4B distillation study (§9.0o wrap-up).
 
 Curves (unbiased pass@k, Chen et al. 2021, from the per-sample math-eval traces, 300 questions × 16 samples):
-  E4B RL (bs 64, seeds 42/43/44) and E4B RL 4× batch (bs 256, seeds 45/46/47) as seed means with each seed as a faint line; a table of pass@1 / pass@16 sits under the plot; and the four 1000-step 2e-6 → 2e-7 distilled students — teacher = untrained-12B RL, off-policy-distilled-12B RL,
+  E4B RL (batch 64 / mini-batch 32, seeds 42/43/44) and E4B RL 4× (batch 256 / mini-batch 128, seeds 45/46/47) as seed means with each seed as a faint line; a table of pass@1 / pass@16 sits under the plot; and the four 1000-step 2e-6 → 2e-7 distilled students — teacher = untrained-12B RL, off-policy-distilled-12B RL,
   untrained-26B RL (warm-started run), off-policy-distilled-26B RL.
 
     python rl-distill-scripts/plot_medium_passk_summary.py [--out figures/passk_id_medium_summary.png]
@@ -30,8 +30,8 @@ SINGLES = [  # (tag, label, color)
     ("distill_26bd_lr2e6_medium_to_e4b_step1000", "(E4B → 26B) RL → E4B", "tab:orange"),
 ]
 GROUPS = [  # (tags, short label, color)
-    (["rl_e4b_medium", "rl_e4b_medium_s43", "rl_e4b_medium_s44"], "E4B RL, bs 64", "black"),
-    (["rl_e4b_medium_bs256_s45", "rl_e4b_medium_bs256_s46", "rl_e4b_medium_bs256_s47"], "E4B RL, bs 256", "tab:green"),
+    (["rl_e4b_medium", "rl_e4b_medium_s43", "rl_e4b_medium_s44"], "E4B RL, mini-batch 32", "black"),
+    (["rl_e4b_medium_bs256_s45", "rl_e4b_medium_bs256_s46", "rl_e4b_medium_bs256_s47"], "E4B RL, mini-batch 128", "tab:green"),
 ]
 
 def pass_at_k_curve(tag: str) -> np.ndarray:
@@ -75,10 +75,10 @@ def main() -> int:
         ax.plot(ks, curve, color=color, lw=2, marker="o", ms=3, label=label)
         p1[label], p16[label] = curve[0], curve[-1]
         print(f"{label}: pass@1 {curve[0]:.1f}  pass@16 {curve[-1]:.1f}")
-    order = sorted(p1, key=p1.get, reverse=True)
+    order = [label for _, label, _ in SINGLES] + [label for _, label, _ in GROUPS]  # distilled students by teacher, then E4B RL
     cells = [[label, f"{p1[label]:.1f}", f"{p16[label]:.1f}"] for label in order]
     tbl.axis("off")
-    table = tbl.table(cellText=cells, colLabels=["model (sorted by pass@1)", "pass@1", "pass@16"], loc="center", cellLoc="left", colLoc="left", colWidths=[0.6, 0.15, 0.15])
+    table = tbl.table(cellText=cells, colLabels=["model", "pass@1", "pass@16"], loc="center", cellLoc="left", colLoc="left", colWidths=[0.6, 0.15, 0.15])
     table.auto_set_font_size(False)
     table.set_fontsize(9)
     table.scale(1, 1.3)
@@ -95,7 +95,9 @@ def main() -> int:
     ax.set_ylabel("pass@k (%)")
     ax.set_title("E4B models on the medium band (300 held-out questions, 16 samples)\nall distilled models: 1000 steps, lr 2e-6 → 2e-7, top-128 KL on 3000×16 teacher traces", fontsize=10)
     ax.grid(alpha=0.3, which="both")
-    ax.legend(fontsize=8, loc="lower right")
+    handles, labels = ax.get_legend_handles_labels()
+    n_groups = len(GROUPS)
+    ax.legend(handles[n_groups:] + handles[:n_groups], labels[n_groups:] + labels[:n_groups], fontsize=8, loc="lower right")
     fig.tight_layout()
     fig.savefig(args.out, dpi=160)
     print(f"wrote {args.out}")
