@@ -2,7 +2,7 @@
 """One-panel id_medium pass@k summary of the E4B distillation study (§9.0o wrap-up).
 
 Curves (unbiased pass@k, Chen et al. 2021, from the per-sample math-eval traces, 300 questions × 16 samples):
-  E4B RL (bs 64, seeds 42/43/44) and E4B RL 4× batch (bs 256, seeds 45/46/47) as seed means with each seed as a faint line; and the four 1000-step 2e-6 → 2e-7 distilled students — teacher = untrained-12B RL, off-policy-distilled-12B RL,
+  E4B RL (bs 64, seeds 42/43/44) and E4B RL 4× batch (bs 256, seeds 45/46/47) as seed means with each seed as a faint line; a table of pass@1 / pass@16 sits under the plot; and the four 1000-step 2e-6 → 2e-7 distilled students — teacher = untrained-12B RL, off-policy-distilled-12B RL,
   untrained-26B RL (warm-started run), off-policy-distilled-26B RL.
 
     python rl-distill-scripts/plot_medium_passk_summary.py [--out figures/passk_id_medium_summary.png]
@@ -17,6 +17,7 @@ from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.ticker
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -28,11 +29,10 @@ SINGLES = [  # (tag, label, color)
     ("distill_26bw_lr2e6_medium_to_e4b_step1000_n8", "26B Base RL → E4B", "tab:red"),
     ("distill_26bd_lr2e6_medium_to_e4b_step1000", "(E4B → 26B) RL → E4B", "tab:orange"),
 ]
-GROUPS = [  # (tags, label, color)
-    (["rl_e4b_medium", "rl_e4b_medium_s43", "rl_e4b_medium_s44"], "E4B RL, bs 64 (mean of 3 seeds; faint = each seed)", "black"),
-    (["rl_e4b_medium_bs256_s45", "rl_e4b_medium_bs256_s46", "rl_e4b_medium_bs256_s47"], "E4B RL, bs 256 (mean of 3 seeds; faint = each seed)", "tab:green"),
+GROUPS = [  # (tags, short label, color)
+    (["rl_e4b_medium", "rl_e4b_medium_s43", "rl_e4b_medium_s44"], "E4B RL, bs 64", "black"),
+    (["rl_e4b_medium_bs256_s45", "rl_e4b_medium_bs256_s46", "rl_e4b_medium_bs256_s47"], "E4B RL, bs 256", "tab:green"),
 ]
-
 
 def pass_at_k_curve(tag: str) -> np.ndarray:
     path = RESULTS / tag / tag / "math" / "traces" / f"{tag}__{DATASET}.jsonl"
@@ -56,24 +56,41 @@ def main() -> int:
     args = parser.parse_args()
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
-    fig, ax = plt.subplots(figsize=(8, 5.5))
+    fig, (ax, tbl) = plt.subplots(2, 1, figsize=(9, 8.5), gridspec_kw={"height_ratios": [3.2, 1]})
     ks = None
+    p1: dict[str, float] = {}
+    p16: dict[str, float] = {}
     for tags, label, color in GROUPS:
         curves = np.stack([pass_at_k_curve(t) for t in tags])
         ks = np.arange(1, curves.shape[1] + 1)
         mean = curves.mean(axis=0)
         for curve in curves:
             ax.plot(ks, curve, color=color, lw=1, alpha=0.3)
-        ax.plot(ks, mean, color=color, lw=2, marker="o", ms=3, label=label)
+        ax.plot(ks, mean, color=color, lw=2, marker="o", ms=3, label=f"{label} (mean of 3 seeds; faint = each seed)")
+        p1[label], p16[label] = mean[0], mean[-1]
         print(f"{label}: pass@1 {mean[0]:.1f} (seeds {', '.join(f'{c[0]:.1f}' for c in curves)})  pass@16 {mean[-1]:.1f} (seeds {', '.join(f'{c[-1]:.1f}' for c in curves)})")
     for tag, label, color in SINGLES:
         curve = pass_at_k_curve(tag)
         ks = np.arange(1, len(curve) + 1)
         ax.plot(ks, curve, color=color, lw=2, marker="o", ms=3, label=label)
+        p1[label], p16[label] = curve[0], curve[-1]
         print(f"{label}: pass@1 {curve[0]:.1f}  pass@16 {curve[-1]:.1f}")
+    order = sorted(p1, key=p1.get, reverse=True)
+    cells = [[label, f"{p1[label]:.1f}", f"{p16[label]:.1f}"] for label in order]
+    tbl.axis("off")
+    table = tbl.table(cellText=cells, colLabels=["model (sorted by pass@1)", "pass@1", "pass@16"], loc="center", cellLoc="left", colLoc="left", colWidths=[0.6, 0.15, 0.15])
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1, 1.3)
+    for (row, col), cell in table.get_celld().items():
+        cell.set_edgecolor("0.8")
+        if row == 0:
+            cell.set_text_props(weight="bold")
     ax.set_xscale("log", base=2)
-    ax.set_xticks(ks)
-    ax.set_xticklabels([str(k) for k in ks])
+    ticks = [k for k in ks if k & (k - 1) == 0]
+    ax.set_xticks(ticks)
+    ax.set_xticklabels([str(k) for k in ticks])
+    ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
     ax.set_xlabel("k (samples per question)")
     ax.set_ylabel("pass@k (%)")
     ax.set_title("E4B models on the medium band (300 held-out questions, 16 samples)\nall distilled models: 1000 steps, lr 2e-6 → 2e-7, top-128 KL on 3000×16 teacher traces", fontsize=10)
