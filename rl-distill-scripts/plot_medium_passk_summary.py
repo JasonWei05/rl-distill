@@ -23,10 +23,10 @@ import numpy as np
 RESULTS = Path("/tmp/gemma4_distill_study_eval/results")
 DATASET = "id_medium"
 SINGLES = [  # (tag, label, color)
-    ("distill_12br_lr2e6_medium_to_e4b_step1000", "untrained 12B RL → E4B", "tab:blue"),
-    ("distill_12bd_medium_to_e4b_step1000", "off-policy-distilled 12B RL → E4B", "tab:cyan"),
-    ("distill_26bw_lr2e6_medium_to_e4b_step1000_n8", "untrained 26B RL → E4B", "tab:red"),
-    ("distill_26bd_lr2e6_medium_to_e4b_step1000", "off-policy-distilled 26B RL → E4B", "tab:orange"),
+    ("distill_12br_lr2e6_medium_to_e4b_step1000", "12B Base RL → E4B", "tab:blue"),
+    ("distill_12bd_medium_to_e4b_step1000", "(E4B → 12B) RL → E4B", "tab:cyan"),
+    ("distill_26bw_lr2e6_medium_to_e4b_step1000_n8", "26B Base RL → E4B", "tab:red"),
+    ("distill_26bd_lr2e6_medium_to_e4b_step1000", "(E4B → 26B) RL → E4B", "tab:orange"),
 ]
 GROUPS = [  # (tags, label, color)
     (["rl_e4b_medium", "rl_e4b_medium_s43", "rl_e4b_medium_s44"], "E4B RL, bs 64 (mean of 3 seeds; faint = each seed)", "black"),
