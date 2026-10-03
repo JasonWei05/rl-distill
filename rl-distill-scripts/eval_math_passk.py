@@ -381,6 +381,38 @@ def _render_prompt(tokenizer: Any, question_text: str, chat_template: str) -> li
     return [int(token_id) for token_id in token_ids]
 
 
+def _stream_finished_responses(
+    llm: Any, tokenizer: Any, questions: Sequence[EvalQuestion], chat_template: str, handle: Any
+) -> Callable[[], list[Any]]:
+    """Append every finished sample (ungraded) to ``handle`` as vLLM completes it, for live progress grading.
+
+    Wraps the engine's ``step`` on this LLM instance (samples are matched to questions by prompt token ids)
+    and returns the original ``step`` so the caller can restore it.
+    """
+    question_by_prompt = {tuple(_render_prompt(tokenizer, q.question_text, chat_template)): q for q in questions}
+    step = llm.llm_engine.step
+
+    def step_and_stream() -> list[Any]:
+        outputs = step()
+        for output in outputs:
+            if output.finished:
+                question = question_by_prompt[tuple(output.prompt_token_ids)]
+                completion = output.outputs[0]
+                record = {
+                    "question_id": question.question_id,
+                    "gold": question.gold_answer,
+                    "response_text": completion.text,
+                    "response_length": len(completion.token_ids),
+                    "finish_reason": completion.finish_reason,
+                }
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                handle.flush()
+        return outputs
+
+    llm.llm_engine.step = step_and_stream
+    return step
+
+
 def _logprob_field(entry: Any, field_name: str) -> Any:
     if isinstance(entry, Mapping):
         return entry.get(field_name)
@@ -830,6 +862,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="extra stop token ids, e.g. ChatML <|im_end|>/<|im_start|> (stop strings never match special tokens)",
     )
     parser.add_argument(
+        "--stream_dir",
+        default=None,
+        help="also append each finished (ungraded) sample to <stream_dir>/<tag>__<dataset>.stream.jsonl as it completes",
+    )
+    parser.add_argument(
         "--hf_overrides",
         type=json.loads,
         default=None,
@@ -1027,6 +1064,12 @@ def main(argv: Sequence[str] | None = None) -> None:
                     trace_handle.write(json.dumps(trace, ensure_ascii=False) + "\n")
 
                 llm, tokenizer = get_llm()
+                stream_handle = None
+                if args.stream_dir:
+                    stream_path = Path(args.stream_dir) / f"{args.tag}__{name}.stream.jsonl"
+                    stream_path.parent.mkdir(parents=True, exist_ok=True)
+                    stream_handle = stream_path.open("w", encoding="utf-8")
+                    original_step = _stream_finished_responses(llm, tokenizer, questions, chat_template, stream_handle)
                 aggregation, _ = evaluate_questions(
                     llm=llm,
                     tokenizer=tokenizer,
@@ -1055,6 +1098,9 @@ def main(argv: Sequence[str] | None = None) -> None:
                     retain_traces=False,
                     stop_token_ids=args.stop_token_ids,
                 )
+                if stream_handle is not None:
+                    llm.llm_engine.step = original_step
+                    stream_handle.close()
             partial_trace_path.replace(trace_path)
         full_metrics = aggregation["by_k"][str(samples_per_question)]
         results[name] = {

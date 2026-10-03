@@ -47,7 +47,18 @@ Both are within bf16 noise; the override changes the computation as intended (1 
 ### Results
 
 <!-- OURO_RESULTS_TABLE -->
-_Running (launched 2026-10-03 16:57 UTC on local GPUs 3–7)._
+_Updated 2026-10-03 17:36 UTC. Cells: mean@16 / pass@16 (%); italics = live mean accuracy of samples graded so far._
+
+| Model | Loops | Prompt | id_easy | id_medium | id_hard | mean resp len | truncated % |
+|---|---|---|---|---|---|---|---|
+| Ouro-1.4B | 1 | 12-shot | — | — | — | — | — |
+| Ouro-1.4B | 1 | 0-shot | — | — | — | — | — |
+| Ouro-1.4B | 4 (intended) | 12-shot | — | — | — | — | — |
+| Ouro-1.4B | 4 (intended) | 0-shot | — | — | — | — | — |
+| Ouro-2.6B | 1 | 12-shot | — | — | — | — | — |
+| Ouro-2.6B | 1 | 0-shot | — | — | — | — | — |
+| Ouro-2.6B | 4 (intended) | 12-shot | 69.3 / 99.7 | — | — | 151 | 0.1 |
+| Ouro-2.6B | 4 (intended) | 0-shot | *24.0 (250/4800)* | *15.2 (105/4800)* | *10.2 (127/4800)* | 181 | 0.0 |
 <!-- /OURO_RESULTS_TABLE -->
 
 **Observation from the smoke test:** at 1 step and temperature 1.0, Ouro-2.6B 0-shot begins a coherent
