@@ -2,14 +2,16 @@
 """Local Ouro looped-LM math evals: {1.4B, 2.6B} x {1, 4} recurrent steps x {12-shot, 0-shot}.
 
 Each (config, dataset) pair is one eval_math_passk.py process on the three 300-question DeepScaleR
-band validation sets, 16 samples/question, the standard math protocol (temp 1.0, top_p 1.0, 8192 new
+band validation sets, 4 samples/question, otherwise the standard math protocol (temp 1.0, top_p 1.0, 8192 new
 tokens, boxed-only math_verify). Loop count is set through vLLM ``hf_overrides={"total_ut_steps": N}``;
 4 is Ouro's shipped (intended) setting, early_exit_threshold=1.0 = always run all steps. Prompts are the
 repo's 12-shot math examples rendered in Ouro's native ChatML (data/ouro_chatml_{fewshot,0shot}_math.jinja).
 
 Scheduler: every GPU has two half-slots; a 4-step task takes a whole GPU (KV cache is 4x per token),
 a 1-step task takes one half. Heaviest tasks start first; finished (config, dataset) metrics are skipped
-on restart, and a restarted driver adopts still-running tasks from their ``.running`` markers.
+on restart, and a restarted driver adopts still-running tasks from their ``.running`` markers. Traces from an
+earlier 16-sample run (``--from16-root``) are cut to sample indices 0-3 (per-sample seeds make these identical
+to a 4-sample run) and re-aggregated without a GPU.
 
 Each task streams finished samples to ``<tag>/stream/``; ``--report`` grades them incrementally (same
 boxed-only ``math_verify`` as the final metrics) so unfinished tasks show a live mean accuracy.
@@ -39,6 +41,7 @@ LOOPS = (4, 1)
 DATASETS = ("id_easy", "id_medium", "id_hard")
 CHATML_STOP_TOKEN_IDS = ("2", "1")  # <|im_end|>, <|im_start|>
 KV_GIB = {1: 28, 2: 62}  # by half-slots used
+SAMPLES = 4
 
 
 def build_tasks(data_dir: Path, out_root: Path) -> list[dict]:
@@ -53,8 +56,8 @@ def build_tasks(data_dir: Path, out_root: Path) -> list[dict]:
             "--model", repo, "--model_revision", revision,
             "--tag", tag, "--chat_template", PROMPTS[prompt],
             "--datasets", str(data_dir / f"{dataset}.parquet"),
-            "--samples_per_question", "16", "--allow_nonstandard_sample_count",
-            "--ks", "1", "2", "4", "8", "16",
+            "--samples_per_question", str(SAMPLES), "--allow_nonstandard_sample_count",
+            "--ks", "1", "2", "4",
             "--subset_strategy", "monte_carlo", "--monte_carlo_resamples", "4096",
             "--out", str(metrics), "--trace_dir", str(out_root / tag / "traces"),
             "--stream_dir", str(out_root / tag / "stream"),
@@ -64,8 +67,23 @@ def build_tasks(data_dir: Path, out_root: Path) -> list[dict]:
             "--stop_token_ids", *CHATML_STOP_TOKEN_IDS,
             "--hf_overrides", f'{{"total_ut_steps": {loops}}}',
         ]
-        tasks.append({"name": f"{tag}__{dataset}", "units": units, "metrics": metrics, "command": command})
+        trace = out_root / tag / "traces" / f"{tag}__{dataset}.jsonl"
+        tasks.append(
+            {"name": f"{tag}__{dataset}", "units": units, "metrics": metrics, "trace": trace, "command": command}
+        )
     return tasks
+
+
+def convert_from_16(task: dict, from16_root: Path) -> bool:
+    """Build a task's 4-sample metrics from a finished 16-sample trace (sample indices 0-3), CPU only."""
+    source = from16_root / task["trace"].relative_to(task["trace"].parents[2])
+    if not source.exists():
+        return False
+    task["trace"].parent.mkdir(parents=True, exist_ok=True)
+    with source.open() as src, task["trace"].open("w") as dst:
+        dst.writelines(line for line in src if json.loads(line)["sample_index"] < SAMPLES)
+    result = subprocess.run([*task["command"], "--resume_traces"], cwd=REPO, capture_output=True, text=True)
+    return result.returncode == 0 and task["metrics"].exists()
 
 
 def graded_stream(stream: Path) -> list[dict]:
@@ -91,9 +109,9 @@ def graded_stream(stream: Path) -> list[dict]:
 
 
 def report(out_root: Path) -> str:
-    """Markdown table: mean@16 / pass@16 per band, plus response length and 8192-token truncation rate.
+    """Markdown table: mean@4 / pass@4 per band, plus response length and 8192-token truncation rate.
 
-    Unfinished tasks show ``*live mean acc (graded samples/4800)*`` from their streamed samples.
+    Unfinished tasks show ``*live mean acc (graded samples/1200)*`` from their streamed samples.
     """
     lines = [
         "| Model | Loops | Prompt | id_easy | id_medium | id_hard | mean resp len | truncated % |",
@@ -109,7 +127,7 @@ def report(out_root: Path) -> str:
                 graded = graded_stream(stream) if stream.exists() else []
                 if graded:
                     live_acc = 100 * sum(row["acc"] for row in graded) / len(graded)
-                    cells.append(f"*{live_acc:.1f} ({len(graded)}/4800)*")
+                    cells.append(f"*{live_acc:.1f} ({len(graded)}/{300 * SAMPLES})*")
                     lengths += [row["response_length"] for row in graded]
                 else:
                     cells.append("—")
@@ -134,7 +152,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gpus", nargs="+", type=int)
     parser.add_argument("--data-dir", type=Path, default=Path("/tmp/ouro_eval/data"))
-    parser.add_argument("--out-root", type=Path, default=Path("/tmp/ouro_eval/results"))
+    parser.add_argument("--out-root", type=Path, default=Path("/tmp/ouro_eval/results_k4"))
+    parser.add_argument("--from16-root", type=Path, default=Path("/tmp/ouro_eval/results"))
     parser.add_argument("--report", action="store_true", help="print the results table and exit")
     parser.add_argument("--doc", type=Path, help="with --report: also write the table between the OURO_RESULTS_TABLE markers")
     args = parser.parse_args()
@@ -146,11 +165,15 @@ def main() -> None:
             head, rest = text.split("<!-- OURO_RESULTS_TABLE -->\n", 1)
             tail = rest.split("<!-- /OURO_RESULTS_TABLE -->", 1)[1]
             stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
-            body = f"_Updated {stamp}. Cells: mean@16 / pass@16 (%); italics = live mean accuracy of samples graded so far._\n\n"
+            body = f"_Updated {stamp}. Cells: mean@4 / pass@4 (%); italics = live mean accuracy of samples graded so far._\n\n"
             args.doc.write_text(f"{head}<!-- OURO_RESULTS_TABLE -->\n{body}{table}\n<!-- /OURO_RESULTS_TABLE -->{tail}")
         return
 
     pending = [t for t in build_tasks(args.data_dir, args.out_root) if not t["metrics"].exists()]
+    for task in list(pending):
+        if convert_from_16(task, args.from16_root):
+            pending.remove(task)
+            print(f"{time.strftime('%FT%TZ', time.gmtime())} DONE {task['name']} (from 16-sample trace)", flush=True)
     free = {gpu: 2 for gpu in args.gpus}
     running: list[tuple[subprocess.Popen | int, dict, int]] = []  # Popen, or the pid of an adopted task
     log_dir = args.out_root / "logs"
@@ -172,7 +195,7 @@ def main() -> None:
             if isinstance(proc, int):
                 if Path(f"/proc/{proc}").exists():
                     continue
-                returncode = 0 if task["metrics"].exists() else None
+                returncode = 0 if task["metrics"].exists() or convert_from_16(task, args.from16_root) else None
             elif (returncode := proc.poll()) is None:
                 continue
             running.remove((proc, task, gpu))
