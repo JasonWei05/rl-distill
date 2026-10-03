@@ -48,20 +48,30 @@ Both are within bf16 noise; the override changes the computation as intended (1 
 ### Results
 
 <!-- OURO_RESULTS_TABLE -->
-_Updated 2026-10-03 17:43 UTC. Cells: mean@4 / pass@4 (%); italics = live mean accuracy of samples graded so far._
+_Updated 2026-10-03 18:29 UTC. Cells: mean@4 / pass@4 (%); italics = live mean accuracy of samples graded so far._
 
 | Model | Loops | Prompt | id_easy | id_medium | id_hard | mean resp len | truncated % |
 |---|---|---|---|---|---|---|---|
-| Ouro-1.4B | 1 | 12-shot | — | — | — | — | — |
-| Ouro-1.4B | 1 | 0-shot | — | — | — | — | — |
-| Ouro-1.4B | 4 (intended) | 12-shot | — | — | — | — | — |
-| Ouro-1.4B | 4 (intended) | 0-shot | — | — | — | — | — |
-| Ouro-2.6B | 1 | 12-shot | — | — | — | — | — |
-| Ouro-2.6B | 1 | 0-shot | — | — | — | — | — |
-| Ouro-2.6B | 4 (intended) | 12-shot | 68.5 / 95.3 | — | — | 143 | 0.0 |
-| Ouro-2.6B | 4 (intended) | 0-shot | — | — | — | — | — |
+| Ouro-1.4B | 1 | 12-shot | 0.3 / 1.3 | 0.1 / 0.3 | *0.0 (949/1200)* | 1165 | 0.0 |
+| Ouro-1.4B | 1 | 0-shot | *0.9 (530/1200)* | — | — | 1042 | 0.0 |
+| Ouro-1.4B | 4 (intended) | 12-shot | 63.2 / 92.3 | 27.0 / 58.7 | 9.7 / 31.7 | 260 | 0.3 |
+| Ouro-1.4B | 4 (intended) | 0-shot | *35.7 (403/1200)* | — | — | 630 | 0.0 |
+| Ouro-2.6B | 1 | 12-shot | 11.4 / 32.3 | 2.7 / 9.0 | 0.8 / 2.7 | 819 | 0.0 |
+| Ouro-2.6B | 1 | 0-shot | 9.8 / 28.0 | 2.2 / 7.3 | 0.5 / 1.3 | 847 | 0.0 |
+| Ouro-2.6B | 4 (intended) | 12-shot | 68.5 / 95.3 | 35.5 / 73.0 | 13.9 / 37.3 | 381 | 1.1 |
+| Ouro-2.6B | 4 (intended) | 0-shot | 68.6 / 88.3 | *45.3 (417/1200)* | *25.4 (272/1200)* | 1688 | 6.0 |
 <!-- /OURO_RESULTS_TABLE -->
 
-**Observation from the smoke test:** at 1 step and temperature 1.0, Ouro-2.6B 0-shot begins a coherent
-"Okay, let's see…" and then degrades into token salad within ~50 tokens; the per-step parity above rules out an
-implementation bug.
+**1-step outputs are near-uniform at temperature 1.0 (real model behavior, not a vLLM bug).** HF reference
+(`modeling_ouro.py`, fp32 on CPU), Ouro-1.4B, the 12-shot prompt for `id_easy` question 1:
+
+| | 1 step | 4 steps (shipped) |
+|---|---|---|
+| first-token entropy | **9.61 nats** (top token "To" p=0.018) | 2.13 nats (top token "The" p=0.42) |
+| greedy continuation | coherent ("To determine what fraction of the large rectangle is shaded, we need to follow these steps: …") | coherent |
+| temperature-1.0 sample | token salad ("book eukaryoticatiibuslete …") | boxed correct answer |
+
+The step-1 logits keep a sensible argmax but have an almost flat tail, so full-temperature sampling mostly draws junk
+(Ouro-1.4B 1-step: 1% of samples contain `\boxed`; Ouro-2.6B 1-step is sharper and degrades after a few dozen tokens).
+1-step numbers in the table therefore measure *temperature-1.0* behavior; greedy/low-temperature 1-step evals would
+be much higher.
