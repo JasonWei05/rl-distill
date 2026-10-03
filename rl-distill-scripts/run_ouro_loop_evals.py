@@ -64,6 +64,8 @@ def build_tasks(data_dir: Path, out_root: Path) -> list[dict]:
             "--predictive_topk_width", "0",
             "--questions_per_batch", "300", "--request_batch_size", "4800",
             "--kv_cache_memory_gib", str(KV_GIB[units]),
+            # vLLM's startup check wants free memory >= utilization * total even with a fixed KV budget
+            "--gpu_memory_utilization", "0.4" if units == 1 else "0.9",
             "--stop_token_ids", *CHATML_STOP_TOKEN_IDS,
             "--hf_overrides", f'{{"total_ut_steps": {loops}}}',
         ]
