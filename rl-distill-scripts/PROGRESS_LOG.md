@@ -9,6 +9,19 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-03 — Ouro looped-LM baseline evals (1 vs 4 loops, 12-shot vs 0-shot)
+
+Start of a controlled study with ByteDance Ouro-1.4B / Ouro-2.6B (planned: small model with no loop vs larger model
+with untied per-loop parameters). Baseline: both models × {1, 4 (shipped)} recurrent steps × {12-shot, 0-shot}, on the
+three 300-question DeepScaleR band validation sets, 4 samples/question, temp 1.0, 8192 tokens, boxed-only math_verify.
+Run locally on GPUs 3–7 via `run_ouro_loop_evals.py` (loop count through vLLM `hf_overrides`; HF-vs-vLLM parity
+checked at 1 and 4 steps). **Done, 24/24.** Key results (mean@4, easy/medium/hard): 2.6B 4-step 0-shot
+68.6/55.5/41.0, 1.4B 4-step 0-shot 62.2/51.4/38.2; 12-shot is 20–29 points worse on medium/hard; 1-step ≈ 0–11
+because the 1-step distribution is near-uniform at temperature 1.0 (argmax still coherent). Full table + findings:
+[`OURO_LOOP_STUDY.md`](OURO_LOOP_STUDY.md). Traces/metrics: `/tmp/ouro_eval/results_k4/` (local NVMe only).
+
+---
+
 ## 2026-08-06 — Borrowing-enabled extra runs have durable full-checkpoint recovery
 
 Three high-priority borrowing jobs were submitted: 12B Medium
