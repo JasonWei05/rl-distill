@@ -547,6 +547,7 @@ def _make_sampling_params(
     top_k: int,
     max_tokens: int,
     predictive_topk_width: int,
+    stop_token_ids: Sequence[int] = (),
 ) -> Any:
     return sampling_params_class(
         n=1,
@@ -555,6 +556,7 @@ def _make_sampling_params(
         top_k=top_k,
         max_tokens=max_tokens,
         stop=list(STOP_STRINGS),
+        stop_token_ids=list(stop_token_ids),
         logprobs=predictive_topk_width if predictive_topk_width > 0 else None,
         seed=seed,
     )
@@ -587,6 +589,7 @@ def evaluate_questions(
     questions_per_batch: int = 1,
     trace_callback: Callable[[Mapping[str, Any]], None] | None = None,
     retain_traces: bool = True,
+    stop_token_ids: Sequence[int] = (),
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Run generation through scoring while bounding retained response data.
 
@@ -649,6 +652,7 @@ def evaluate_questions(
                     top_k=top_k,
                     max_tokens=max_tokens,
                     predictive_topk_width=predictive_topk_width,
+                    stop_token_ids=stop_token_ids,
                 )
                 for _, request in request_batch
             ]
@@ -818,6 +822,19 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="fixed KV-cache budget (GiB); bypasses vLLM memory profiling so several instances can share a GPU",
     )
     parser.add_argument("--enforce_eager", action="store_true")
+    parser.add_argument(
+        "--stop_token_ids",
+        nargs="+",
+        type=int,
+        default=[],
+        help="extra stop token ids, e.g. ChatML <|im_end|>/<|im_start|> (stop strings never match special tokens)",
+    )
+    parser.add_argument(
+        "--hf_overrides",
+        type=json.loads,
+        default=None,
+        help='JSON dict of model-config overrides passed to vLLM, e.g. \'{"total_ut_steps": 1}\' for Ouro',
+    )
     return parser.parse_args(argv)
 
 
@@ -926,6 +943,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     }
     if args.model_revision and not Path(args.model).exists():
         llm_kwargs["revision"] = args.model_revision
+    if args.hf_overrides:
+        llm_kwargs["hf_overrides"] = args.hf_overrides
     if args.kv_cache_memory_gib is not None:
         llm_kwargs["kv_cache_memory_bytes"] = int(args.kv_cache_memory_gib * 2**30)
     chat_template = Path(args.chat_template).read_text()
@@ -1034,6 +1053,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                     questions_per_batch=args.questions_per_batch,
                     trace_callback=write_trace,
                     retain_traces=False,
+                    stop_token_ids=args.stop_token_ids,
                 )
             partial_trace_path.replace(trace_path)
         full_metrics = aggregation["by_k"][str(samples_per_question)]
