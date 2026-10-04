@@ -159,3 +159,22 @@ asked, so the true score lies between the two.
 (and ~2.7–5× its compute). Gains saturate by r ≈ 16; r ≤ 8 is near-broken (greedy repetition loops); temperature-1.0
 sampling cuts accuracy 2–4×, like low-loop Ouro. Consistent with its paper (MATH 12 %, GSM8K CoT 35–42 % at r = 32):
 Huginn is an 800B-token proof of concept, not a strong math base.
+
+## 4. IFM dense `d28` / `d112` prepared as HF Llama checkpoints (2026-10-04)
+
+Student/teacher pair on identical data and tokens (both 336B tokens, same 250k K2-Horizon tokenizer, no looping):
+[`IFM/LoopedLM-P1-dense-d28-336b`](https://huggingface.co/IFM/LoopedLM-P1-dense-d28-336b) (1.497B, 28 layers) and
+[`IFM/LoopedLM-P1-dense-d112-336b`](https://huggingface.co/IFM/LoopedLM-P1-dense-d112-336b) (3.677B, 112 layers;
+a [500B endpoint](https://huggingface.co/IFM/LoopedLM-P1-dense-d112-500b) also exists, d28 has none). Published
+(IFM Part I Table 2, own protocol): MATH500 12.80 → 47.60, GSM8K 29.11 → 64.22, BBH-CoT 34.42 → 55.91.
+
+- **Converted (bf16):** `s3://scale-ml/genai/rl-distill/ifm-hf/dense-{d28,d112}-336b/` (local `/tmp/ifm_eval/hf/`).
+  Plain `LlamaForCausalLM` (GQA 24/6 heads × 64, rope θ 1e6, RMSNorm eps 1e-6, untied head, bos=0 `<|begin_of_text|>`,
+  eos=1 `<|endoftext|>`, no chat template — prepend BOS). Loads in vLLM 0.15.1 as stock Llama.
+- **Converter:** `ifm/convert_ifm_dense_to_llama.py` (also unrolls `dense-ouro` / `dense-middle`; refuses injection,
+  random state init, H/L, MoE). Two non-obvious steps: xLLM RMSNorm applies `weight + 1.0` (stored gains are offsets),
+  and xLLM RoPE is interleaved complex → q/k rows permuted per head for HF `rotate_half`.
+- **Parity gate:** `ifm/check_ifm_llama_parity.py` vs IFM's own xLLM forward (pure-torch attention backend; xLLM CUDA
+  extension built locally, deps in `/tmp/ifm_eval/pydeps`). fp32: d28 argmax agreement 100%, mean |Δlogp| 0.0004,
+  NLL 1.7267 = 1.7267; d112 100%, 0.0003, 1.4596 = 1.4596 → `IFM_LLAMA_PARITY_OK`. bf16 differs only by kernel
+  rounding (98% / 0.02).
