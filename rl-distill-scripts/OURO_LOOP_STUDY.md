@@ -117,3 +117,45 @@ The step-1 logits keep a sensible argmax but have an almost flat tail, so full-t
 (Ouro-1.4B 1-step: 1% of samples contain `\boxed`; Ouro-2.6B 1-step is sharper and degrades after a few dozen tokens).
 1-step numbers in the table therefore measure *temperature-1.0* behavior; greedy/low-temperature 1-step evals would
 be much higher.
+
+## 3. Comparison: Huginn-0125 (tomg-group-umd, recurrent-depth "Raven" model, 2026-10-04)
+
+[Huginn-0125](https://huggingface.co/tomg-group-umd/huginn-0125) @ `bb6621b6` (arXiv 2502.05171): 3.5B params =
+2 prelude + 4 recurrent + 2 coda layers (hidden 5280, **55 KV heads = full MHA**, head_dim 96), trained with a random
+recurrence count (mean r = 32), context 4096. No vLLM support → HF remote code, patched locally (static-cache ctor
+for transformers ≥ 4.56; contiguous `torch.cat` fast path for the default "full" dynamic cache — the shipped one
+re-stacks per-token entries every layer step). Scripts: `eval_huginn_math.py`, `run_huginn_math_evals.sh`;
+outputs `/tmp/huginn_eval/runs/<config>/`.
+
+**KV cache per token** (bf16, K+V): (4 + 4r) layer caches × 20.6 KiB.
+
+| Model | KV/token | KV for a 2k-token seq | matmul params/token |
+|---|---|---|---|
+| Huginn r=4 / 8 / 16 | 412 / 742 / 1,402 KiB | 0.8 / 1.5 / 2.7 GiB | ~8 / 15 / 27B |
+| **Huginn r=32 (default)** | **2,722 KiB** | **5.3 GiB** | **~53B** |
+| Huginn r=64 | 5,362 KiB | 10.5 GiB | ~103B |
+| Huginn + `compress-s16` KV sharing (zero-shot trick) | 412 KiB | 0.8 GiB | — |
+| Ouro-2.6B 1 / 4 loops | 384 / 1,536 KiB | 0.75 / 3.0 GiB | ~2.5 / 10B |
+| Gemma-4 12B / E4B | 16 KiB past window | 352 / 52 MiB | ~11 / 4B |
+
+**Protocol.** Huginn's standard inference = greedy, chat template + its math system prompt ("You are a helpful
+assistant that is capable of helping users with mathematical reasoning."); we add "Please reason step by step, and put
+your final answer within \boxed{}." so the boxed-only grader applies (without it Huginn boxes ~3–19 %). 1 sample/q
+(greedy is deterministic), 1024 max new tokens (4k context). **Strict** = boxed-only `math_verify` (our protocol);
+**lenient** = whole-output extraction (has false positives — upper bound only). Huginn boxes only ~25–35 % even when
+asked, so the true score lies between the two.
+
+| Huginn config | id_easy strict / lenient | id_medium | id_hard | boxed | hit 1024 cap |
+|---|---|---|---|---|---|
+| r=4, greedy | 0.7 / 8.3 | 0.3 / 5.3 | 0.3 / 4.3 | 5–7 % | 49–58 % |
+| r=8, greedy | 6.3 / 13.7 | 1.7 / 3.3 | 0.7 / 2.3 | 28–33 % | 30–39 % |
+| r=16, greedy | **17.3 / 33.3** | **6.7 / 15.3** | **2.3 / 6.0** | 24–35 % | 12–32 % |
+| **r=32, greedy (standard)** | 14.7 / 28.7 | 7.0 / 12.7 | 1.3 / 5.7 | 26–31 % | 11–28 % |
+| r=64, greedy | 17.0 / 30.0 | 5.0 / 14.3 | 1.3 / 5.3 | 24–32 % | 9–27 % |
+| r=32, temperature 1.0 | 5.7 / 11.3 | 1.7 / 2.7 | 2.0 / 3.7 | 31–32 % | 2–7 % |
+
+**Verdict: not better.** Even Huginn's lenient upper bound at its best depth (r=16) is about half of Ouro-2.6B 4-loop
+0-shot on easy (68.6 mean@4) and ~1/7 on hard (41.0), while costing 0.9–1.8× Ouro-2.6B@4's KV per token at r=16–32
+(and ~2.7–5× its compute). Gains saturate by r ≈ 16; r ≤ 8 is near-broken (greedy repetition loops); temperature-1.0
+sampling cuts accuracy 2–4×, like low-loop Ouro. Consistent with its paper (MATH 12 %, GSM8K CoT 35–42 % at r = 32):
+Huginn is an 800B-token proof of concept, not a strong math base.
