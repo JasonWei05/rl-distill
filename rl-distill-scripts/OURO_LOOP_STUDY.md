@@ -48,16 +48,20 @@ Both are within bf16 noise; the override changes the computation as intended (1 
 ### Results
 
 <!-- OURO_RESULTS_TABLE -->
-_Updated 2026-10-03 21:05 UTC. Cells: mean@4 / pass@4 (%); italics = live mean accuracy of samples graded so far._
+_Updated 2026-10-04 01:13 UTC. Cells: mean@4 / pass@4 (%); italics = live mean accuracy of samples graded so far._
 
 | Model | Loops | Prompt | id_easy | id_medium | id_hard | mean resp len | truncated % |
 |---|---|---|---|---|---|---|---|
 | Ouro-1.4B | 1 | 12-shot | 0.3 / 1.3 | 0.1 / 0.3 | 0.0 / 0.0 | 1215 | 0.0 |
 | Ouro-1.4B | 1 | 0-shot | 0.7 / 2.7 | 0.1 / 0.3 | 0.0 / 0.0 | 1364 | 0.0 |
+| Ouro-1.4B | 2 | 0-shot | — | — | — | — | — |
+| Ouro-1.4B | 3 | 0-shot | — | — | — | — | — |
 | Ouro-1.4B | 4 (intended) | 12-shot | 63.2 / 92.3 | 27.0 / 58.7 | 9.7 / 31.7 | 260 | 0.3 |
 | Ouro-1.4B | 4 (intended) | 0-shot | 62.2 / 86.3 | 51.4 / 77.0 | 38.2 / 62.0 | 2614 | 14.2 |
 | Ouro-2.6B | 1 | 12-shot | 11.4 / 32.3 | 2.7 / 9.0 | 0.8 / 2.7 | 819 | 0.0 |
 | Ouro-2.6B | 1 | 0-shot | 9.8 / 28.0 | 2.2 / 7.3 | 0.5 / 1.3 | 847 | 0.0 |
+| Ouro-2.6B | 2 | 0-shot | — | — | — | — | — |
+| Ouro-2.6B | 3 | 0-shot | — | — | — | — | — |
 | Ouro-2.6B | 4 (intended) | 12-shot | 68.5 / 95.3 | 35.5 / 73.0 | 13.9 / 37.3 | 381 | 1.1 |
 | Ouro-2.6B | 4 (intended) | 0-shot | 68.6 / 88.3 | 55.5 / 80.3 | 41.0 / 64.3 | 2268 | 10.2 |
 <!-- /OURO_RESULTS_TABLE -->
@@ -76,6 +80,10 @@ _Updated 2026-10-03 21:05 UTC. Cells: mean@4 / pass@4 (%); italics = live mean a
    41.0, 1.4B hard 9.7 → 38.2); on easy they tie on mean@4 while 12-shot has higher pass@4. The short 12-shot exemplars
    make the model answer in ~250–400 tokens. 0-shot is the stronger default for this family; note its 10–14 %
    truncation at 8192 tokens on hard/medium, so a larger budget could raise it further.
+
+**Extension (2026-10-04, running):** 0-shot only (12-shot dropped per finding 3), **2 and 3 recurrent steps** for both
+models on all three bands, same protocol, all 8 local GPUs:
+`run_ouro_loop_evals.py --gpus 0 1 2 3 4 5 6 7 --loops 2 3 --prompts 0shot`. Rows appear in the table above.
 
 **1-step outputs are near-uniform at temperature 1.0 (real model behavior, not a vLLM bug).** HF reference
 (`modeling_ouro.py`, fp32 on CPU), Ouro-1.4B, the 12-shot prompt for `id_easy` question 1:

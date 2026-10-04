@@ -37,19 +37,19 @@ PROMPTS = {
     "fewshot12": "rl-distill-scripts/data/ouro_chatml_fewshot_math.jinja",
     "0shot": "rl-distill-scripts/data/ouro_chatml_0shot_math.jinja",
 }
-LOOPS = (4, 1)
+LOOPS = (1, 2, 3, 4)
 DATASETS = ("id_easy", "id_medium", "id_hard")
 CHATML_STOP_TOKEN_IDS = ("2", "1")  # <|im_end|>, <|im_start|>
 KV_GIB = {1: 28, 2: 62}  # by half-slots used
 SAMPLES = 4
 
 
-def build_tasks(data_dir: Path, out_root: Path) -> list[dict]:
+def build_tasks(data_dir: Path, out_root: Path, loop_counts: list[int], prompts: list[str]) -> list[dict]:
     tasks = []
-    for size, loops, prompt, dataset in itertools.product(("2p6b", "1p4b"), LOOPS, PROMPTS, DATASETS):
+    for size, loops, prompt, dataset in itertools.product(("2p6b", "1p4b"), loop_counts, prompts, DATASETS):
         tag = f"ouro{size}_ut{loops}_{prompt}"
         repo, revision = MODELS[size]
-        units = 2 if loops == 4 else 1
+        units = 1 if loops == 1 else 2  # KV per token grows with the loop count
         metrics = out_root / tag / f"metrics_{dataset}.json"
         command = [
             sys.executable, "rl-distill-scripts/eval_math_passk.py",
@@ -70,10 +70,12 @@ def build_tasks(data_dir: Path, out_root: Path) -> list[dict]:
             "--hf_overrides", f'{{"total_ut_steps": {loops}}}',
         ]
         trace = out_root / tag / "traces" / f"{tag}__{dataset}.jsonl"
+        # rough relative cost (KV bytes x response length) so the longest tasks start first
+        cost = loops * (2 if size == "2p6b" else 1) * {"id_easy": 1, "id_medium": 2.5, "id_hard": 4}[dataset]
         tasks.append(
-            {"name": f"{tag}__{dataset}", "units": units, "metrics": metrics, "trace": trace, "command": command}
+            {"name": f"{tag}__{dataset}", "units": units, "metrics": metrics, "trace": trace, "command": command, "cost": cost}
         )
-    return tasks
+    return sorted(tasks, key=lambda task: -task["cost"])
 
 
 def convert_from_16(task: dict, from16_root: Path) -> bool:
@@ -119,8 +121,10 @@ def report(out_root: Path) -> str:
         "| Model | Loops | Prompt | id_easy | id_medium | id_hard | mean resp len | truncated % |",
         "|---|---|---|---|---|---|---|---|",
     ]
-    for size, loops, prompt in itertools.product(("1p4b", "2p6b"), (1, 4), PROMPTS):
+    for size, loops, prompt in itertools.product(("1p4b", "2p6b"), LOOPS, PROMPTS):
         tag = f"ouro{size}_ut{loops}_{prompt}"
+        if not (out_root / tag).exists():
+            continue
         cells, lengths = [], []
         for dataset in DATASETS:
             metrics = out_root / tag / f"metrics_{dataset}.json"
@@ -153,6 +157,8 @@ def report(out_root: Path) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gpus", nargs="+", type=int)
+    parser.add_argument("--loops", nargs="+", type=int, default=[1, 4], help="recurrent step counts to evaluate")
+    parser.add_argument("--prompts", nargs="+", choices=list(PROMPTS), default=list(PROMPTS))
     parser.add_argument("--data-dir", type=Path, default=Path("/tmp/ouro_eval/data"))
     parser.add_argument("--out-root", type=Path, default=Path("/tmp/ouro_eval/results_k4"))
     parser.add_argument("--from16-root", type=Path, default=Path("/tmp/ouro_eval/results"))
@@ -171,7 +177,9 @@ def main() -> None:
             args.doc.write_text(f"{head}<!-- OURO_RESULTS_TABLE -->\n{body}{table}\n<!-- /OURO_RESULTS_TABLE -->{tail}")
         return
 
-    pending = [t for t in build_tasks(args.data_dir, args.out_root) if not t["metrics"].exists()]
+    pending = [
+        t for t in build_tasks(args.data_dir, args.out_root, args.loops, args.prompts) if not t["metrics"].exists()
+    ]
     for task in list(pending):
         if convert_from_16(task, args.from16_root):
             pending.remove(task)
