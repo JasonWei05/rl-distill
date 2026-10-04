@@ -40,6 +40,9 @@ TEMPLATE="${TEMPLATE:-rl-distill-scripts/data/qwen3_base_native_chat.jinja}"
 NL=$'\n'
 STOP_STRINGS="${STOP_STRINGS:-<|im_end|>,${NL}Human:,${NL}user${NL}}"   # base models continue as plain-text chat turns
 STOP_TOKEN_IDS="${STOP_TOKEN_IDS:-151645,151643,151644}"
+# Pin the backend: the image .venv's flash_attn.cute import crashes vLLM's backend auto-selection
+# (AttributeError: cutlass.cute.core has no ThrMma); an explicit backend skips that probe.
+ATTENTION_BACKEND="${ATTENTION_BACKEND:-TRITON_ATTN}"
 n_gpus="${N_GPUS:-$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)}"
 MAX_QUESTIONS="${MAX_QUESTIONS:-0}"   # >0 only for a local smoke test of this run-file
 mkdir -p "${WORK}/out"
@@ -62,6 +65,7 @@ for g in $(seq 0 $((n_gpus - 1))); do
     --max-tokens "${MAX_TOKENS}" --max-model-len $((MAX_TOKENS + 2048)) --max-prompt-tokens 2048 \
     --temperature 1.0 --top-p 1.0 --top-k -1 --stop-strings "${STOP_STRINGS}" --stop-token-ids "${STOP_TOKEN_IDS}" \
     --append-boxed-instruction --boxed-instruction "${PROMPT_INSTRUCTION}" \
+    --attention-backend "${ATTENTION_BACKEND}" \
     --chunk-size "${CHUNK_SIZE}" --max-questions "${MAX_QUESTIONS}" --max-num-seqs 512 --gpu-memory-utilization 0.9 \
     > "${WORK}/out/shard${g}.log" 2>&1 &
   pids+=($!)
