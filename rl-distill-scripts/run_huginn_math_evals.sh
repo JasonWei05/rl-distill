@@ -26,7 +26,8 @@ for g in $(seq 0 $((N - 1))); do
         --out_dir /tmp/huginn_eval/runs/$name --shard $g/$N --samples_per_question 1 --temperature $temp \
         --num_steps $steps --prompt boxinstr --batch_size $batch --max_new_tokens 1024 \
         >> /tmp/huginn_eval/runs/$name/logs/shard$g.log 2>&1
-      echo "$(date -u +%FT%TZ) SHARD_DONE $name $g rc=$?" >> /tmp/huginn_eval/runs/progress.log
+      rc=$?  # capture before $(date) resets it
+      echo "$(date -u +%FT%TZ) SHARD_DONE $name $g rc=$rc" >> /tmp/huginn_eval/runs/progress.log
     done
   ) &
 done
