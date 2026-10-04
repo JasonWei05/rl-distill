@@ -98,9 +98,12 @@ def grade(args: argparse.Namespace) -> None:
     from verl.utils.reward_score import math_verify
 
     summary = {}
-    for name in sorted({Path(p).name.split(".shard")[0] for p in glob.glob(f"{args.out_dir}/*.shard*of*.jsonl")}):
+    def shard_files(pattern: str) -> list[str]:
+        return sorted(p for p in glob.glob(pattern) if not p.endswith(".graded.jsonl"))  # skip the grade caches
+
+    for name in sorted({Path(p).name.split(".shard")[0] for p in shard_files(f"{args.out_dir}/*.shard*of*.jsonl")}):
         rows = []
-        for path in sorted(glob.glob(f"{args.out_dir}/{name}.shard*of*.jsonl")):
+        for path in shard_files(f"{args.out_dir}/{name}.shard*of*.jsonl"):
             cache_path = Path(path).with_suffix(".graded.jsonl")
             cached = [json.loads(line) for line in cache_path.open()] if cache_path.exists() else []
             with open(path) as src, cache_path.open("a") as cache:
