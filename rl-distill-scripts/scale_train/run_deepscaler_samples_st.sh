@@ -34,7 +34,10 @@ command -v aws >/dev/null || { echo "FATAL: aws CLI missing" >&2; exit 2; }
 
 WORK="${WORK:-/tmp/ds_samples}"   # fixed paths: the per-shard manifest records them and must match across relaunches
 N="${N:-8}"; MAX_TOKENS="${MAX_TOKENS:-8192}"; CHUNK_SIZE="${CHUNK_SIZE:-256}"; SYNC_SECONDS="${SYNC_SECONDS:-120}"
-PROMPT_INSTRUCTION="${PROMPT_INSTRUCTION:-Please reason step by step, and put your final answer within \\boxed{}.}"
+# Single-quoted default: inside ${VAR:-...} bash ends the default at the first "}" and mangles "\boxed{}".
+DEFAULT_INSTRUCTION='Please reason step by step, and put your final answer within \boxed{}.'
+PROMPT_INSTRUCTION="${PROMPT_INSTRUCTION:-${DEFAULT_INSTRUCTION}}"
+echo "PROMPT_INSTRUCTION=${PROMPT_INSTRUCTION}"
 INPUT_S3="${INPUT_S3:-s3://scale-ml/genai/rl-distill/data/deepscaler_it_gen_dedup_v2.parquet}"
 TEMPLATE="${TEMPLATE:-rl-distill-scripts/data/qwen3_base_native_chat.jinja}"
 NL=$'\n'
