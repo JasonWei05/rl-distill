@@ -9,6 +9,21 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-04 — Qwen3 base family chosen; Qwen3-8B-Base DeepScaleR sampling (n=8) on ScaleTrain
+
+Switched the controlled student/teacher study to the Qwen3 Base family (1.7B / 4B / 8B; same 36T pretraining tokens
+per the Qwen3 report). First job: Qwen3-8B-Base on the full deduplicated DeepScaleR set (38,796 questions,
+`deepscaler_it_gen_dedup_v2.parquet`), 8 samples/question, temp 1.0, top_p 1.0, 8192 max response tokens, 0-shot native
+ChatML prompt + "Please reason step by step, and put your final answer within \\boxed{}." (bare question boxed only 54%
+in a smoke test, with Python-program/Chinese drift; the instruction gives ~87-89% boxed). Stops: `<|im_end|>` token id
+plus plain-text "\\nHuman:" / "\\nuser\\n" turn starts. ScaleTrain 4 GPUs (borrowing, high), DP4 via
+`scale_train/run_deepscaler_samples_st.sh` (S3-resumable chunk parquets, supervisor relaunch). Bugs fixed before the
+real run: untracked generator not shipped; image .venv flash_attn.cute crash (pin TRITON_ATTN); `${VAR:-...}` default
+mangled `\\boxed{}` to `\\boxed{.}`. First 1,024 questions: 89% boxed, strict mean@8 28.9%, pass@8 70.8%.
+Output: `s3://scale-ml/genai/rl-distill/qwen3-deepscaler-samples/qwen3-8b-base-0shot-qwenmath-n8-8k/`. **Running.**
+
+---
+
 ## 2026-10-03 — Ouro looped-LM baseline evals (1 vs 4 loops, 12-shot vs 0-shot)
 
 Start of a controlled study with ByteDance Ouro-1.4B / Ouro-2.6B (planned: small model with no loop vs larger model
