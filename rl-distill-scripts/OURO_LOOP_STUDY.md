@@ -48,25 +48,25 @@ Both are within bf16 noise; the override changes the computation as intended (1 
 ### Results
 
 <!-- OURO_RESULTS_TABLE -->
-_Updated 2026-10-04 01:13 UTC. Cells: mean@4 / pass@4 (%); italics = live mean accuracy of samples graded so far._
+_Updated 2026-10-04 03:32 UTC. Cells: mean@4 / pass@4 (%); italics = live mean accuracy of samples graded so far._
 
 | Model | Loops | Prompt | id_easy | id_medium | id_hard | mean resp len | truncated % |
 |---|---|---|---|---|---|---|---|
 | Ouro-1.4B | 1 | 12-shot | 0.3 / 1.3 | 0.1 / 0.3 | 0.0 / 0.0 | 1215 | 0.0 |
 | Ouro-1.4B | 1 | 0-shot | 0.7 / 2.7 | 0.1 / 0.3 | 0.0 / 0.0 | 1364 | 0.0 |
-| Ouro-1.4B | 2 | 0-shot | — | — | — | — | — |
-| Ouro-1.4B | 3 | 0-shot | — | — | — | — | — |
+| Ouro-1.4B | 2 | 0-shot | 36.3 / 75.0 | 15.2 / 37.0 | 6.2 / 18.7 | 1693 | 0.5 |
+| Ouro-1.4B | 3 | 0-shot | 68.5 / 91.0 | 51.8 / 76.7 | 36.8 / 63.3 | 2724 | 15.0 |
 | Ouro-1.4B | 4 (intended) | 12-shot | 63.2 / 92.3 | 27.0 / 58.7 | 9.7 / 31.7 | 260 | 0.3 |
 | Ouro-1.4B | 4 (intended) | 0-shot | 62.2 / 86.3 | 51.4 / 77.0 | 38.2 / 62.0 | 2614 | 14.2 |
 | Ouro-2.6B | 1 | 12-shot | 11.4 / 32.3 | 2.7 / 9.0 | 0.8 / 2.7 | 819 | 0.0 |
 | Ouro-2.6B | 1 | 0-shot | 9.8 / 28.0 | 2.2 / 7.3 | 0.5 / 1.3 | 847 | 0.0 |
-| Ouro-2.6B | 2 | 0-shot | — | — | — | — | — |
-| Ouro-2.6B | 3 | 0-shot | — | — | — | — | — |
+| Ouro-2.6B | 2 | 0-shot | 68.7 / 92.7 | 44.5 / 75.0 | 25.8 / 50.7 | 2503 | 6.4 |
+| Ouro-2.6B | 3 | 0-shot | 72.6 / 91.3 | 55.2 / 79.3 | 41.5 / 69.3 | 2403 | 10.8 |
 | Ouro-2.6B | 4 (intended) | 12-shot | 68.5 / 95.3 | 35.5 / 73.0 | 13.9 / 37.3 | 381 | 1.1 |
 | Ouro-2.6B | 4 (intended) | 0-shot | 68.6 / 88.3 | 55.5 / 80.3 | 41.0 / 64.3 | 2268 | 10.2 |
 <!-- /OURO_RESULTS_TABLE -->
 
-**Status:** complete 2026-10-03 21:05 UTC (24/24 tasks, no failures; ~4 h on 5 local H100s).
+**Status:** baseline complete 2026-10-03 21:05 UTC (24/24 tasks, no failures; ~4 h on 5 local H100s); 0-shot 2/3-step extension complete 2026-10-04 03:32 UTC (below).
 
 **Findings**
 
@@ -81,9 +81,28 @@ _Updated 2026-10-04 01:13 UTC. Cells: mean@4 / pass@4 (%); italics = live mean a
    make the model answer in ~250–400 tokens. 0-shot is the stronger default for this family; note its 10–14 %
    truncation at 8192 tokens on hard/medium, so a larger budget could raise it further.
 
-**Extension (2026-10-04, running):** 0-shot only (12-shot dropped per finding 3), **2 and 3 recurrent steps** for both
-models on all three bands, same protocol, all 8 local GPUs:
-`run_ouro_loop_evals.py --gpus 0 1 2 3 4 5 6 7 --loops 2 3 --prompts 0shot`. Rows appear in the table above.
+**Extension: 0-shot loop sweep (2026-10-04, complete 03:32 UTC, 12/12 tasks, 8 local GPUs, ~2 h 20 min).**
+0-shot only (12-shot dropped per finding 3); `run_ouro_loop_evals.py --gpus 0 1 2 3 4 5 6 7 --loops 2 3 --prompts 0shot`.
+0-shot mean@4 / pass@4 by recurrent steps:
+
+| Model | Steps | id_easy | id_medium | id_hard |
+|---|---|---|---|---|
+| Ouro-1.4B | 1 | 0.7 / 2.7 | 0.1 / 0.3 | 0.0 / 0.0 |
+| Ouro-1.4B | 2 | 36.3 / 75.0 | 15.2 / 37.0 | 6.2 / 18.7 |
+| Ouro-1.4B | 3 | **68.5 / 91.0** | **51.8** / 76.7 | 36.8 / **63.3** |
+| Ouro-1.4B | 4 (shipped) | 62.2 / 86.3 | 51.4 / **77.0** | **38.2** / 62.0 |
+| Ouro-2.6B | 1 | 9.8 / 28.0 | 2.2 / 7.3 | 0.5 / 1.3 |
+| Ouro-2.6B | 2 | 68.7 / **92.7** | 44.5 / 75.0 | 25.8 / 50.7 |
+| Ouro-2.6B | 3 | **72.6** / 91.3 | 55.2 / 79.3 | **41.5 / 69.3** |
+| Ouro-2.6B | 4 (shipped) | 68.6 / 88.3 | **55.5 / 80.3** | 41.0 / 64.3 |
+
+4. **3 steps ≈ 4 steps** for both models (within ~1.5 mean@4 everywhere, ahead on easy); essentially all of the
+   gain is from 2 → 3 steps.
+5. **2 steps is where the models separate.** Ouro-2.6B at 2 steps ties 4 steps on easy but loses 11/15 points on
+   medium/hard; Ouro-1.4B at 2 steps loses 26–36 points. At 2 steps the 1.4B responses start coherent and then
+   derail into token salad mid-solution (only 13–40 % contain `\boxed`): HF reference first-token entropy (same
+   prompt as below) is 9.61 / 3.28 / 2.12 / 2.13 nats at 1 / 2 / 3 / 4 steps, so 2 steps is sharp enough to start
+   but its tail is heavy enough that temperature-1.0 sampling over ~2k tokens eventually draws a junk token.
 
 **1-step outputs are near-uniform at temperature 1.0 (real model behavior, not a vLLM bug).** HF reference
 (`modeling_ouro.py`, fp32 on CPU), Ouro-1.4B, the 12-shot prompt for `id_easy` question 1:
