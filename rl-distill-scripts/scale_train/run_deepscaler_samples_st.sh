@@ -6,6 +6,7 @@
 #   - a background loop mirrors finished chunk parquets (never *.tmp) to OUT_S3 every SYNC_SECONDS;
 #   - when every shard finishes, the merged shard outputs + all.parquet + RUN_COMPLETE.json are uploaded.
 # Env: MODEL_REPO, MODEL_REVISION (pinned), OUT_S3 (required); PROMPT_INSTRUCTION, N, MAX_TOKENS, CHUNK_SIZE optional.
+# TP (default 1): tensor-parallel GPUs per generator; DP = #GPUs / TP generators, generator i on GPUs [i*TP, (i+1)*TP).
 #   bash launch_st_with_code.sh --gpus-per-instance 4 --priority high --allow-borrowing \
 #     --run-file run_deepscaler_samples_st.sh --job-name q3-8b-ds-n8 \
 #     --env-vars "MODEL_REPO=Qwen/Qwen3-8B-Base,MODEL_REVISION=<sha>,OUT_S3=s3://.../qwen3-8b-base"
@@ -50,6 +51,9 @@ STOP_TOKEN_IDS="${STOP_TOKEN_IDS:-151645,151643,151644}"
 ATTENTION_BACKEND="${ATTENTION_BACKEND:-TRITON_ATTN}"
 n_gpus="${N_GPUS:-$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)}"
 MAX_QUESTIONS="${MAX_QUESTIONS:-0}"   # >0 only for a local smoke test of this run-file
+TP="${TP:-1}"
+if (( n_gpus % TP != 0 )); then echo "FATAL: ${n_gpus} GPUs not divisible by TP=${TP}" >&2; exit 2; fi
+n_dp=$((n_gpus / TP))
 mkdir -p "${WORK}/out"
 export HF_HOME=/tmp/hf_cache
 "${PY}" - <<PY
@@ -58,15 +62,15 @@ snapshot_download("${MODEL_REPO}", revision="${MODEL_REVISION}", local_dir="${WO
 PY
 aws s3 cp --only-show-errors "${INPUT_S3}" "${WORK}/input.parquet"
 aws s3 sync --only-show-errors --exclude "*.tmp" "${OUT_S3}/out" "${WORK}/out" || true
-echo "RESTORED parts=$(find "${WORK}/out" -name 'part_*.parquet' | wc -l) gpus=${n_gpus}"
+echo "RESTORED parts=$(find "${WORK}/out" -name 'part_*.parquet' | wc -l) gpus=${n_gpus} tp=${TP} dp=${n_dp}"
 
 ( while true; do sleep "${SYNC_SECONDS}"; aws s3 sync --only-show-errors --exclude "*.tmp" "${WORK}/out" "${OUT_S3}/out" || true; done ) &
 SYNC_PID=$!
 pids=()
-for g in $(seq 0 $((n_gpus - 1))); do
-  CUDA_VISIBLE_DEVICES="${g}" "${PY}" rl-distill-scripts/data/generate_deepscaler_4bpt_samples.py \
+for g in $(seq 0 $((n_dp - 1))); do
+  CUDA_VISIBLE_DEVICES="$(seq -s, $((g * TP)) $((g * TP + TP - 1)))" "${PY}" rl-distill-scripts/data/generate_deepscaler_4bpt_samples.py \
     --model "${WORK}/model" --input "${WORK}/input.parquet" --chat-template "${TEMPLATE}" \
-    --output "${WORK}/out/shard${g}.parquet" --shard-id "${g}" --num-shards "${n_gpus}" --n "${N}" \
+    --output "${WORK}/out/shard${g}.parquet" --shard-id "${g}" --num-shards "${n_dp}" --tensor-parallel-size "${TP}" --n "${N}" \
     --max-tokens "${MAX_TOKENS}" --max-model-len $((MAX_TOKENS + MAX_PROMPT_TOKENS)) --max-prompt-tokens "${MAX_PROMPT_TOKENS}" \
     --temperature 1.0 --top-p 1.0 --top-k -1 --stop-strings "${STOP_STRINGS}" --stop-token-ids "${STOP_TOKEN_IDS}" \
     --append-boxed-instruction --boxed-instruction "${PROMPT_INSTRUCTION}" \
