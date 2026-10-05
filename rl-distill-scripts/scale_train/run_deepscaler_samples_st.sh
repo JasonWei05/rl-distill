@@ -33,7 +33,9 @@ fi
 command -v aws >/dev/null || { echo "FATAL: aws CLI missing" >&2; exit 2; }
 
 WORK="${WORK:-/tmp/ds_samples}"   # fixed paths: the per-shard manifest records them and must match across relaunches
-N="${N:-8}"; MAX_TOKENS="${MAX_TOKENS:-8192}"; MAX_PROMPT_TOKENS="${MAX_PROMPT_TOKENS:-4096}";  # longest dedup_v2 prompt: 3,320 CHUNK_SIZE="${CHUNK_SIZE:-256}"; SYNC_SECONDS="${SYNC_SECONDS:-120}"
+# MAX_PROMPT_TOKENS: the longest deepscaler_it_gen_dedup_v2 prompt is 3,320 tokens.
+N="${N:-8}"; MAX_TOKENS="${MAX_TOKENS:-8192}"; MAX_PROMPT_TOKENS="${MAX_PROMPT_TOKENS:-4096}"
+CHUNK_SIZE="${CHUNK_SIZE:-256}"; SYNC_SECONDS="${SYNC_SECONDS:-120}"
 # Single-quoted default: inside ${VAR:-...} bash ends the default at the first "}" and mangles "\boxed{}".
 DEFAULT_INSTRUCTION='Please reason step by step, and put your final answer within \boxed{}.'
 PROMPT_INSTRUCTION="${PROMPT_INSTRUCTION:-${DEFAULT_INSTRUCTION}}"
