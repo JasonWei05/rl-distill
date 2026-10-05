@@ -28,7 +28,8 @@ min; a local attempt failed because other users' jobs held 72+ GiB on 7/8 GPUs).
 | 30B medium | 30.6 | 8.3 | 54.3 | 16.6 | 82.0 |
 | 30B hard | 12.5 | 3.7 | 35.7 | 7.6 | 58.3 |
 
-Boxed ~74-78% for both students (teachers 88-89%), truncation 1-3%. 30B-defined bands are harder for both students
+pass^k (all k correct, C(c,k)/C(n,k)): pass^4 = 1.7B 2.7/0.4/0.0, 4B 4.6/0.9/0.1 on 8B easy/medium/hard and 1.7B 3.0/0.2/0.0, 4B 3.3/0.4/0.0 on 30B easy/medium/hard; pass^16 = 0 everywhere (best question 14/16; only 4-17 of 300
+questions per set have all 16 samples boxed). Boxed ~74-78% for both students (teachers 88-89%), truncation 1-3%. 30B-defined bands are harder for both students
 than 8B-defined bands at equal teacher accuracy (30B solves questions the 8B and smaller models don't).
 
 ---
