@@ -20,7 +20,13 @@ plus plain-text "\\nHuman:" / "\\nuser\\n" turn starts. ScaleTrain 4 GPUs (borro
 `scale_train/run_deepscaler_samples_st.sh` (S3-resumable chunk parquets, supervisor relaunch). Bugs fixed before the
 real run: untracked generator not shipped; image .venv flash_attn.cute crash (pin TRITON_ATTN); `${VAR:-...}` default
 mangled `\\boxed{}` to `\\boxed{.}`. First 1,024 questions: 89% boxed, strict mean@8 28.9%, pass@8 70.8%.
-Output: `s3://scale-ml/genai/rl-distill/qwen3-deepscaler-samples/qwen3-8b-base-0shot-qwenmath-n8-8k/`. **Running.**
+Output: `s3://scale-ml/genai/rl-distill/qwen3-deepscaler-samples/qwen3-8b-base-0shot-qwenmath-n8-8k/` (`all.parquet`,
+`RUN_COMPLETE.json`). **Done 2026-10-05 05:05 UTC.** One prompt (source_index 32326, 3,320 tokens) exceeded the original 2048
+prompt cap; cap raised to 4096 (resume accepts raised caps). Final strict (boxed-only) grading, 38,796 q x 8:
+mean@8 28.52%, pass@8 71.10%, boxed 89.0%; per-question k/8 = 0: 28.9%, 1: 18.8%, 2: 13.4%, 3: 10.6%, 4: 8.9%, 5: 7.8%,
+6: 6.2%, 7: 3.9%, 8: 1.4%. Lenient grading (whole-output extraction) agreed to within 0.3 pt; strict kept.
+Qwen3-30B-A3B-Base (TP2 x DP2, same protocol) auto-launched 05:06 UTC ->
+`.../qwen3-30b-a3b-base-0shot-qwenmath-n8-8k/`.
 
 ---
 
