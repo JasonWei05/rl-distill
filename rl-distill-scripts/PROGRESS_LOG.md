@@ -25,8 +25,10 @@ Output: `s3://scale-ml/genai/rl-distill/qwen3-deepscaler-samples/qwen3-8b-base-0
 prompt cap; cap raised to 4096 (resume accepts raised caps). Final strict (boxed-only) grading, 38,796 q x 8:
 mean@8 28.52%, pass@8 71.10%, boxed 89.0%; per-question k/8 = 0: 28.9%, 1: 18.8%, 2: 13.4%, 3: 10.6%, 4: 8.9%, 5: 7.8%,
 6: 6.2%, 7: 3.9%, 8: 1.4%. Lenient grading (whole-output extraction) agreed to within 0.3 pt; strict kept.
-Qwen3-30B-A3B-Base (TP2 x DP2, same protocol) auto-launched 05:06 UTC ->
-`.../qwen3-30b-a3b-base-0shot-qwenmath-n8-8k/`.
+Qwen3-30B-A3B-Base (TP2 x DP2, same protocol) auto-launched 05:06 UTC, **done 10:22 UTC** ->
+`.../qwen3-30b-a3b-base-0shot-qwenmath-n8-8k/`: strict mean@8 33.91%, pass@8 76.33%, boxed 87.7%, mean response 985
+tokens; k/8 = 0: 23.7%, 1: 16.6%, 2: 12.6%, 3: 11.4%, 4: 10.0%, 5: 9.5%, 6: 8.0%, 7: 5.9%, 8: 2.3%. Per question vs 8B:
+30B higher 42.5%, equal 33.5%, lower 24.0%; 4,570 solved only by 30B, 2,541 only by 8B; corr(k) 0.744.
 
 ---
 
