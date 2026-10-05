@@ -196,6 +196,19 @@ def main() -> None:
     manifest_path = output_path.with_suffix(output_path.suffix + ".manifest.json")
     if manifest_path.exists():
         existing_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        # Raising the length caps cannot change any prompt that already fit, so finished parts stay valid:
+        # accept increases of max_prompt_tokens / max_model_len and record the new values.
+        raisable = ("max_prompt_tokens", "max_model_len")
+        if (
+            existing_manifest != manifest
+            and {k: v for k, v in existing_manifest.items() if k not in raisable}
+            == {k: v for k, v in manifest.items() if k not in raisable}
+            and all(manifest[k] >= existing_manifest[k] for k in raisable)
+        ):
+            print(f"MANIFEST_UPDATED shard={args.shard_id} raised caps "
+                  f"{ {k: (existing_manifest[k], manifest[k]) for k in raisable} }", flush=True)
+            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+            existing_manifest = manifest
         if existing_manifest != manifest:
             raise RuntimeError(
                 f"Existing generation manifest does not match this run; refusing to reuse parts: "

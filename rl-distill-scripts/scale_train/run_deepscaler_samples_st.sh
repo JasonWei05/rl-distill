@@ -33,7 +33,7 @@ fi
 command -v aws >/dev/null || { echo "FATAL: aws CLI missing" >&2; exit 2; }
 
 WORK="${WORK:-/tmp/ds_samples}"   # fixed paths: the per-shard manifest records them and must match across relaunches
-N="${N:-8}"; MAX_TOKENS="${MAX_TOKENS:-8192}"; CHUNK_SIZE="${CHUNK_SIZE:-256}"; SYNC_SECONDS="${SYNC_SECONDS:-120}"
+N="${N:-8}"; MAX_TOKENS="${MAX_TOKENS:-8192}"; MAX_PROMPT_TOKENS="${MAX_PROMPT_TOKENS:-4096}";  # longest dedup_v2 prompt: 3,320 CHUNK_SIZE="${CHUNK_SIZE:-256}"; SYNC_SECONDS="${SYNC_SECONDS:-120}"
 # Single-quoted default: inside ${VAR:-...} bash ends the default at the first "}" and mangles "\boxed{}".
 DEFAULT_INSTRUCTION='Please reason step by step, and put your final answer within \boxed{}.'
 PROMPT_INSTRUCTION="${PROMPT_INSTRUCTION:-${DEFAULT_INSTRUCTION}}"
@@ -65,7 +65,7 @@ for g in $(seq 0 $((n_gpus - 1))); do
   CUDA_VISIBLE_DEVICES="${g}" "${PY}" rl-distill-scripts/data/generate_deepscaler_4bpt_samples.py \
     --model "${WORK}/model" --input "${WORK}/input.parquet" --chat-template "${TEMPLATE}" \
     --output "${WORK}/out/shard${g}.parquet" --shard-id "${g}" --num-shards "${n_gpus}" --n "${N}" \
-    --max-tokens "${MAX_TOKENS}" --max-model-len $((MAX_TOKENS + 2048)) --max-prompt-tokens 2048 \
+    --max-tokens "${MAX_TOKENS}" --max-model-len $((MAX_TOKENS + MAX_PROMPT_TOKENS)) --max-prompt-tokens "${MAX_PROMPT_TOKENS}" \
     --temperature 1.0 --top-p 1.0 --top-k -1 --stop-strings "${STOP_STRINGS}" --stop-token-ids "${STOP_TOKEN_IDS}" \
     --append-boxed-instruction --boxed-instruction "${PROMPT_INSTRUCTION}" \
     --attention-backend "${ATTENTION_BACKEND}" \
