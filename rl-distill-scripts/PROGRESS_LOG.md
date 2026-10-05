@@ -9,6 +9,30 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-05 — Qwen3-1.7B/4B-Base on 8B- and 30B-defined difficulty bands (n=16)
+
+Bands from each teacher's own strict k/8 on full DeepScaleR: easy 4-7/8, medium 2-3/8, hard 1/8; 300 random questions
+per (teacher, band), seed 42 (`data/build_qwen3_teacher_band_sets.py`; sets at
+`s3://scale-ml/genai/rl-distill/qwen3-deepscaler-samples/band_sets/`). Students sampled with the identical protocol
+(n=16) on ScaleTrain job `job_db1qvfpmen9g08cv9ih0` (4 GPUs, borrowing; `scale_train/run_qwen3_band_evals_st.sh`, ~37
+min; a local attempt failed because other users' jobs held 72+ GiB on 7/8 GPUs). Strict grading
+(`data/grade_band_eval_samples.py`, `data/summarize_qwen3_band_evals.py`); outputs + grades + `band_table.md` under
+`.../qwen3-deepscaler-samples/band_evals/`. Teacher mean@8 is selection-biased (the sets were picked with those samples).
+
+| set | teacher mean@8 | 1.7B mean@16 | 1.7B pass@16 | 4B mean@16 | 4B pass@16 |
+|---|---|---|---|---|---|
+| 8B easy | 64.6 | 29.2 | 88.3 | 39.4 | 98.3 |
+| 8B medium | 30.5 | 11.7 | 63.7 | 21.2 | 90.7 |
+| 8B hard | 12.5 | 4.0 | 37.7 | 9.4 | 68.0 |
+| 30B easy | 65.9 | 26.2 | 84.3 | 34.7 | 97.3 |
+| 30B medium | 30.6 | 8.3 | 54.3 | 16.6 | 82.0 |
+| 30B hard | 12.5 | 3.7 | 35.7 | 7.6 | 58.3 |
+
+Boxed ~74-78% for both students (teachers 88-89%), truncation 1-3%. 30B-defined bands are harder for both students
+than 8B-defined bands at equal teacher accuracy (30B solves questions the 8B and smaller models don't).
+
+---
+
 ## 2026-10-04 — Qwen3 base family chosen; Qwen3-8B-Base DeepScaleR sampling (n=8) on ScaleTrain
 
 Switched the controlled student/teacher study to the Qwen3 Base family (1.7B / 4B / 8B; same 36T pretraining tokens
