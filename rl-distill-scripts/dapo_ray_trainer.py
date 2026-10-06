@@ -125,8 +125,17 @@ class RayDAPOTrainer(RayPPOTrainer):
         frequency = self._rolling_checkpoint_frequency()
         return frequency > 0 and self.global_steps % frequency == 0
 
+    def _rollout_sleep_mode(self) -> bool:
+        return bool(self.config.actor_rollout_ref.rollout.get("enable_sleep_mode", False))
+
     def _save_checkpoint(self, *, permanent: bool = True):
         """Save locally, then publish a permanent or rolling resumable checkpoint."""
+        # Every save runs with the vLLM engines awake (weight sync after the update, validation). With sleep mode they
+        # hold weights + KV beside the trainer while the save onloads the model and gathers the HF export: Qwen3-30B-A3B
+        # OOMed at its first permanent save (vLLM 63.75 of 79 GiB on GPU 0). Park them first; a caller that keeps
+        # training afterwards must call checkpoint_manager.update_weights() (wake + resync, as after an actor update).
+        if self._rollout_sleep_mode():
+            self.checkpoint_manager.sleep_replicas()
         early_stopping = getattr(self, "_validation_early_stopping", None)
         if early_stopping is not None:
             checkpoint_dir = Path(self.config.trainer.default_local_dir) / f"global_step_{self.global_steps}"
@@ -965,6 +974,9 @@ class RayDAPOTrainer(RayPPOTrainer):
                 if permanent_checkpoint_requested or rolling_checkpoint_requested:
                     with marked_timer("save_checkpoint", timing_raw, "green"):
                         self._save_checkpoint(permanent=permanent_checkpoint_requested)
+                    if self._rollout_sleep_mode():  # _save_checkpoint parked the engines; wake + resync for next step
+                        with marked_timer("update_weights_after_save", timing_raw, "red"):
+                            self.checkpoint_manager.update_weights()
                     if permanent_checkpoint_requested:
                         self._maybe_push_to_hf(self.global_steps)
 
