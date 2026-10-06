@@ -240,6 +240,7 @@ class RayDAPOTrainer(RayPPOTrainer):
                 mode=early_stopping.mode,
                 min_delta=early_stopping.min_delta,
                 include_initial_validation=early_stopping.include_initial_validation,
+                miss_tolerance=early_stopping.miss_tolerance,
             )
             source_step = historical.load_legacy_history(
                 encoded_payload=encoded_migration,
