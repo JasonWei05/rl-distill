@@ -53,10 +53,12 @@ if [ "${MODEL_TAG}" = qwen3-30b-a3b-base ]; then
   CHAT_TEMPLATE_DEFAULT="${PROJECT_ROOT}/rl-distill-scripts/data/qwen3_base_native_chat.jinja"
   ROLLOUT_EXTRA_STOP_DEFAULT='\nHuman:,\nuser\n'
   ROLLOUT_EXTRA_STOP_TOKEN_IDS_DEFAULT=151645,151643,151644   # <|im_end|>, <|endoftext|> (= eos), <|im_start|>
+  FSDP2_LOCAL_LOAD_DEFAULT=0   # per-rank local load requires tied embeddings; Qwen3-30B-A3B is untied -> rank-0 broadcast load
 else
   CHAT_TEMPLATE_DEFAULT="${PROJECT_ROOT}/rl-distill-scripts/data/gemma3_it_fewshot_math.jinja"
   ROLLOUT_EXTRA_STOP_DEFAULT='<end_of_turn>,<start_of_turn>'
   ROLLOUT_EXTRA_STOP_TOKEN_IDS_DEFAULT=
+  FSDP2_LOCAL_LOAD_DEFAULT=1
 fi
 
 DIFFICULTY_DATASET_SOURCE="${DIFFICULTY_DATASET_SOURCE:-legacy}"
@@ -545,7 +547,7 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       +ray_kwargs.ray_init.runtime_env.env_vars.PYTORCH_CUDA_ALLOC_CONF="'${PYTORCH_CUDA_ALLOC_CONF:-}'" \
       +ray_kwargs.ray_init.runtime_env.env_vars.VLLM_ATTENTION_BACKEND="TRITON_ATTN" \
       +ray_kwargs.ray_init.runtime_env.env_vars.VLLM_USE_FLASHINFER_SAMPLER="'0'" \
-      +ray_kwargs.ray_init.runtime_env.env_vars.VERL_FSDP2_LOCAL_LOAD="'1'" \
+      +ray_kwargs.ray_init.runtime_env.env_vars.VERL_FSDP2_LOCAL_LOAD="'${VERL_FSDP2_LOCAL_LOAD:-${FSDP2_LOCAL_LOAD_DEFAULT}}'" \
       +ray_kwargs.ray_init.runtime_env.env_vars.TORCH_CUDNN_SDPA_ENABLED="'${TORCH_CUDNN_SDPA_ENABLED:-1}'" \
       `# VERL_GEMMA4_CUDNN_SDPA / VERL_GEMMA4_EVAL_CUDNN_SDPA: the FSDP engine (_set_gemma4_cudnn_sdpa) forces cuDNN SDPA ON for every` \
       `# Gemma 4 train forward unless VERL_GEMMA4_CUDNN_SDPA=0 -- TORCH_CUDNN_SDPA_ENABLED alone never reaches update_actor.` \
