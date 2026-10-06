@@ -9,6 +9,19 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-06 — HF dataset `JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k` (public)
+
+Replica of `JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k` with Qwen3-30B-A3B-Base (n=8 run above) as the teacher:
+hard = 1/8, medium = 2-3/8, easy = 4-8/8 (pools 6,440 / 9,315 / 13,859); 3,300 per band by SHA-256 rank (seed 42), then
+300 validation / 3,000 train (seed 43); same verl schema, manifest and README layout. Builder
+`data/build_deepscaler_qwen3_30b_difficulty_dataset.py` (copy of the Gemma builder with teacher constants swapped);
+grade source `/mnt/efs/jasonwei/verl/data/deepscaler_qwen3_30b_a3b_base_n8_dedup_v2_20261005/questions_with_current_rl_grades.parquet`
+(sha 84965510…, also in the 30B S3 prefix); Hub commit be4dcd8b. Rows hold the plain problem (as in the Gemma version);
+the teacher's 0-shot instruction is in `extra_info.teacher_prompt_instruction` and must be appended at tokenization.
+Not the same questions as the 2026-10-05 300-q band eval sets (those used easy = 4-7/8 and a numpy RNG draw).
+
+---
+
 ## 2026-10-05 — Qwen3-1.7B/4B-Base on 8B- and 30B-defined difficulty bands (n=16)
 
 Bands from each teacher's own strict k/8 on full DeepScaleR: easy 4-7/8, medium 2-3/8, hard 1/8; 300 random questions
