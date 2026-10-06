@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -104,8 +106,32 @@ def _split_s3_uri(uri: str) -> tuple[str, str]:
 
 def _s3_client():
     import boto3
+    from botocore.config import Config
 
-    return boto3.client("s3", region_name="us-west-2")
+    return boto3.client("s3", region_name="us-west-2", config=Config(max_pool_connections=_file_workers() * _part_workers() + 8))
+
+
+# Checkpoints are a few dozen multi-GB rank shards. Transferring them one file at a time with boto3's defaults
+# (10 threads, 8 MiB parts) ran at ~0.5 GB/s (a 305 GB 26B-A4B checkpoint took ~10 min); files now move in parallel.
+def _file_workers() -> int:
+    return max(1, int(os.environ.get("FULL_CHECKPOINT_S3_FILE_WORKERS", "16")))
+
+
+def _part_workers() -> int:
+    return max(1, int(os.environ.get("FULL_CHECKPOINT_S3_PART_WORKERS", "8")))
+
+
+def _transfer_config():
+    from boto3.s3.transfer import TransferConfig
+
+    return TransferConfig(multipart_chunksize=64 * 1024 * 1024, max_concurrency=_part_workers())
+
+
+def _parallel(fn, items) -> None:
+    """Run fn over items on a thread pool; re-raises the first failure after the pool drains."""
+    with ThreadPoolExecutor(max_workers=_file_workers()) as pool:
+        for future in [pool.submit(fn, item) for item in items]:
+            future.result()
 
 
 def build_size_manifest(step_dir: Path, step: int) -> dict[str, object]:
@@ -184,13 +210,16 @@ def _upload_checkpoint_step(
         flush=True,
     )
     client = _s3_client()
-    for item in manifest["files"]:
-        relative_path = str(item["path"])
-        client.upload_file(
-            str(step_dir / relative_path),
+    config = _transfer_config()
+    _parallel(
+        lambda item: client.upload_file(
+            str(step_dir / str(item["path"])),
             bucket,
-            f"{prefix}/global_step_{step}/{relative_path}",
-        )
+            f"{prefix}/global_step_{step}/{item['path']}",
+            Config=config,
+        ),
+        manifest["files"],
+    )
     client.upload_file(
         str(manifest_path),
         bucket,
@@ -767,20 +796,21 @@ def restore_hf_export(checkpoint_root: Path, s3_uri: str, step: int) -> Path:
         f"[FullCheckpointS3] restoring best HF export step={step} files={len(hf_files)} from {remote_root}",
         flush=True,
     )
-    try:
-        for relative_path, expected_size in sorted(hf_files.items()):
-            destination = partial_dir / relative_path
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            client.download_file(
-                bucket,
-                f"{step_prefix}/{hf_prefix}{relative_path}",
-                str(destination),
+    config = _transfer_config()
+
+    def download(entry: tuple[str, int]) -> None:
+        relative_path, expected_size = entry
+        destination = partial_dir / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        client.download_file(bucket, f"{step_prefix}/{hf_prefix}{relative_path}", str(destination), Config=config)
+        if destination.stat().st_size != expected_size:
+            raise ValueError(
+                f"restored HF object size mismatch for {relative_path}: "
+                f"expected={expected_size} observed={destination.stat().st_size}"
             )
-            if destination.stat().st_size != expected_size:
-                raise ValueError(
-                    f"restored HF object size mismatch for {relative_path}: "
-                    f"expected={expected_size} observed={destination.stat().st_size}"
-                )
+
+    try:
+        _parallel(download, sorted(hf_files.items()))
         hf_dir.parent.mkdir(parents=True, exist_ok=True)
         partial_dir.rename(hf_dir)
     except BaseException:
@@ -1164,17 +1194,20 @@ def restore_latest_checkpoint(checkpoint_root: Path, s3_uri: str) -> int | None:
         if int(manifest.get("global_step", -1)) != step:
             raise ValueError(f"remote completion marker records the wrong global step: {manifest}")
         for item in manifest["files"]:
-            relative_path = str(item["path"])
-            candidate = Path(relative_path)
+            candidate = Path(str(item["path"]))
             if candidate.is_absolute() or ".." in candidate.parts or not candidate.parts:
-                raise ValueError(f"remote completion marker contains an unsafe path: {relative_path!r}")
-            destination = partial_dir / relative_path
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            client.download_file(
+                raise ValueError(f"remote completion marker contains an unsafe path: {str(item['path'])!r}")
+            (partial_dir / candidate).parent.mkdir(parents=True, exist_ok=True)
+        config = _transfer_config()
+        _parallel(
+            lambda item: client.download_file(
                 bucket,
-                f"{source_prefix}/global_step_{step}/{relative_path}",
-                str(destination),
-            )
+                f"{source_prefix}/global_step_{step}/{item['path']}",
+                str(partial_dir / str(item["path"])),
+                Config=config,
+            ),
+            manifest["files"],
+        )
         (partial_dir / _MANIFEST_NAME).write_bytes(marker_bytes)
         validate_size_manifest(partial_dir, manifest)
         layout, world_size = _checkpoint_layout(partial_dir)

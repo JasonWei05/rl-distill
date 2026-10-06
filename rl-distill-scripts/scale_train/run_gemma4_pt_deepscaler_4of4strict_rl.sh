@@ -11,7 +11,11 @@
 #     that overflows the default 2GB FSDP->vLLM weight-sync bucket).
 #
 # Which model via GEMMA4_MODEL env (google/gemma-4-E2B | google/gemma-4-E4B |
-# google/gemma-4-12B | google/gemma-4-26B-A4B). Per-seed via DATA_SEED.
+# google/gemma-4-12B | google/gemma-4-26B-A4B | Qwen/Qwen3-30B-A3B-Base). Per-seed via DATA_SEED.
+# Qwen3-30B-A3B-Base runs on the same stack and recipe with its own prompt contract: 0-shot native ChatML
+# (data/qwen3_base_native_chat.jinja, instruction appended to each problem by the data prep), stops on the
+# <|im_end|>/<|im_start|> token ids and the plain-text turn starts "\nHuman:" / "\nuser\n", Qwen3MoeDecoderLayer wrap,
+# no router replay (FSDP2 R3 is Gemma-4-only). Launcher: launch_qwen3_30b_a3b_medium_rl.sh.
 #
 # Launch (E2B, one node, borrowing OFF):
 #   python rl-distill-scripts/scale_train/launch_st_job.py --cluster eks --n-instances 1 \
@@ -34,6 +38,7 @@ case "${GEMMA4_MODEL}" in
   *E4B*) MODEL_TAG=gemma4-e4b; WRAP_LAYER_CLS_DEFAULT=Gemma4TextDecoderLayer ;;
   *12B*) MODEL_TAG=gemma4-12b; WRAP_LAYER_CLS_DEFAULT=Gemma4UnifiedTextDecoderLayer ;;
   *26B-A4B*) MODEL_TAG=gemma4-26b-a4b; WRAP_LAYER_CLS_DEFAULT=Gemma4TextDecoderLayer ;;
+  Qwen/Qwen3-30B-A3B-Base) MODEL_TAG=qwen3-30b-a3b-base; WRAP_LAYER_CLS_DEFAULT=Qwen3MoeDecoderLayer ;;
   *)
     MODEL_TAG="$(echo "${GEMMA4_MODEL}" | tr '/A-Z' '-a-z')"
     echo "FATAL: unsupported GEMMA4_MODEL=${GEMMA4_MODEL}" >&2
@@ -42,10 +47,32 @@ case "${GEMMA4_MODEL}" in
 esac
 
 WRAP_LAYER_CLS="${WRAP_LAYER_CLS:-${WRAP_LAYER_CLS_DEFAULT}}"
+# Prompt contract per model family: chat template, extra stop strings (literal "\n" = newline) and stop token ids.
+if [ "${MODEL_TAG}" = qwen3-30b-a3b-base ]; then
+  CHAT_TEMPLATE_DEFAULT="${PROJECT_ROOT}/rl-distill-scripts/data/qwen3_base_native_chat.jinja"
+  ROLLOUT_EXTRA_STOP_DEFAULT='\nHuman:,\nuser\n'
+  ROLLOUT_EXTRA_STOP_TOKEN_IDS_DEFAULT=151645,151643,151644   # <|im_end|>, <|endoftext|> (= eos), <|im_start|>
+else
+  CHAT_TEMPLATE_DEFAULT="${PROJECT_ROOT}/rl-distill-scripts/data/gemma3_it_fewshot_math.jinja"
+  ROLLOUT_EXTRA_STOP_DEFAULT='<end_of_turn>,<start_of_turn>'
+  ROLLOUT_EXTRA_STOP_TOKEN_IDS_DEFAULT=
+fi
 
 DIFFICULTY_DATASET_SOURCE="${DIFFICULTY_DATASET_SOURCE:-legacy}"
 DIFFICULTY_DATASET="${DIFFICULTY_DATASET:-strict4of4}"
-if [ "${DIFFICULTY_DATASET_SOURCE}" = gemma4_26b_bands ]; then
+if [ "${DIFFICULTY_DATASET_SOURCE}" = qwen3_30b_bands ]; then
+  case "${DIFFICULTY_DATASET}" in
+    easy|medium|hard)
+      DATASET_TAG="qwen30b-${DIFFICULTY_DATASET}"
+      TRAIN_BASENAME="deepscaler_qwen3_30b_${DIFFICULTY_DATASET}_train.parquet"
+      IN_DIST_VAL_BASENAME="deepscaler_qwen3_30b_${DIFFICULTY_DATASET}_val300_x16.parquet"
+      ;;
+    *)
+      echo "FATAL: qwen3_30b_bands requires DIFFICULTY_DATASET=easy, medium, or hard; got ${DIFFICULTY_DATASET}" >&2
+      exit 2
+      ;;
+  esac
+elif [ "${DIFFICULTY_DATASET_SOURCE}" = gemma4_26b_bands ]; then
   case "${DIFFICULTY_DATASET}" in
     easy|medium|hard)
       DATASET_TAG="gemma26b-${DIFFICULTY_DATASET}"
@@ -212,7 +239,8 @@ if [ "${ROLLOUT_ENFORCE_EAGER,,}" = "false" ]; then
 fi
 # Use `${name-default}` (not `:-`) so an explicitly empty value can force a
 # max-length rollout in memory canaries. Production keeps both stop strings.
-VERL_ROLLOUT_EXTRA_STOP="${VERL_ROLLOUT_EXTRA_STOP-<end_of_turn>,<start_of_turn>}"
+VERL_ROLLOUT_EXTRA_STOP="${VERL_ROLLOUT_EXTRA_STOP-${ROLLOUT_EXTRA_STOP_DEFAULT}}"
+VERL_ROLLOUT_EXTRA_STOP_TOKEN_IDS="${VERL_ROLLOUT_EXTRA_STOP_TOKEN_IDS-${ROLLOUT_EXTRA_STOP_TOKEN_IDS_DEFAULT}}"
 
 DEFAULT_CKPTS_DIR="${RAY_DATA_HOME}/ckpts/${MODEL_TAG}-deepscaler-${DATASET_TAG}-seed${SEED}${NORMALIZED_RUN_SUFFIX}"
 RAY_TEMP_DIR="${RAY_TEMP_DIR:-/tmp/ray_${MODEL_TAG}_${DATASET_TAG}_seed${SEED}_${RUN_SLOT}}"
@@ -449,7 +477,11 @@ PY
     echo "ONPOLICY_DISTILL teacher=${ONPOLICY_DISTILL_TEACHER_REPO}@${ONPOLICY_DISTILL_TEACHER_REVISION:-main} path=${TEACHER_LOCAL_PATH} loss=${ONPOLICY_DISTILL_LOSS_MODE} topk=${ONPOLICY_DISTILL_TOPK} teacher_tp=${ONPOLICY_DISTILL_TEACHER_TP} teacher_util=${ONPOLICY_DISTILL_TEACHER_GPU_MEM_UTIL} sleep=${ONPOLICY_DISTILL_TEACHER_SLEEP} task_rewards=${ONPOLICY_DISTILL_USE_TASK_REWARDS} policy_gradient=${ONPOLICY_DISTILL_USE_POLICY_GRADIENT}"
     ;;
 esac
-if [ "${DIFFICULTY_DATASET_SOURCE}" = gemma4_26b_bands ]; then
+if [ "${DIFFICULTY_DATASET_SOURCE}" = qwen3_30b_bands ]; then
+  "${VENV}/bin/python" rl-distill-scripts/data/prepare_deepscaler_qwen3_30b_difficulty_rl_data.py \
+    --data-dir "${DATA_DIR}" --band "${DIFFICULTY_DATASET}" --validation-repeats 16
+  DEFAULT_VAL_FILES="['${DATA_DIR}/${IN_DIST_VAL_BASENAME}']"
+elif [ "${DIFFICULTY_DATASET_SOURCE}" = gemma4_26b_bands ]; then
   "${VENV}/bin/python" rl-distill-scripts/data/prepare_deepscaler_gemma4_26b_difficulty_rl_data.py \
     --data-dir "${DATA_DIR}" --band "${DIFFICULTY_DATASET}" --validation-repeats 16
   DEFAULT_VAL_FILES="['${DATA_DIR}/${IN_DIST_VAL_BASENAME}']"
@@ -493,7 +525,7 @@ EXP_NAME="${EXP_NAME:-${DEFAULT_EXP_NAME}}" \
 DATA_SEED="${SEED}" \
 TRAIN_FILE="${TRAIN_FILE}" \
 VAL_FILES="${VAL_FILES}" \
-GEMMA3_CHAT_TEMPLATE_FILE="${GEMMA3_CHAT_TEMPLATE_FILE:-${PWD}/rl-distill-scripts/data/gemma3_it_fewshot_math.jinja}" \
+GEMMA3_CHAT_TEMPLATE_FILE="${GEMMA3_CHAT_TEMPLATE_FILE:-${CHAT_TEMPLATE_DEFAULT}}" \
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH}" MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH}" OVERLONG_BUFFER_LEN="${OVERLONG_BUFFER_LEN:-4096}" \
 LOG_VAL_GENERATIONS="${LOG_VAL_GENERATIONS:-100}" LOG_TRAIN_GENERATIONS="${LOG_TRAIN_GENERATIONS:-100}" \
 ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.65}" \
@@ -518,6 +550,7 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       +ray_kwargs.ray_init.runtime_env.env_vars.VERL_GEMMA4_EVAL_CUDNN_SDPA="'${VERL_GEMMA4_EVAL_CUDNN_SDPA:-${VERL_GEMMA4_CUDNN_SDPA:-1}}'" \
       +ray_kwargs.ray_init.runtime_env.env_vars.VERL_SKIP_VLLM_MM_WEIGHT_RELOAD="'${VERL_SKIP_VLLM_MM_WEIGHT_RELOAD}'" \
       "+ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROLLOUT_EXTRA_STOP='${VERL_ROLLOUT_EXTRA_STOP}'" \
+      "+ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROLLOUT_EXTRA_STOP_TOKEN_IDS='${VERL_ROLLOUT_EXTRA_STOP_TOKEN_IDS}'" \
       actor_rollout_ref.model.use_remove_padding=False \
       +actor_rollout_ref.model.override_config.attn_implementation=sdpa \
       ++actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes="${UPDATE_WEIGHTS_BUCKET_MB:-8192}" \

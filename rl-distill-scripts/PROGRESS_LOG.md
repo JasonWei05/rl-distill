@@ -9,6 +9,24 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-06 — Qwen3-30B-A3B-Base medium-band DAPO RL: PREPARED, NOT LAUNCHED
+
+Gemma 4 26B-A4B recipe (GRPO n=16, bsz 64 / mini 32, lr 1e-6 + 20 warmup, token-mean, clip 0.2/0.28, 8k + 2k overlong,
+token TIS 2.0, val every 10 on the 300 x16 medium validation split, early stop patience 5 on mean@16, 400 steps max) on the
+Qwen3-30B medium band (train 3,000 / val 300 of the new HF dataset; prompt = teacher's 0-shot ChatML + boxed instruction,
+verified identical to the 30B sampler's prompt for all 3,300 questions). One p5 node, borrowing on, priority high.
+Files: `scale_train/launch_qwen3_30b_a3b_medium_rl.sh`, `scale_train/start_qwen3_30b_a3b_medium_rl_supervisor.sh`
+(supervisor + rolling-checkpoint janitor), `data/prepare_deepscaler_qwen3_30b_difficulty_rl_data.py`; the Gemma 4 run-file
+gained a `Qwen/Qwen3-30B-A3B-Base` branch (Qwen3MoeDecoderLayer, qwen3 jinja, stop ids 151645/151643/151644 + "\nHuman:" /
+"\nuser\n" via new `VERL_ROLLOUT_EXTRA_STOP_TOKEN_IDS` and `\n` escapes in `VERL_ROLLOUT_EXTRA_STOP`).
+Deltas vs Gemma: ROUTER_REPLAY_MODE=disabled (FSDP2 R3 is Gemma-4-only), GEN_TP=2, KV 12 GiB/GPU, MAX_ACTOR_CKPT_TO_KEEP=2.
+Checkpoints: rolling S3 slot after every step (~366 GB: fp32 shards + Adam) + permanent every 10; full_checkpoint_s3.py now
+transfers files in parallel (16 files x 8 parts; devbox test 1.12 GB/s vs 0.69 single-file, devbox NIC-bound). Local
+DRY_RUN composed the config end to end. Unvalidated on GPUs: memory layout, step time, checkpoint upload time on a pod.
+S3: `s3://scale-ml/genai/rl-distill/qwen3-30b-a3b-base-rl{,-full-checkpoints}/…`; W&B id q3-30b-a3b-medium-es5-s42-v1.
+
+---
+
 ## 2026-10-06 — HF dataset `JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k` (public)
 
 Replica of `JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k` with Qwen3-30B-A3B-Base (n=8 run above) as the teacher:
