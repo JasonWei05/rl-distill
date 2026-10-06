@@ -126,3 +126,59 @@ def test_fsdp_engine_accepts_qwen3_moe_r3_routes():
     engine.use_ulysses_sp = False
     model_inputs, _ = engine.prepare_model_inputs(micro_batch)
     assert model_inputs["routed_experts"].shape == (2, 3, LAYERS, TOP_K)
+
+
+def test_router_stats_cover_every_layer_mask_padding_and_measure_r3_agreement():
+    from verl.models.transformers.qwen3_moe_router_replay import ROUTER_STATS
+
+    patch_qwen3_moe_router_replay()
+    model = _model()
+    input_ids = torch.randint(0, 64, (2, 6))
+    _, routes = _native_routes(model, input_ids)  # stats are off outside start/stop
+    assert not ROUTER_STATS.active and ROUTER_STATS.layers == []
+
+    ROUTER_STATS.start(None)
+    model(input_ids=input_ids, routed_experts=routes)
+    assert len(ROUTER_STATS.layers) == LAYERS
+    stats = ROUTER_STATS.stop()
+    assert stats["moe/r3_route_agreement"] == pytest.approx(1.0)
+    expected = {"aux_loss", "z_loss", "router_entropy", "max_expert_load", "min_expert_load", "dead_expert_frac",
+                "r3_route_agreement", "max_expert_load_worst_layer"}
+    assert set(stats) == {f"moe/{k}" for k in expected}
+    assert all(torch.isfinite(torch.tensor(v)) for v in stats.values())
+    assert stats["moe/max_expert_load"] >= 1.0 >= stats["moe/min_expert_load"] >= 0.0
+
+    # forced routes: the agreement is the share of forced IDs inside the trainer's own (native) top-k
+    forced = (routes + 3) % EXPERTS
+    expected_agreement = (forced.unsqueeze(-1) == routes.unsqueeze(-2)).any(-1).float().mean().item()
+    assert expected_agreement < 1.0
+    ROUTER_STATS.start(None)
+    model(input_ids=input_ids, routed_experts=forced)
+    assert ROUTER_STATS.stop()["moe/r3_route_agreement"] == pytest.approx(expected_agreement)
+
+    # padding is excluded: masking a row equals running only the unmasked row; no replay -> no agreement key
+    mask = torch.tensor([[1] * 6, [0] * 6])
+    ROUTER_STATS.start(mask)
+    model(input_ids=input_ids)
+    masked = ROUTER_STATS.stop()
+    ROUTER_STATS.start(None)
+    model(input_ids=input_ids[:1])
+    single = ROUTER_STATS.stop()
+    assert "moe/r3_route_agreement" not in masked
+    for key, value in single.items():
+        assert masked[key] == pytest.approx(value, rel=1e-5, abs=1e-6)
+
+
+def test_router_stats_aux_loss_is_top_k_and_loads_are_one_for_a_uniform_router():
+    from verl.models.transformers.qwen3_moe_router_replay import ROUTER_STATS
+
+    tokens = EXPERTS * 4
+    index = torch.stack([torch.arange(tokens) % EXPERTS, (torch.arange(tokens) + 1) % EXPERTS], dim=-1)
+    ROUTER_STATS.start(None)
+    ROUTER_STATS.record(torch.zeros(tokens, EXPERTS), index, replayed=False)
+    stats = ROUTER_STATS.stop()
+    assert stats["moe/aux_loss"] == pytest.approx(TOP_K)
+    assert stats["moe/max_expert_load"] == pytest.approx(1.0) and stats["moe/min_expert_load"] == pytest.approx(1.0)
+    assert stats["moe/dead_expert_frac"] == 0.0
+    assert stats["moe/router_entropy"] == pytest.approx(float(torch.log(torch.tensor(float(EXPERTS)))))
+    assert stats["moe/z_loss"] == pytest.approx(float(torch.log(torch.tensor(float(EXPERTS)))) ** 2)

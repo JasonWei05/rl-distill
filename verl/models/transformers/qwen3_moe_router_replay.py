@@ -34,6 +34,63 @@ _ROUTED_EXPERTS_ATTR = "_verl_routed_experts"
 _MISSING = object()
 
 
+class _RouterStats:
+    """Per-forward MoE router statistics (monitoring only; nothing here enters the loss).
+
+    ``start(token_mask)`` arms collection for one model forward, every patched router call then records one layer, and
+    ``stop()`` returns layer-averaged scalars. Padding tokens are excluded via ``token_mask`` ([batch, seq], 1 = real
+    token; None = every token is real). Collection is off outside start/stop, so activation-checkpoint recomputation
+    in backward is never double counted.
+    """
+
+    def __init__(self):
+        self.active = False
+        self.token_mask = None
+        self.layers: list[dict[str, torch.Tensor]] = []
+
+    def start(self, token_mask: torch.Tensor | None) -> None:
+        self.active, self.layers = True, []
+        self.token_mask = None if token_mask is None else token_mask.reshape(-1).bool()
+
+    def stop(self) -> dict[str, float]:
+        self.active, layers, self.layers, self.token_mask = False, self.layers, [], None
+        if not layers:
+            return {}
+        stacked = {key: torch.stack([layer[key] for layer in layers]) for key in layers[0]}
+        out = {f"moe/{key}": float(value.mean()) for key, value in stacked.items()}
+        out["moe/max_expert_load_worst_layer"] = float(stacked["max_expert_load"].max())
+        return out
+
+    @torch.no_grad()
+    def record(self, router_logits: torch.Tensor, top_k_index: torch.Tensor, replayed: bool) -> None:
+        logits = router_logits.float()
+        if self.token_mask is not None and self.token_mask.numel() == logits.shape[0]:
+            keep = self.token_mask.to(logits.device)
+            logits, top_k_index = logits[keep], top_k_index[keep]
+        if logits.shape[0] == 0:
+            return
+        num_experts, top_k = logits.shape[-1], top_k_index.shape[-1]
+        probs = torch.softmax(logits, dim=-1)
+        # fraction of top-k assignments per expert (x E: 1.0 = uniform)
+        load = torch.bincount(top_k_index.reshape(-1), minlength=num_experts).float() / top_k_index.numel()
+        stats = {
+            # HF Qwen3-MoE load_balancing_loss_func (Switch aux loss); = top_k when perfectly balanced
+            "aux_loss": num_experts * (load * top_k * probs.mean(0)).sum(),
+            "z_loss": torch.logsumexp(logits, dim=-1).square().mean(),  # ST-MoE router z-loss
+            "router_entropy": -(probs * torch.log(probs.clamp_min(1e-30))).sum(-1).mean(),
+            "max_expert_load": load.max() * num_experts,
+            "min_expert_load": load.min() * num_experts,
+            "dead_expert_frac": (load == 0).float().mean(),
+        }
+        if replayed:  # share of the rollout's (vLLM's) chosen experts that the trainer's own router would also pick
+            own = probs.topk(top_k, dim=-1).indices
+            stats["r3_route_agreement"] = (top_k_index.unsqueeze(-1) == own.unsqueeze(-2)).any(-1).float().mean()
+        self.layers.append(stats)
+
+
+ROUTER_STATS = _RouterStats()
+
+
 def replay_qwen3_moe_router(
     router_logits: torch.Tensor, routed_experts: torch.Tensor, *, top_k: int, norm_topk_prob: bool
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -84,12 +141,15 @@ def patch_qwen3_moe_router_replay() -> bool:
     def router_forward_with_replay(self, hidden_states: torch.Tensor):
         routed_experts = getattr(self, _ROUTED_EXPERTS_ATTR, None)
         if routed_experts is None:
-            return original_router_forward(self, hidden_states)
-        hidden_states = hidden_states.reshape(-1, self.hidden_dim)
-        router_logits = torch.nn.functional.linear(hidden_states, self.weight)
-        top_k_weights, top_k_index = replay_qwen3_moe_router(
-            router_logits, routed_experts, top_k=self.top_k, norm_topk_prob=self.norm_topk_prob
-        )
+            router_logits, top_k_weights, top_k_index = original_router_forward(self, hidden_states)
+        else:
+            hidden_states = hidden_states.reshape(-1, self.hidden_dim)
+            router_logits = torch.nn.functional.linear(hidden_states, self.weight)
+            top_k_weights, top_k_index = replay_qwen3_moe_router(
+                router_logits, routed_experts, top_k=self.top_k, norm_topk_prob=self.norm_topk_prob
+            )
+        if ROUTER_STATS.active:
+            ROUTER_STATS.record(router_logits, top_k_index, replayed=routed_experts is not None)
         return router_logits, top_k_weights, top_k_index
 
     original_decoder_forward = Qwen3MoeDecoderLayer.forward

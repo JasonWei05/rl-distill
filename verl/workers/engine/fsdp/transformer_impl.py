@@ -34,6 +34,7 @@ from torch.distributed.tensor import DTensor
 
 import verl.utils.torch_functional as verl_F
 from verl.models.transformers.qwen3_moe_router_replay import (
+    ROUTER_STATS,
     patch_qwen3_moe_router_replay,
     qwen3_moe_router_replay_installed,
 )
@@ -49,6 +50,7 @@ from verl.utils.activation_offload import enable_activation_offloading
 from verl.utils.checkpoint.fsdp_checkpoint_manager import FSDPCheckpointManager
 from verl.utils.dataset.dataset_utils import DatasetPadMode
 from verl.utils.debug import log_gpu_memory_usage
+from verl.utils.metric import AggregationType, Metric
 from verl.utils.device import get_device_id, get_device_name
 from verl.utils.fsdp_utils import (
     CPUOffloadPolicy,
@@ -1891,10 +1893,16 @@ class FSDPEngineWithLMHead(FSDPEngine):
                 return loss, output
 
         with torch.autocast(device_type=device_name, dtype=torch.bfloat16):
-            raw_output = self.module(
-                **model_inputs,
-                use_cache=False,
-            )  # prevent model thinks we are generating
+            # MoE router statistics (Qwen3-MoE router patch) for the actor-update forwards only; padding is masked out.
+            if not forward_only:
+                ROUTER_STATS.start(model_inputs.get("attention_mask"))
+            try:
+                raw_output = self.module(
+                    **model_inputs,
+                    use_cache=False,
+                )  # prevent model thinks we are generating
+            finally:
+                router_metrics = ROUTER_STATS.stop() if not forward_only else {}
 
             model_output = self.prepare_model_outputs(
                 output=raw_output, output_args=output_args, micro_batch=micro_batch, logits_processor_func=loss_function
@@ -1908,6 +1916,8 @@ class FSDPEngineWithLMHead(FSDPEngine):
                 assert forward_only, "forward_only must be True when loss_function is None"
                 loss = torch.tensor(1.0, device=device_name)
                 metrics = {}
+            for key, value in router_metrics.items():
+                metrics[key] = Metric(value=value, aggregation=AggregationType.MAX if key.endswith("worst_layer") else "mean")
 
             # rl-distill fork: detach the returned tensors. The caller accumulates these metas
             # across micro-batches; a graph-attached tensor here (e.g. entropy, which the loss

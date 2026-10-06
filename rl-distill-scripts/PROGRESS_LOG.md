@@ -22,7 +22,9 @@ gained a `Qwen/Qwen3-30B-A3B-Base` branch (Qwen3MoeDecoderLayer, qwen3 jinja, st
 Deltas vs Gemma: GEN_TP=2, KV 12 GiB/GPU, MAX_ACTOR_CKPT_TO_KEEP=2. Update (same day): R3 router replay added for Qwen3-MoE
 (`verl/models/transformers/qwen3_moe_router_replay.py`, CPU tests exact on native routes) and enabled; early stopping
 `EARLY_STOPPING_MISS_TOLERANCE=0.01` (a miss = more than 1 point below the best; 5 consecutive misses stop; within 1 point
-resets); rolling checkpoint every 5 steps, permanent every 10.
+resets); rolling checkpoint every 5 steps, permanent every 10. MoE router metrics (monitoring only, not in the loss) on W&B as
+`actor/moe/{aux_loss,z_loss,router_entropy,max_expert_load,max_expert_load_worst_layer,min_expert_load,dead_expert_frac,
+r3_route_agreement}` from the actor-update forwards (padding masked, layer-averaged; aux_loss = top_k = 8 when balanced).
 Checkpoints (original plan, superseded): rolling S3 slot after every step (~366 GB: fp32 shards + Adam) + permanent every 10; full_checkpoint_s3.py now
 transfers files in parallel (16 files x 8 parts; devbox test 1.12 GB/s vs 0.69 single-file, devbox NIC-bound). Local
 DRY_RUN composed the config end to end. Unvalidated on GPUs: memory layout, step time, checkpoint upload time on a pod.
