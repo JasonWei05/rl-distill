@@ -9,6 +9,20 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-06 — Qwen3 medium-band DAPO RL LAUNCHED: 30B-A3B (8 GPUs) + 4B (4 GPUs), ScaleTrain borrowing
+
+Supervisors `rl-q3-30b-rl-med` / `rl-q3-4b-rl-med` (+ `ckpt-janitor-*`), state `.scale_train_supervisors/q3-{30b,4b}-rl-med-20261006/`;
+`start_qwen3_30b_a3b_medium_rl_supervisor.sh` (`QWEN_SIZE=4b` for 4B: FSDP2 DP4, vLLM DP4 TP1, no offload, no R3). W&B ids
+`q3-30b-a3b-medium-es5-s42-v1`, `q3-4b-medium-es5-s42-v1`. Launch fixes on the way: VERL_FSDP2_LOCAL_LOAD per family (b9a57b31,
+30B untied); torchcodec 0.15.0 pin (a9400d35/4467c8a9, PyPI 0.17 broke `import vllm` on cu129 pods); vLLM parked during checkpoint
+saves (0c32176b) -- BOTH runs OOMed at their first permanent (HF-export) save at step 10 with vLLM awake after validation (63.75 /
+66.15 GiB of 79 on GPU 0); after the fix both step-10 permanent saves completed. Step 0 -> 10 val mean@16: 30B 31.1 -> 32.8, 4B 21.0
+-> 22.1 (30B val matches the teacher-band expectation 31.3). 30B: ~250 s/step (gen 80 / old-logprob 32 / update 113 / sync 16), R3
+route agreement 98.6%, aux_loss 12.6 (balanced 8), 0.3% clipped; rolling ckpt 366 GB: local 2.5 min + upload 5.2 min (1.2 GB/s);
+restore 17 min (0.36 GB/s download); permanent save ~13 min. 4B: ~150 s/step, 2.6% clipped, 48 GB checkpoints.
+
+---
+
 ## 2026-10-06 — Qwen3-30B-A3B-Base medium-band DAPO RL: PREPARED, NOT LAUNCHED
 
 Gemma 4 26B-A4B recipe (GRPO n=16, bsz 64 / mini 32, lr 1e-6 + 20 warmup, token-mean, clip 0.2/0.28, 8k + 2k overlong,
