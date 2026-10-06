@@ -14,27 +14,43 @@
 # checkpoint on every pod start); every 10 steps a permanent checkpoint with the HF export is kept for best-step selection.
 #   bash launch_qwen3_30b_a3b_medium_rl.sh --image <uri>        # whole node (p5.48xlarge, 8 GPUs), borrowing on, priority high
 # Use start_qwen3_30b_a3b_medium_rl_supervisor.sh to run it under the relaunching supervisor + rolling-checkpoint janitor.
+# QWEN_SIZE=4b: the same recipe on Qwen3-4B-Base (dense, tied embeddings) on 4 GPUs -- FSDP2 DP4 training, vLLM DP4
+# (one TP-1 engine per GPU), no router replay (no experts); everything else identical.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
-RUN_TAG="${RUN_TAG:-es5}"   # -> run name DAPO-qwen3-30b-a3b-base-pt-DeepScaleR-qwen30b-medium-seed42-${RUN_TAG}
-S3_BASE="${S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-30b-a3b-base-rl}"
+QWEN_SIZE="${QWEN_SIZE:-30b-a3b}"
+RUN_TAG="${RUN_TAG:-es5}"   # -> run name DAPO-qwen3-<size>-base-pt-DeepScaleR-qwen30b-medium-seed42-${RUN_TAG}
 TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-400}"
-ENV_VARS="GEMMA4_MODEL=Qwen/Qwen3-30B-A3B-Base,GEMMA4_MODEL_REVISION=1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9"
+case "${QWEN_SIZE}" in
+  30b-a3b)
+    MODEL=Qwen/Qwen3-30B-A3B-Base; REVISION=1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9; GPUS=8; SLUG=qwen3-30b-a3b; WANDB_SLUG=q3-30b-a3b
+    DEFAULT_JOB_NAME=q3-30b-rl-med; ROUTER_REPLAY=R3
+    # one-node MoE layout of the 26B-A4B runs (FSDP2 DP8, phase-level offload, vLLM sleep mode, mbs 4 / 8192-token cap), with
+    # vLLM at TP 2 (4 engines; ~28.5 GiB weights per GPU) and a 12 GiB KV cache per GPU (Qwen3-30B-A3B: 96 KiB/token, 48 KiB at TP 2)
+    LAYOUT="GEN_TP=2,FSDP_CPU_OFFLOAD_POLICY=False,OFFLOAD=True,VLLM_SLEEP_MODE=True,MAX_PADDED_TOKENS_PER_MICROBATCH=8192,MICRO_BATCH_SIZE_PER_GPU=4,ROLLOUT_GPU_MEMORY_UTILIZATION=0.10,VLLM_KV_CACHE_MEMORY_BYTES=12884901888" ;;
+  4b)
+    MODEL=Qwen/Qwen3-4B-Base; REVISION=906bfd4b4dc7f14ee4320094d8b41684abff8539; GPUS=4; SLUG=qwen3-4b; WANDB_SLUG=q3-4b
+    DEFAULT_JOB_NAME=q3-4b-rl-med; ROUTER_REPLAY=disabled
+    # 4 GPUs: FSDP2 DP4 (fp32 master + Adam ~16 GiB/GPU stays resident, no offload), vLLM DP4 = one TP-1 engine per GPU (8 GiB
+    # bf16 weights) with a 24 GiB KV cache (144 KiB/token -> ~175k tokens per engine), sleep mode during the update
+    LAYOUT="GEN_TP=1,FSDP_CPU_OFFLOAD_POLICY=False,OFFLOAD=False,VLLM_SLEEP_MODE=True,MAX_PADDED_TOKENS_PER_MICROBATCH=8192,MICRO_BATCH_SIZE_PER_GPU=4,ROLLOUT_GPU_MEMORY_UTILIZATION=0.10,VLLM_KV_CACHE_MEMORY_BYTES=25769803776" ;;
+  *) echo "FATAL: QWEN_SIZE must be 30b-a3b or 4b, got ${QWEN_SIZE}" >&2; exit 2 ;;
+esac
+S3_BASE="${S3_BASE:-s3://scale-ml/genai/rl-distill/${SLUG}-base-rl}"
+ENV_VARS="GEMMA4_MODEL=${MODEL},GEMMA4_MODEL_REVISION=${REVISION}"
 ENV_VARS+=",DIFFICULTY_DATASET_SOURCE=qwen3_30b_bands,DIFFICULTY_DATASET=medium"
-ENV_VARS+=",DATA_SEED=42,RUN_NAME_SUFFIX=${RUN_TAG},RUN_SLOT=qwen3-30b-a3b-medium-${RUN_TAG},VERL_VLLM_PORT_BASE=54000"
+ENV_VARS+=",DATA_SEED=42,RUN_NAME_SUFFIX=${RUN_TAG},RUN_SLOT=${SLUG}-medium-${RUN_TAG},VERL_VLLM_PORT_BASE=54000"
 # sweep recipe (identical to the Gemma 4 runs)
 ENV_VARS+=",ACTOR_FSDP_SIZE=-1,ACTOR_LR=1e-6,ACTOR_LR_WARMUP_STEPS=20,EARLY_STOPPING_ENABLED=True,EARLY_STOPPING_INCLUDE_INITIAL_VALIDATION=True,EARLY_STOPPING_METRIC=val-core/math/acc/mean@16,EARLY_STOPPING_MIN_DELTA=0.0,EARLY_STOPPING_MODE=max,EARLY_STOPPING_PATIENCE=5,EARLY_STOPPING_MISS_TOLERANCE=0.01"
 ENV_VARS+=",ENABLE_OVERLONG_BUFFER=True,GEN_PROMPT_BSZ=64,HF_PUSH_FREQ=10,HF_PUSH_MAX_TO_KEEP=8,LOG_TRAIN_GENERATIONS=100,LOG_VAL_GENERATIONS=100,MAX_MODEL_LEN=12288,MAX_PROMPT_LENGTH=4096,MAX_RESPONSE_LENGTH=8192,N_RESP_PER_PROMPT=16,OVERLONG_BUFFER_LEN=2048,OVERLONG_PENALTY_FACTOR=1.0"
-ENV_VARS+=",ROLLOUT_ENFORCE_EAGER=False,ROUTER_REPLAY_MODE=R3,ROUTER_Z_LOSS_COEF=0.0,SAVE_FREQ=10,SP_SIZE=1,TEST_FREQ=10,TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS},TRAIN_PROMPT_BSZ=64,TRAIN_PROMPT_MINI_BSZ=32,VAL_BEFORE_TRAIN=True,VAL_N=1,VLLM_DISABLE_COMPILE_CACHE=0"
-# one-node MoE layout of the 26B-A4B runs (FSDP2 DP8, phase-level offload, vLLM sleep mode, mbs 4 / 8192-token cap), with
-# vLLM at TP 2 (4 engines; ~28.5 GiB weights per GPU) and a 12 GiB KV cache per GPU (Qwen3-30B-A3B: 96 KiB/token, 48 KiB at TP 2)
-ENV_VARS+=",GEN_TP=2,FSDP_CPU_OFFLOAD_POLICY=False,OFFLOAD=True,VLLM_SLEEP_MODE=True,MAX_PADDED_TOKENS_PER_MICROBATCH=8192,MICRO_BATCH_SIZE_PER_GPU=4,ROLLOUT_GPU_MEMORY_UTILIZATION=0.10,VLLM_KV_CACHE_MEMORY_BYTES=12884901888"
+ENV_VARS+=",ROLLOUT_ENFORCE_EAGER=False,ROUTER_REPLAY_MODE=${ROUTER_REPLAY},ROUTER_Z_LOSS_COEF=0.0,SAVE_FREQ=10,SP_SIZE=1,TEST_FREQ=10,TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS},TRAIN_PROMPT_BSZ=64,TRAIN_PROMPT_MINI_BSZ=32,VAL_BEFORE_TRAIN=True,VAL_N=1,VLLM_DISABLE_COMPILE_CACHE=0"
+ENV_VARS+=",${LAYOUT}"
 ENV_VARS+=",PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 # S3-only artifacts: permanent S3 checkpoints carry the HF snapshot, best_hf/ is published at the end
 ENV_VARS+=",HF_PUSH_ENABLE=False,HF_PUSH_REQUIRED=False,MAX_ACTOR_CKPT_TO_KEEP=2"
 # resumable checkpoint every 5 steps (rolling slot) + permanent every 10 + durable completion markers
-ENV_VARS+=",ROLLING_CHECKPOINT_ENABLED=True,ROLLING_CHECKPOINT_FREQ=5,FULL_CHECKPOINT_S3_URI=${S3_BASE}-full-checkpoints/qwen30b-medium-${RUN_TAG},RUN_ARTIFACT_S3_URI=${S3_BASE}/qwen3-30b-a3b-medium-${RUN_TAG}"
-ENV_VARS+=",WANDB_RUN_ID=q3-30b-a3b-medium-${RUN_TAG}-s42-v1,WANDB_RESUME=allow"
+ENV_VARS+=",ROLLING_CHECKPOINT_ENABLED=True,ROLLING_CHECKPOINT_FREQ=5,FULL_CHECKPOINT_S3_URI=${S3_BASE}-full-checkpoints/qwen30b-medium-${RUN_TAG},RUN_ARTIFACT_S3_URI=${S3_BASE}/${SLUG}-medium-${RUN_TAG}"
+ENV_VARS+=",WANDB_RUN_ID=${WANDB_SLUG}-medium-${RUN_TAG}-s42-v1,WANDB_RESUME=allow"
 echo "LAUNCH_ENV ${ENV_VARS}"
-exec bash launch_st_with_code.sh --gpus-per-instance 8 --priority high --allow-borrowing --active-deadline-hours 240 \
-  --run-file run_gemma4_pt_deepscaler_4of4strict_rl.sh --job-name "${JOB_NAME:-q3-30b-rl-med}" --env-vars "${ENV_VARS}" "$@"
+exec bash launch_st_with_code.sh --gpus-per-instance "${GPUS}" --priority high --allow-borrowing --active-deadline-hours 240 \
+  --run-file run_gemma4_pt_deepscaler_4of4strict_rl.sh --job-name "${JOB_NAME:-${DEFAULT_JOB_NAME}}" --env-vars "${ENV_VARS}" "$@"
