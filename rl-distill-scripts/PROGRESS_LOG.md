@@ -54,6 +54,10 @@ Qwen3-30B-A3B-Base (TP2 x DP2, same protocol) auto-launched 05:06 UTC, **done 10
 `.../qwen3-30b-a3b-base-0shot-qwenmath-n8-8k/`: strict mean@8 33.91%, pass@8 76.33%, boxed 87.7%, mean response 985
 tokens; k/8 = 0: 23.7%, 1: 16.6%, 2: 12.6%, 3: 11.4%, 4: 10.0%, 5: 9.5%, 6: 8.0%, 7: 5.9%, 8: 2.3%. Per question vs 8B:
 30B higher 42.5%, equal 33.5%, lower 24.0%; 4,570 solved only by 30B, 2,541 only by 8B; corr(k) 0.744.
+30B response lengths (tokens; strict per-sample grades re-derived 2026-10-06 -> `grades_strict.parquet` in the same prefix):
+all samples mean 985 / median 675 / std 1171 / p99 7574, 0.87% hit 8192; medium band (30B k=2-3, 9,315 q) mean 1026 /
+median 725 / std 1128, 0.70% hit 8192 (correct samples 0.13%, incorrect 0.95%), 1.27% exceed 6144 (Gemma 4 RL's
+overlong-penalty onset); ~60% of capped samples end in a low-entropy repetition loop (zlib tail ratio < 0.25).
 
 ---
 
