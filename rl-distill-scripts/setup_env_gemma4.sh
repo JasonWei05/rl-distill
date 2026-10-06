@@ -39,6 +39,11 @@ uv pip install \
   ninja \
   "ray[default]" wandb \
   --extra-index-url "${PT_INDEX}" --index-strategy unsafe-best-match
+# torchcodec is an unpinned vllm dependency imported by `import vllm` (multimodal video). The PyPI default wheel
+# tracks the newest CUDA (torchcodec 0.17.0 needs libnvrtc.so.13 and broke every cu129 pod on 2026-10-06), so pin
+# the build matching torch from the PyTorch index of the selected variant.
+uv pip install --reinstall --no-deps "torchcodec==0.15.0" --index-url "${PT_INDEX}"
+python3 -c "import torchcodec.decoders; import importlib.metadata as m; print('torchcodec', m.version('torchcodec'))"
 # ninja: flashinfer JIT-compiles sampling kernels at engine init (even with TRITON_ATTN attention)
 # and dies with FileNotFoundError('ninja') without it. We ALSO disable the flashinfer sampler at
 # runtime (VLLM_USE_FLASHINFER_SAMPLER=0 in the run scripts) — JIT-compiling cu129 flashinfer with
