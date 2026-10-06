@@ -19,8 +19,11 @@ Files: `scale_train/launch_qwen3_30b_a3b_medium_rl.sh`, `scale_train/start_qwen3
 (supervisor + rolling-checkpoint janitor), `data/prepare_deepscaler_qwen3_30b_difficulty_rl_data.py`; the Gemma 4 run-file
 gained a `Qwen/Qwen3-30B-A3B-Base` branch (Qwen3MoeDecoderLayer, qwen3 jinja, stop ids 151645/151643/151644 + "\nHuman:" /
 "\nuser\n" via new `VERL_ROLLOUT_EXTRA_STOP_TOKEN_IDS` and `\n` escapes in `VERL_ROLLOUT_EXTRA_STOP`).
-Deltas vs Gemma: ROUTER_REPLAY_MODE=disabled (FSDP2 R3 is Gemma-4-only), GEN_TP=2, KV 12 GiB/GPU, MAX_ACTOR_CKPT_TO_KEEP=2.
-Checkpoints: rolling S3 slot after every step (~366 GB: fp32 shards + Adam) + permanent every 10; full_checkpoint_s3.py now
+Deltas vs Gemma: GEN_TP=2, KV 12 GiB/GPU, MAX_ACTOR_CKPT_TO_KEEP=2. Update (same day): R3 router replay added for Qwen3-MoE
+(`verl/models/transformers/qwen3_moe_router_replay.py`, CPU tests exact on native routes) and enabled; early stopping
+`EARLY_STOPPING_MISS_TOLERANCE=0.01` (a miss = more than 1 point below the best; 5 consecutive misses stop; within 1 point
+resets); rolling checkpoint every 5 steps, permanent every 10.
+Checkpoints (original plan, superseded): rolling S3 slot after every step (~366 GB: fp32 shards + Adam) + permanent every 10; full_checkpoint_s3.py now
 transfers files in parallel (16 files x 8 parts; devbox test 1.12 GB/s vs 0.69 single-file, devbox NIC-bound). Local
 DRY_RUN composed the config end to end. Unvalidated on GPUs: memory layout, step time, checkpoint upload time on a pod.
 S3: `s3://scale-ml/genai/rl-distill/qwen3-30b-a3b-base-rl{,-full-checkpoints}/…`; W&B id q3-30b-a3b-medium-es5-s42-v1.

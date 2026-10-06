@@ -14,13 +14,19 @@ _STATE_PROTOCOL = "validation_early_stopping_v1"
 
 @dataclass
 class ValidationEarlyStopping:
-    """Track strict all-time validation improvements."""
+    """Track strict all-time validation improvements.
+
+    A validation that does not improve on the best counts as a miss, and ``patience`` consecutive misses stop
+    training. With ``miss_tolerance > 0`` only a score worse than ``best - miss_tolerance`` (mode "max"; mirrored for
+    "min") is a miss; a non-improving score within the tolerance is not a miss and resets the consecutive-miss count.
+    """
 
     metric: str
     patience: int
     mode: str = "max"
     min_delta: float = 0.0
     include_initial_validation: bool = True
+    miss_tolerance: float = 0.0
     best_score: float | None = None
     best_step: int | None = None
     non_improving_rounds: int = 0
@@ -38,6 +44,8 @@ class ValidationEarlyStopping:
             raise ValueError(f"early-stopping mode must be 'max' or 'min', got {self.mode!r}")
         if self.min_delta < 0:
             raise ValueError("early-stopping min_delta must be non-negative")
+        if self.miss_tolerance < 0:
+            raise ValueError("early-stopping miss_tolerance must be non-negative")
         self._validate_runtime_state()
 
     @classmethod
@@ -51,16 +59,20 @@ class ValidationEarlyStopping:
             mode=str(config.get("mode", "max")),
             min_delta=float(config.get("min_delta", 0.0)),
             include_initial_validation=bool(config.get("include_initial_validation", True)),
+            miss_tolerance=float(config.get("miss_tolerance", 0.0)),
         )
 
     def _config_state(self) -> dict[str, str | int | float | bool]:
-        return {
+        state = {
             "metric": self.metric,
             "patience": self.patience,
             "mode": self.mode,
             "min_delta": self.min_delta,
             "include_initial_validation": self.include_initial_validation,
         }
+        if self.miss_tolerance:  # omitted at 0 so checkpoints written before the field existed still match
+            state["miss_tolerance"] = self.miss_tolerance
+        return state
 
     def _validate_runtime_state(self) -> None:
         if self.non_improving_rounds < 0:
@@ -393,6 +405,12 @@ class ValidationEarlyStopping:
             self.best_score = score
             self.best_step = step
             self.non_improving_rounds = 0
+        elif self.miss_tolerance > 0 and (
+            score >= self.best_score - self.miss_tolerance
+            if self.mode == "max"
+            else score <= self.best_score + self.miss_tolerance
+        ):
+            self.non_improving_rounds = 0  # within miss_tolerance of the best: not a miss, breaks the streak
         else:
             self.non_improving_rounds += 1
 

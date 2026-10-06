@@ -33,6 +33,10 @@ from torch.distributed.fsdp.api import FullStateDictConfig, ShardedStateDictConf
 from torch.distributed.tensor import DTensor
 
 import verl.utils.torch_functional as verl_F
+from verl.models.transformers.qwen3_moe_router_replay import (
+    patch_qwen3_moe_router_replay,
+    qwen3_moe_router_replay_installed,
+)
 from verl.models.transformers.gemma4_router_replay import (
     patch_gemma4_router_replay,
     routed_experts_to_model_input,
@@ -378,6 +382,7 @@ def _patch_gemma4_skip_lm_head():
 
 _patch_gemma4_skip_lm_head()
 patch_gemma4_router_replay()
+patch_qwen3_moe_router_replay()
 
 
 class FSDPEngine(BaseEngine):
@@ -1363,11 +1368,13 @@ class FSDPEngineWithLMHead(FSDPEngine):
                     "in the batch"
                 )
             text_config = getattr(module_config, "text_config", module_config)
-            if getattr(text_config, "model_type", None) != "gemma4_text":
-                raise NotImplementedError("FSDP2 R3 is currently implemented only for Hugging Face Gemma 4")
+            if getattr(text_config, "model_type", None) not in ("gemma4_text", "qwen3_moe"):
+                raise NotImplementedError("FSDP2 R3 is currently implemented only for Hugging Face Gemma 4 and Qwen3-MoE")
+            if text_config.model_type == "qwen3_moe" and not qwen3_moe_router_replay_installed():
+                raise NotImplementedError("Qwen3-MoE FSDP2 R3 needs the transformers 5 router (Qwen3MoeTopKRouter)")
             if self.use_ulysses_sp:
                 raise NotImplementedError(
-                    "Gemma 4 FSDP2 R3 with Ulysses sequence parallelism is not yet supported; use actor DP only"
+                    "FSDP2 R3 with Ulysses sequence parallelism is not yet supported; use actor DP only"
                 )
 
         if not isinstance(temperature, torch.Tensor):

@@ -15,7 +15,8 @@
 # Qwen3-30B-A3B-Base runs on the same stack and recipe with its own prompt contract: 0-shot native ChatML
 # (data/qwen3_base_native_chat.jinja, instruction appended to each problem by the data prep), stops on the
 # <|im_end|>/<|im_start|> token ids and the plain-text turn starts "\nHuman:" / "\nuser\n", Qwen3MoeDecoderLayer wrap,
-# no router replay (FSDP2 R3 is Gemma-4-only). Launcher: launch_qwen3_30b_a3b_medium_rl.sh.
+# optional R3 router replay (ROUTER_REPLAY_MODE=R3, verl/models/transformers/qwen3_moe_router_replay.py). Launcher:
+# launch_qwen3_30b_a3b_medium_rl.sh.
 #
 # Launch (E2B, one node, borrowing OFF):
 #   python rl-distill-scripts/scale_train/launch_st_job.py --cluster eks --n-instances 1 \
@@ -223,10 +224,12 @@ if [ "${MODEL_TAG}" = gemma4-26b-a4b ]; then
     exit 2
   fi
   ENABLE_ROLLOUT_ROUTING_REPLAY=True
+elif [ "${MODEL_TAG}" = qwen3-30b-a3b-base ] && [ "${ROUTER_REPLAY_MODE}" = R3 ]; then
+  ENABLE_ROLLOUT_ROUTING_REPLAY=True   # verl/models/transformers/qwen3_moe_router_replay.py
 elif [ "${ROUTER_REPLAY_MODE}" = disabled ]; then
   ENABLE_ROLLOUT_ROUTING_REPLAY=False
 else
-  echo "FATAL: router replay is enabled only for Gemma 4 26B-A4B; got ${GEMMA4_MODEL}" >&2
+  echo "FATAL: router replay (R3) is supported only for Gemma 4 26B-A4B and Qwen3-30B-A3B; got ${GEMMA4_MODEL} mode=${ROUTER_REPLAY_MODE}" >&2
   exit 2
 fi
 # verl defaults VLLM_DISABLE_COMPILE_CACHE=1 in its Ray runtime environment.
@@ -594,6 +597,7 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       ++trainer.early_stopping.mode="${EARLY_STOPPING_MODE:-max}" \
       ++trainer.early_stopping.patience="${EARLY_STOPPING_PATIENCE:-5}" \
       ++trainer.early_stopping.min_delta="${EARLY_STOPPING_MIN_DELTA:-0.0}" \
+      ++trainer.early_stopping.miss_tolerance="${EARLY_STOPPING_MISS_TOLERANCE:-0.0}" \
       ++trainer.early_stopping.include_initial_validation="${EARLY_STOPPING_INCLUDE_INITIAL_VALIDATION:-True}" \
       `# Forward ordinary experiment overrides first. The rollout-correction settings below are` \
       `# deliberately last so every Gemma 4 run uses the same always-on token TIS contract.` \

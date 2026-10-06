@@ -81,12 +81,14 @@ def validate_routed_experts(
         raise TypeError(f"routed_experts must use an integer dtype, got {routed_experts.dtype}")
 
     text_config = _text_config(config)
+    model_type = getattr(text_config, "model_type", "the model")
     expected_layers = int(text_config.num_hidden_layers)
-    expected_top_k = int(text_config.top_k_experts)
+    # Gemma 4 names the router fan-out top_k_experts; Qwen3-MoE (shared R3 path) uses num_experts_per_tok.
+    expected_top_k = int(getattr(text_config, "top_k_experts", None) or text_config.num_experts_per_tok)
     if routed_experts.shape[2] != expected_layers:
-        raise ValueError(f"routed_experts has {routed_experts.shape[2]} layers, expected {expected_layers} for Gemma 4")
+        raise ValueError(f"routed_experts has {routed_experts.shape[2]} layers, expected {expected_layers} for {model_type}")
     if routed_experts.shape[3] != expected_top_k:
-        raise ValueError(f"routed_experts top_k is {routed_experts.shape[3]}, expected {expected_top_k} for Gemma 4")
+        raise ValueError(f"routed_experts top_k is {routed_experts.shape[3]}, expected {expected_top_k} for {model_type}")
     if expected_batch_size is not None and routed_experts.shape[0] != expected_batch_size:
         raise ValueError(f"routed_experts batch size is {routed_experts.shape[0]}, expected {expected_batch_size}")
     if expected_sequence_length is not None and routed_experts.shape[1] != expected_sequence_length:
