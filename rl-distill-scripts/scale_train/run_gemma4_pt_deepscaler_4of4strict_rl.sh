@@ -265,6 +265,7 @@ source "${PROJECT_ROOT}/rl-distill-scripts/assert_local_fs.sh"
 assert_local_fs CKPTS_DIR="${CKPTS_DIR}" RAY_DATA_HOME="${RAY_DATA_HOME}" DATA_DIR="${DATA_DIR}" HF_HOME="${HF_HOME:-}"
 export ROLLING_CHECKPOINT_ENABLED="${ROLLING_CHECKPOINT_ENABLED:-False}"
 export ROLLING_CHECKPOINT_FREQ="${ROLLING_CHECKPOINT_FREQ:-1}"
+export ASYNC_CHECKPOINT_UPLOAD="${ASYNC_CHECKPOINT_UPLOAD:-False}"   # dapo_ray_trainer: background S3 upload of each checkpoint
 case "${ROLLING_CHECKPOINT_ENABLED,,}" in
   1|true|yes|on)
     if [ -z "${FULL_CHECKPOINT_S3_URI:-}" ]; then

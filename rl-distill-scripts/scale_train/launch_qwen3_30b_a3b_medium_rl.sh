@@ -56,7 +56,9 @@ ENV_VARS+=",PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segmen
 # S3-only artifacts: permanent S3 checkpoints carry the HF snapshot, best_hf/ is published at the end
 ENV_VARS+=",HF_PUSH_ENABLE=False,HF_PUSH_REQUIRED=False,MAX_ACTOR_CKPT_TO_KEEP=2"
 # resumable checkpoint every 5 steps (rolling slot) + permanent every 10 + durable completion markers
-ENV_VARS+=",ROLLING_CHECKPOINT_ENABLED=True,ROLLING_CHECKPOINT_FREQ=5,FULL_CHECKPOINT_S3_URI=${S3_BASE}-full-checkpoints/qwen30b-${BAND}-${RUN_TAG},RUN_ARTIFACT_S3_URI=${S3_BASE}/${SLUG}-${BAND}-${RUN_TAG}"
+# ROLLING_CHECKPOINT_ENABLED=False keeps only the permanent saves every 10 steps; ASYNC_CHECKPOINT_UPLOAD=True uploads each
+# checkpoint to S3 in the background while training continues (joined before the next save / run outcome)
+ENV_VARS+=",ROLLING_CHECKPOINT_ENABLED=${ROLLING_CHECKPOINT_ENABLED:-True},ROLLING_CHECKPOINT_FREQ=5,ASYNC_CHECKPOINT_UPLOAD=${ASYNC_CHECKPOINT_UPLOAD:-False},FULL_CHECKPOINT_S3_URI=${S3_BASE}-full-checkpoints/qwen30b-${BAND}-${RUN_TAG},RUN_ARTIFACT_S3_URI=${S3_BASE}/${SLUG}-${BAND}-${RUN_TAG}"
 ENV_VARS+=",WANDB_RUN_ID=${WANDB_SLUG}-${BAND}-${RUN_TAG}-s42-v1,WANDB_RESUME=allow"
 echo "LAUNCH_ENV ${ENV_VARS}"
 exec bash launch_st_with_code.sh --gpus-per-instance "${GPUS}" --priority high --allow-borrowing --active-deadline-hours 240 \
