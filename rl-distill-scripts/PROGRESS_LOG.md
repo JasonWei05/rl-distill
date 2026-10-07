@@ -18,7 +18,8 @@ dapo_ray_trainer uploads each checkpoint on a background thread, joined before t
 commit marker last, so preemption mid-upload falls back to the previous step). Validation can't overlap the local save (both
 need vLLM's GPU memory in opposite states; ES state saved in the checkpoint must include that step's validation); the upload
 overlaps the next steps instead. Expected 30B overhead ~10%. Cutover (`cutover_qwen3_30b_ckptfix.sh`, detached): medium at
-permanent step 350 (best 0.7575 @320, 1 miss), hard at step 200 -> new supervisors `.scale_train_supervisors/q3-30b-rl-{med,hard}-20261007-ckptfix/`,
+permanent step 350 (best 0.7575 @320, 1 miss; job_db38bg4f8c4g08flbe70), hard cut over early at the user's request from rolling step 195
+(best 0.5154 @190; job_db38lnjmjdjg088cefb0) -> new supervisors `.scale_train_supervisors/q3-30b-rl-{med,hard}-20261007-ckptfix/`,
 TOTAL_TRAINING_STEPS=500, same S3 prefixes / W&B ids, exact resume (Adam + data cursor + ES state). 4B runs unchanged.
 
 ---
