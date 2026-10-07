@@ -2,7 +2,7 @@
 # Supervised ScaleTrain trace collection from the untrained Qwen3-4B-Base teacher: one 1-GPU borrowing job per band
 # (run_qwen3_4b_base_traces_st.sh), relaunched after preemption / failure / cancel; each relaunch restores the finished
 # shards from S3 and continues. Bundles: s3://scale-ml/genai/rl-distill/qwen3-4b-base-traces-topk128-v1/q4b-base-<band>/
-#   bash start_qwen3_4b_base_traces_supervisors.sh            # BANDS="medium hard" by default
+#   bash start_qwen3_4b_base_traces_supervisors.sh            # BANDS="medium hard" by default; GPUS=4 for 4 DP workers per band
 #   stop one: touch .scale_train_supervisors/q4b-tr-<band>-<date>/STOP; tmux kill-session -t tr-q4b-tr-<band>
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
@@ -14,7 +14,7 @@ for band in ${BANDS:-medium hard}; do
   tmux new-session -d -s "tr-${name}" "env -u AWS_PROFILE python3 rl-distill-scripts/scale_train/supervise_borrowing_job.py --name ${name} \
     --relaunch-on-cancel --relaunch-on-failure --max-relaunches 30 --quick-cancel-seconds 300 --max-quick-cancels 3 --failure-backoff-seconds 600 \
     --launch-log ${sup}/launch.log --monitor-log ${sup}/monitor.log --state-file ${sup}/state.json --stop-file ${sup}/STOP --pod-log-dir ${sup}/pod-logs \
-    -- bash -c 'cd rl-distill-scripts/scale_train && bash launch_st_with_code.sh --gpus-per-instance 1 --priority high --allow-borrowing \
+    -- bash -c 'cd rl-distill-scripts/scale_train && bash launch_st_with_code.sh --gpus-per-instance ${GPUS:-1} --priority high --allow-borrowing \
        --active-deadline-hours 72 --run-file run_qwen3_4b_base_traces_st.sh --job-name ${name} --image ${IMG} \
        --env-vars TRACE_SPEC=q4b-base-${band}' 2>&1 | tee -a ${sup}/supervisor.out"
   echo "started supervisor tr-${name} (state ${sup})"
