@@ -9,6 +9,20 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-07 — Qwen3-30B-A3B RL: checkpoint-overhead fix + relaunch to 500 steps
+
+Measured share of wall-clock spent checkpointing: 30B medium 34%, 30B hard 29%, 4B hard 6%, 4B medium 4% (30B: rolling save at
+every step-5 ~8 min = 2.5 local + ~5 upload; permanent every 10 ~12 min incl. HF export + vLLM sleep/wake; 366-427 GB each).
+Fixes (958bb6f9): (1) ROLLING_CHECKPOINT_ENABLED=False -> permanent saves every 10 only; (2) ASYNC_CHECKPOINT_UPLOAD=True ->
+dapo_ray_trainer uploads each checkpoint on a background thread, joined before the next save and before the run outcome (S3
+commit marker last, so preemption mid-upload falls back to the previous step). Validation can't overlap the local save (both
+need vLLM's GPU memory in opposite states; ES state saved in the checkpoint must include that step's validation); the upload
+overlaps the next steps instead. Expected 30B overhead ~10%. Cutover (`cutover_qwen3_30b_ckptfix.sh`, detached): medium at
+permanent step 350 (best 0.7575 @320, 1 miss), hard at step 200 -> new supervisors `.scale_train_supervisors/q3-30b-rl-{med,hard}-20261007-ckptfix/`,
+TOTAL_TRAINING_STEPS=500, same S3 prefixes / W&B ids, exact resume (Adam + data cursor + ES state). 4B runs unchanged.
+
+---
+
 ## 2026-10-07 — Qwen3-4B-Base -> 30B-A3B distillation, step 1: top-128 teacher traces (ScaleTrain, 1 GPU per band)
 
 Same protocol as the E4B-base -> 12B/26B control (DISTILLATION_EXPERIMENTS.md §9): untrained Qwen3-4B-Base@906bfd4b teacher,
