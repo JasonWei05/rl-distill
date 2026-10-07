@@ -56,6 +56,18 @@ ALLOWED_DIRECTIONS = {
     # RL'd 26B-A4B teachers stopped at the 5-h mark (§9.0o): distilled-init (26bd) and warm-started untrained (26bw) -> E4B base, 16 samples.
     "26bd_medium_to_e4b",
     "26bw_medium_to_e4b",
+    # Untrained Qwen3-4B-Base teacher -> Qwen3-30B-A3B-Base student, 16 samples.
+    "q4b_base_medium_to_30b",
+    "q4b_base_hard_to_30b",
+}
+
+
+# Qwen3 teachers use the Gemma contract except for the stop rules (run_gemma4_bestckpt_trace_collection.sh q4b-base-*):
+# ChatML <|im_end|>/<|endoftext|>/<|im_start|> ids plus the plain-text turn starts a base model drifts into.
+QWEN3_SAMPLING_OVERRIDES = {"stop": ["\nHuman:", "\nuser\n"], "stop_token_ids": [151645, 151643, 151644]}
+SAMPLING_OVERRIDES_BY_DIRECTION = {
+    "q4b_base_medium_to_30b": QWEN3_SAMPLING_OVERRIDES,
+    "q4b_base_hard_to_30b": QWEN3_SAMPLING_OVERRIDES,
 }
 
 
@@ -127,7 +139,7 @@ def _verify_generation(index: Mapping[str, Any], expected_direction: str) -> dic
         if index.get(field) != semantic.get(field):
             raise TrainingViewPreflightError(f"view {field} does not match source generation provenance")
     sampling = semantic.get("sampling")
-    expected_sampling = source_preflight.EXPECTED_SAMPLING
+    expected_sampling = {**source_preflight.EXPECTED_SAMPLING, **SAMPLING_OVERRIDES_BY_DIRECTION.get(direction, {})}
     if not isinstance(sampling, Mapping):
         raise TrainingViewPreflightError("source sampling contract is missing")
     for key, expected in expected_sampling.items():

@@ -309,37 +309,13 @@ def _patch_gemma3_skip_lm_head():
 _patch_gemma3_skip_lm_head()
 
 
-def _patch_gemma4_skip_lm_head():
-    """Allow Gemma 4 to return selected hidden states without projecting the LM head.
+def _install_skip_lm_head(targets):
+    """Patch ``(causal_lm_cls, output_cls)`` pairs to return selected hidden states when ``skip_lm_head=True``.
 
-    The off-policy distillation path projects response-token hidden states through the
-    vocabulary head in small chunks. Gemma 4's native ``logits_to_keep`` still applies
-    the complete LM head in one call, which defeats that memory bound for long traces.
-    Both Gemma 4 causal-LM classes are patched: ``Gemma4ForConditionalGeneration`` (E2B/E4B/26B-A4B)
-    and ``Gemma4UnifiedForConditionalGeneration`` (12B); they share the forward structure
-    (``self.model(...)`` -> ``last_hidden_state`` -> ``lm_head`` -> softcap).
+    Each class must follow ``self.model(...)`` -> ``last_hidden_state`` -> ``lm_head``; the output's ``logits`` field
+    then carries the selected hidden states and the distillation loss applies the LM head (and any softcap) in chunks.
     """
     from dataclasses import fields
-
-    targets = []
-    try:
-        from transformers.models.gemma4.modeling_gemma4 import (
-            Gemma4CausalLMOutputWithPast,
-            Gemma4ForConditionalGeneration,
-        )
-
-        targets.append((Gemma4ForConditionalGeneration, Gemma4CausalLMOutputWithPast))
-    except Exception:
-        pass
-    try:
-        from transformers.models.gemma4_unified.modeling_gemma4_unified import (
-            Gemma4UnifiedCausalLMOutputWithPast,
-            Gemma4UnifiedForConditionalGeneration,
-        )
-
-        targets.append((Gemma4UnifiedForConditionalGeneration, Gemma4UnifiedCausalLMOutputWithPast))
-    except Exception:
-        pass
 
     for model_cls, output_cls in targets:
         if getattr(model_cls, "_verl_skip_lm_head_patched", False):
@@ -356,7 +332,7 @@ def _patch_gemma4_skip_lm_head():
                 logits_to_keep_batch_indices = kwargs.pop("logits_to_keep_batch_indices", None)
                 return_dict = kwargs.pop("return_dict", True)
                 if return_dict is False:
-                    raise ValueError("Gemma 4 skip_lm_head requires return_dict=True")
+                    raise ValueError(f"{type(self).__name__} skip_lm_head requires return_dict=True")
 
                 outputs = self.model(*args, return_dict=True, **kwargs)
                 hidden_states = outputs.last_hidden_state
@@ -382,7 +358,64 @@ def _patch_gemma4_skip_lm_head():
         model_cls._verl_skip_lm_head_patched = True
 
 
+def _patch_gemma4_skip_lm_head():
+    """Allow Gemma 4 to return selected hidden states without projecting the LM head.
+
+    The off-policy distillation path projects response-token hidden states through the
+    vocabulary head in small chunks. Gemma 4's native ``logits_to_keep`` still applies
+    the complete LM head in one call, which defeats that memory bound for long traces.
+    Both Gemma 4 causal-LM classes are patched: ``Gemma4ForConditionalGeneration`` (E2B/E4B/26B-A4B)
+    and ``Gemma4UnifiedForConditionalGeneration`` (12B); they share the forward structure
+    (``self.model(...)`` -> ``last_hidden_state`` -> ``lm_head`` -> softcap).
+    """
+    targets = []
+    try:
+        from transformers.models.gemma4.modeling_gemma4 import (
+            Gemma4CausalLMOutputWithPast,
+            Gemma4ForConditionalGeneration,
+        )
+
+        targets.append((Gemma4ForConditionalGeneration, Gemma4CausalLMOutputWithPast))
+    except Exception:
+        pass
+    try:
+        from transformers.models.gemma4_unified.modeling_gemma4_unified import (
+            Gemma4UnifiedCausalLMOutputWithPast,
+            Gemma4UnifiedForConditionalGeneration,
+        )
+
+        targets.append((Gemma4UnifiedForConditionalGeneration, Gemma4UnifiedCausalLMOutputWithPast))
+    except Exception:
+        pass
+    _install_skip_lm_head(targets)
+
+
+def _patch_qwen3_skip_lm_head():
+    """The same chunked-LM-head contract for Qwen3 dense and Qwen3-MoE students (Qwen3-4B -> 30B-A3B distillation).
+
+    The MoE output's ``aux_loss`` is left None: the HF forward adds the load-balancing loss only with
+    ``output_router_logits=True`` (off in the Qwen3-30B-A3B config), so the distillation objective is unchanged.
+    """
+    targets = []
+    try:
+        from transformers.modeling_outputs import CausalLMOutputWithPast
+        from transformers.models.qwen3.modeling_qwen3 import Qwen3ForCausalLM
+
+        targets.append((Qwen3ForCausalLM, CausalLMOutputWithPast))
+    except Exception:
+        pass
+    try:
+        from transformers.modeling_outputs import MoeCausalLMOutputWithPast
+        from transformers.models.qwen3_moe.modeling_qwen3_moe import Qwen3MoeForCausalLM
+
+        targets.append((Qwen3MoeForCausalLM, MoeCausalLMOutputWithPast))
+    except Exception:
+        pass
+    _install_skip_lm_head(targets)
+
+
 _patch_gemma4_skip_lm_head()
+_patch_qwen3_skip_lm_head()
 patch_gemma4_router_replay()
 patch_qwen3_moe_router_replay()
 

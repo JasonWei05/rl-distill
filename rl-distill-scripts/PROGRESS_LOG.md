@@ -9,6 +9,26 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-07 — Qwen3-4B-Base -> Qwen3-30B-A3B-Base distillation (step 2): PREPARED, NOT LAUNCHED
+
+Recipe = the E4B-base -> 26B-A4B student runs (DISTILLATION_EXPERIMENTS.md §9): off-policy top-128 forward KL on the q4b-base-<band>
+bundles (3000 q x 16 = 48k train rows, 128 teacher val generations), batch 128, lr 2e-6 (100 warmup, linear -> 2e-7), 1000 steps
+(~2.7 epochs), val KL every 10, 1 seq/micro-batch (4096 padded-token cap), KL chunk 1024, fp32 master + Adam, bf16 param views, grad
+ckpt; S3-only checkpoints (permanent every 250, rolling every 50 with the HF export under hf_exports/), no Hub pushes.
+Layout: **8 GPUs** (FSDP2 DP8, no offload): 30.5B x 16 B = 61 GB/GPU of params/grads/Adam (~67 GB with activations); 4 GPUs would be
+122 GB/GPU -> CPU offload, several x slower. Code: run_gemma4_distill_one.sh STUDENT=q30b (Qwen/Qwen3-30B-A3B-Base@1b75feb7,
+Qwen3MoeDecoderLayer wrap, VERL_FSDP2_LOCAL_LOAD=0 for the untied head) + q4b-base-* trace family; transformer_impl skip_lm_head patch
+extended to Qwen3/Qwen3-MoE (without it the chunked-LM-head distill forward cannot run on Qwen; CPU test
+test_qwen3_distill_skip_lm_head_on_cpu.py); view preflight: q4b directions + Qwen stop strings/ids. No router aux loss
+(output_router_logits=False in the 30B config; same as Gemma 26B-A4B). Launch: `BAND=medium|hard bash
+rl-distill-scripts/scale_train/start_qwen3_4b_to_30b_distill_supervisor.sh` (jobs q3-dist-4b30b-{med,hard}, 8 GPUs, borrowing, high;
+janitor tmux ckpt-janitor-q3-dist-4b30b) -> run_qwen3_4b_to_30b_distill_st.sh; checkpoints
+s3://scale-ml/genai/rl-distill/qwen3-4b-base-distill-ckpts-v1/q4b-base-<band>-to-q30b-bs128-s1000-lr2e-6, W&B project
+qwen3-4b-base-distill-v1. CPU dry run (VALIDATE_ONLY) passed for medium: view 48,000 / 128 rows, tokenizer + identities + direction OK.
+Untested on GPU (first step will confirm memory; fallback FSDP_OFFLOAD=true).
+
+---
+
 ## 2026-10-07 — Qwen3-30B-A3B RL: checkpoint-overhead fix + relaunch to 500 steps
 
 Measured share of wall-clock spent checkpointing: 30B medium 34%, 30B hard 29%, 4B hard 6%, 4B medium 4% (30B: rolling save at

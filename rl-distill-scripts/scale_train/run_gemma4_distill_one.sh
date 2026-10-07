@@ -26,7 +26,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${PROJECT_ROOT}"
 
 TEACHER_SPEC="${TEACHER_SPEC:?e.g. 12b-easy (any trace spec of run_gemma4_bestckpt_trace_collection.sh)}"
-STUDENT="${STUDENT:?e4b, e2b, 12b or 26b}"
+STUDENT="${STUDENT:?e4b, e2b, 12b, 26b or q30b}"
 DISTILL_GPU_IDS="${DISTILL_GPU_IDS:?comma-separated physical GPU indices for this run}"
 IFS=',' read -r -a GPU_IDS <<< "${DISTILL_GPU_IDS}"
 
@@ -37,11 +37,15 @@ case "${STUDENT}" in
   # all 8 H100s; 12B uses the unified decoder layer class, 26B-A4B (MoE experts live inside the text layer) the text one.
   12b) STUDENT_REPO=google/gemma-4-12B;     STUDENT_REVISION_DEFAULT=023679ed352de9bb66cc873c9009ce3482585c08; STUDENT_MIN_GPUS=8; KL_CHUNK_DEFAULT=2048 ;;
   26b) STUDENT_REPO=google/gemma-4-26B-A4B; STUDENT_REVISION_DEFAULT=24548b62aa021d562695c04aaf7758a1ea47990b; STUDENT_MIN_GPUS=8; KL_CHUNK_DEFAULT=1024 ;;
-  *) echo "FATAL: STUDENT must be e4b, e2b, 12b or 26b, got ${STUDENT}" >&2; exit 2 ;;
+  # Qwen3-4B-Base traces -> Qwen3-30B-A3B-Base (same tokenizer). 30.5B params x 16 B (fp32 master + grad + Adam) = 61 GB/GPU on 8.
+  q30b) STUDENT_REPO=Qwen/Qwen3-30B-A3B-Base; STUDENT_REVISION_DEFAULT=1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9; STUDENT_MIN_GPUS=8; KL_CHUNK_DEFAULT=1024 ;;
+  *) echo "FATAL: STUDENT must be e4b, e2b, 12b, 26b or q30b, got ${STUDENT}" >&2; exit 2 ;;
 esac
 case "${STUDENT}" in
-  12b) export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Gemma4UnifiedTextDecoderLayer}" ;;
-  *)   export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Gemma4TextDecoderLayer}" ;;
+  12b)  export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Gemma4UnifiedTextDecoderLayer}" ;;
+  # untied embeddings: the per-rank local load (VERL_FSDP2_LOCAL_LOAD=1) supports tied models only (as in the Qwen RL runs)
+  q30b) export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Qwen3MoeDecoderLayer}" VERL_FSDP2_LOCAL_LOAD="${VERL_FSDP2_LOCAL_LOAD:-0}" ;;
+  *)    export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Gemma4TextDecoderLayer}" ;;
 esac
 if (( ${#GPU_IDS[@]} < STUDENT_MIN_GPUS )) && [[ ${ALLOW_UNDERSIZED_STUDENT_LAYOUT:-false} != true ]]; then
   echo "FATAL: ${STUDENT} student needs >= ${STUDENT_MIN_GPUS} GPUs (got ${#GPU_IDS[@]}: ${DISTILL_GPU_IDS}); set ALLOW_UNDERSIZED_STUDENT_LAYOUT=true to override" >&2
@@ -60,6 +64,14 @@ case "${TEACHER_SPEC}" in
     TRACE_HF_DATASET_BASE="${TRACE_HF_DATASET_BASE-}"
     TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}"
     PROJECT_NAME="${PROJECT_NAME:-gemma4-e4b-base-distill-v1}"
+    ;;
+  q4b-base-*)
+    # Untrained Qwen3-4B-Base teacher (run_gemma4_bestckpt_trace_collection.sh q4b-base-* specs): 16 train samples, S3 only.
+    TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-base-traces-topk128-v1}"
+    TRACE_LOCAL_ROOT="${TRACE_LOCAL_ROOT:-/tmp/qwen3_4b_base_traces_v1/${TEACHER_SPEC}}"
+    TRACE_HF_DATASET_BASE="${TRACE_HF_DATASET_BASE-}"
+    TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}"
+    PROJECT_NAME="${PROJECT_NAME:-qwen3-4b-base-distill-v1}"
     ;;
   12bd-*|12br-*|12bo-*|26bd-*|26bw-*)
     # RL-on-distilled 12B teacher (§9.0 step 190): bestckpt-v2 trace family on S3, 16 train samples (§9 recipe), no HF dataset mirror.
