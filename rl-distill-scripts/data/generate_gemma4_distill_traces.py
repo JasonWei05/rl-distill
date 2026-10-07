@@ -93,6 +93,10 @@ DIRECTIONS = (
     # RL'd 26B-A4B teachers stopped at the 5-h mark (§9.0o): distilled-init (26bd) and warm-started untrained (26bw) -> E4B base, 16 samples.
     "26bd_medium_to_e4b",
     "26bw_medium_to_e4b",
+    # Untrained Qwen3-4B-Base teacher -> Qwen3-30B-A3B-Base student on the Qwen3-30B-defined bands (0-shot ChatML +
+    # boxed instruction, stops on <|im_end|>/<|endoftext|>/<|im_start|> ids and "\nHuman:"/"\nuser\n"), 16 train samples.
+    "q4b_base_medium_to_30b",
+    "q4b_base_hard_to_30b",
 )
 SPLITS = ("train", "validation")
 
@@ -531,6 +535,7 @@ def _build_run_config(
     tokenizer_sha256: str,
     tokenizer_vocab_size: int,
     chat_template_sha256: str,
+    model_vocab_size: int = 0,
     generator_commit: str,
     repository_dirty: bool,
     source_hash: str,
@@ -546,11 +551,24 @@ def _build_run_config(
         "max_prompt_tokens": args.max_prompt_tokens,
         "max_response_tokens": args.max_response_tokens,
         "max_model_len": args.max_model_len,
-        "stop": list(DEFAULT_STOP_STRINGS),
+        "stop": list(args.stop_strings),
         "include_stop_str_in_output": False,
         "skip_special_tokens": False,
         "logprobs": TOPK_WIDTH,
     }
+    if args.stop_token_ids:  # recorded only when set, so the Gemma configs (and their hashes) are unchanged
+        sampling["stop_token_ids"] = list(args.stop_token_ids)
+    if args.restrict_to_tokenizer_vocab:
+        # Qwen3 pads its LM head past the tokenizer (151,936 rows vs 151,669 ids); at temperature 1 the untrained 4B
+        # occasionally samples a padding row (1 in ~800k tokens), which no tokenizer can decode. The padding ids get
+        # vLLM's strongest logit bias (-100; allowed_token_ids is capped at 1024 ids) and the top-k is taken from the
+        # same biased ("processed") distribution, so sampled and recorded logprobs stay consistent; the
+        # renormalization is negligible.
+        if model_vocab_size <= tokenizer_vocab_size:
+            raise ValueError(f"--restrict-to-tokenizer-vocab: model vocab {model_vocab_size} has no padding rows")
+        sampling["suppressed_token_ids"] = [tokenizer_vocab_size, model_vocab_size]
+        sampling["suppressed_token_logit_bias"] = -100.0
+        sampling["logprobs_mode"] = "processed_logprobs"
     engine = {
         "tensor_parallel_size": args.tensor_parallel_size,
         "dtype": args.dtype,
@@ -659,6 +677,8 @@ def _make_llm(args: argparse.Namespace) -> tuple[Any, Any, Any, str]:
         "max_num_batched_tokens": args.max_num_batched_tokens,
         "seed": args.global_seed,
     }
+    if args.restrict_to_tokenizer_vocab:
+        llm_kwargs["logprobs_mode"] = "processed_logprobs"
     if revision and not Path(args.teacher_model).exists():
         llm_kwargs["revision"] = revision
     if tokenizer_revision and not Path(args.tokenizer_model or args.teacher_model).exists():
@@ -671,13 +691,20 @@ def _make_llm(args: argparse.Namespace) -> tuple[Any, Any, Any, str]:
 
 
 def _sampling_params(SamplingParams: Any, sampling: Mapping[str, Any], seed: int) -> Any:
+    suppressed = sampling.get("suppressed_token_ids")
+    logit_bias = None
+    if suppressed:
+        bias = float(sampling["suppressed_token_logit_bias"])
+        logit_bias = {token_id: bias for token_id in range(int(suppressed[0]), int(suppressed[1]))}
     return SamplingParams(
+        logit_bias=logit_bias,
         n=1,
         temperature=float(sampling["temperature"]),
         top_p=float(sampling["top_p"]),
         top_k=int(sampling["sampling_top_k"]),
         max_tokens=int(sampling["max_response_tokens"]),
         stop=list(sampling["stop"]),
+        stop_token_ids=list(sampling.get("stop_token_ids") or []) or None,
         include_stop_str_in_output=bool(sampling["include_stop_str_in_output"]),
         skip_special_tokens=bool(sampling["skip_special_tokens"]),
         logprobs=int(sampling["logprobs"]),
@@ -815,6 +842,7 @@ def run_generation(args: argparse.Namespace) -> None:
         tokenizer_sha256=tokenizer_sha256,
         tokenizer_vocab_size=tokenizer_vocab_size,
         chat_template_sha256=template_sha256,
+        model_vocab_size=int(llm.llm_engine.model_config.get_vocab_size()),
         generator_commit=generator_commit,
         repository_dirty=repository_dirty,
         source_hash=generator_source_hash(),
@@ -929,6 +957,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--direction", choices=DIRECTIONS, required=True)
     parser.add_argument("--split", choices=SPLITS, required=True)
     parser.add_argument("--chat-template", default=str(DEFAULT_CHAT_TEMPLATE))
+    # Comma-separated; a literal "\n" in an entry is a newline (plain-text turn starts such as "\nHuman:").
+    parser.add_argument(
+        "--stop-strings",
+        type=lambda v: tuple(x.replace("\\n", "\n") for x in v.split(",") if x),
+        default=DEFAULT_STOP_STRINGS,
+    )
+    # Comma-separated token ids; special tokens never match a stop *string* (e.g. Qwen3 base needs <|im_end|> here).
+    parser.add_argument("--stop-token-ids", type=lambda v: tuple(int(x) for x in v.split(",") if x.strip()), default=())
+    parser.add_argument("--restrict-to-tokenizer-vocab", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--samples-per-question", type=int, default=5)
     parser.add_argument("--global-seed", type=int, default=42)
     parser.add_argument("--temperature", type=float, default=1.0)

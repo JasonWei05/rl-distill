@@ -63,12 +63,33 @@ case "${TRACE_SPEC}" in
   # (BEST_STEP_OVERRIDE, required); S3 full checkpoints only (TEACHER_SOURCE=s3; permanent every 10 steps carry actor/huggingface). 16 train samples.
   26bd-medium) RUN_KEY=26b-a4b-medium-from-e4bbase-distill-es5; BAND=medium; BEST_STEP="${BEST_STEP_OVERRIDE:?BEST_STEP_OVERRIDE required for 26bd-medium}"; DIRECTION=26bd_medium_to_e4b; TEACHER_HF_REPO=""; TEACHER_HF_REVISION=""; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-26b-from-e4bbase-distill-rl-full-checkpoints}" ;;
   26bw-medium) RUN_KEY=26b-a4b-medium-ws140; BAND=medium; BEST_STEP="${BEST_STEP_OVERRIDE:?BEST_STEP_OVERRIDE required for 26bw-medium}"; DIRECTION=26bw_medium_to_e4b; TEACHER_HF_REPO=""; TEACHER_HF_REVISION=""; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-20260819-full-checkpoints}" ;;
+  # Untrained Qwen3-4B-Base as the teacher for a Qwen3-30B-A3B-Base student (Qwen analogue of e4b-base-*), on the
+  # Qwen3-30B-defined bands (JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k); 16 samples per training question.
+  q4b-base-medium) RUN_KEY=qwen3-4b-base; BAND=medium; BEST_STEP=0; DIRECTION=q4b_base_medium_to_30b; TEACHER_HF_REPO=Qwen/Qwen3-4B-Base; TEACHER_HF_REVISION=906bfd4b4dc7f14ee4320094d8b41684abff8539; TEACHER_HF_ROOT=1 ;;
+  q4b-base-hard)   RUN_KEY=qwen3-4b-base; BAND=hard;   BEST_STEP=0; DIRECTION=q4b_base_hard_to_30b;   TEACHER_HF_REPO=Qwen/Qwen3-4B-Base; TEACHER_HF_REVISION=906bfd4b4dc7f14ee4320094d8b41684abff8539; TEACHER_HF_ROOT=1 ;;
   *)
     echo "FATAL: unsupported TRACE_SPEC=${TRACE_SPEC}" >&2
     exit 2
     ;;
 esac
 TEACHER_HF_ROOT="${TEACHER_HF_ROOT:-0}"
+# Prompt contract + source data per model family (Gemma 4: 12-shot template, turn-string stops, 26B-PT bands; Qwen3 base:
+# 0-shot native ChatML with the boxed instruction already appended by the data prep, token-id stops, Qwen3-30B bands).
+if [[ ${RUN_KEY} == qwen3-* ]]; then
+  CHAT_TEMPLATE="${PROJECT_ROOT}/rl-distill-scripts/data/qwen3_base_native_chat.jinja"
+  STOP_STRINGS='\nHuman:,\nuser\n'
+  STOP_TOKEN_IDS=151645,151643,151644   # <|im_end|>, <|endoftext|> (eos), <|im_start|>
+  VOCAB_ARGS=(--restrict-to-tokenizer-vocab)   # LM head is padded past the tokenizer; never sample/record padding ids
+  DATA_PREP_SCRIPT=rl-distill-scripts/data/prepare_deepscaler_qwen3_30b_difficulty_rl_data.py; DATA_PREFIX=deepscaler_qwen3_30b
+  DEFAULT_DATASET_REPO=JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k; DEFAULT_DATASET_REVISION=be4dcd8b1fad7d5eb7bf721f0210baf78277aaa9
+else
+  CHAT_TEMPLATE="${PROJECT_ROOT}/rl-distill-scripts/data/gemma3_it_fewshot_math.jinja"
+  STOP_STRINGS='<end_of_turn>,<start_of_turn>'
+  STOP_TOKEN_IDS=
+  VOCAB_ARGS=()
+  DATA_PREP_SCRIPT=rl-distill-scripts/data/prepare_deepscaler_gemma4_26b_difficulty_rl_data.py; DATA_PREFIX=deepscaler_gemma4_26b
+  DEFAULT_DATASET_REPO=JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k; DEFAULT_DATASET_REVISION=a0ba3c3dc07c7bc27e901670ceb1a0b0ceeaa8db
+fi
 
 # TEACHER_SOURCE=s3 pulls the e4b/12b/26b-easy teachers from the S3 full checkpoints instead
 # of their Hub re-uploads (same weights, same content hash; only for boxes with S3 access).
@@ -77,8 +98,8 @@ if [[ ${TEACHER_SOURCE:-hf} == s3 ]]; then
 fi
 FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-difficulty-s42-20260819-full-checkpoints}"
 TEACHER_S3_URI="${FULL_CHECKPOINT_S3_BASE}/${RUN_KEY}/global_step_${BEST_STEP}/actor/huggingface"
-DIFFICULTY_DATASET_REPO="${DIFFICULTY_DATASET_REPO:-JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k}"
-DIFFICULTY_DATASET_REVISION="${DIFFICULTY_DATASET_REVISION:-a0ba3c3dc07c7bc27e901670ceb1a0b0ceeaa8db}"
+DIFFICULTY_DATASET_REPO="${DIFFICULTY_DATASET_REPO:-${DEFAULT_DATASET_REPO}}"
+DIFFICULTY_DATASET_REVISION="${DIFFICULTY_DATASET_REVISION:-${DEFAULT_DATASET_REVISION}}"
 
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-west-2}"
 export AWS_REGION="${AWS_REGION:-us-west-2}"
@@ -175,7 +196,7 @@ fi
 # tokens, i.e. corrupting the top-k logprobs) and leaking <image|> into most responses. The
 # base model's processor_config is byte-compatible (identical multimodal token ids). Added
 # before the content hash, which covers weights only, so the teacher identity is unchanged.
-if [[ ! -f ${MODEL_DIR}/processor_config.json ]]; then
+if [[ ${RUN_KEY} != qwen3-* && ! -f ${MODEL_DIR}/processor_config.json ]]; then   # Qwen3 is text-only
   case "${RUN_KEY}" in
     e2b-*)     BASE_MODEL_REPO=google/gemma-4-E2B ;;
     e4b-*)     BASE_MODEL_REPO=google/gemma-4-E4B ;;
@@ -210,7 +231,7 @@ fi
 
 # --- Source: the band's training + validation data (same as RL) ---
 GLOBAL_SEED="${GLOBAL_SEED:-42}"
-case "${TRACE_SPEC}" in e4b-base-*|12bd-*|12br-*|12bo-*|26bd-*|26bw-*) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" ;; *) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}" ;; esac
+case "${TRACE_SPEC}" in e4b-base-*|q4b-base-*|12bd-*|12br-*|12bo-*|26bd-*|26bw-*) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" ;; *) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}" ;; esac
 VALIDATION_SAMPLES_PER_QUESTION="${VALIDATION_SAMPLES_PER_QUESTION:-1}"
 PROMPTS_PER_SHARD="${PROMPTS_PER_SHARD:-8}"
 ROW_GROUP_ROWS="${ROW_GROUP_ROWS:-2}"
@@ -230,6 +251,7 @@ MAX_WORKER_ATTEMPTS="${MAX_WORKER_ATTEMPTS:-5}"
 # Trace family: RL-teacher study bundles vs the E4B-base (pre-training control) bundles.
 case "${TRACE_SPEC}" in
   e4b-base-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/gemma4_e4b_base_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-e4b-base-traces-topk128-v1}" ;;
+  q4b-base-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/qwen3_4b_base_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-base-traces-topk128-v1}" ;;
   *)          TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/gemma4_bestckpt_traces_v2}";  TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2}" ;;
 esac
 OUTPUT_ROOT="${OUTPUT_ROOT:-${TRACE_LOCAL_BASE}/${TRACE_SPEC}}"
@@ -243,10 +265,10 @@ VALIDATION_DIR="${OUTPUT_ROOT}/validation"
 mkdir -p "${DATA_DIR}" "${TRAIN_DIR}" "${VALIDATION_DIR}" "${OUTPUT_ROOT}/logs"
 
 # validation-repeats 1 => the 300 unique validation questions (1 response each).
-"${VENV}/bin/python" rl-distill-scripts/data/prepare_deepscaler_gemma4_26b_difficulty_rl_data.py \
+"${VENV}/bin/python" "${DATA_PREP_SCRIPT}" \
   --data-dir "${DATA_DIR}" --band "${BAND}" --validation-repeats 1
-TRAIN_PARQUET="${DATA_DIR}/deepscaler_gemma4_26b_${BAND}_train.parquet"
-VALIDATION_PARQUET="${DATA_DIR}/deepscaler_gemma4_26b_${BAND}_val300_x16.parquet"
+TRAIN_PARQUET="${DATA_DIR}/${DATA_PREFIX}_${BAND}_train.parquet"
+VALIDATION_PARQUET="${DATA_DIR}/${DATA_PREFIX}_${BAND}_val300_x16.parquet"
 if [[ ! -f ${TRAIN_PARQUET} || ! -f ${VALIDATION_PARQUET} ]]; then
   echo "FATAL: band source parquets missing (${TRAIN_PARQUET}, ${VALIDATION_PARQUET})" >&2
   exit 2
@@ -328,7 +350,10 @@ run_worker() {
       --output-dir "${output_dir}"
       --direction "${DIRECTION}"
       --split "${split}"
-      --chat-template "${PROJECT_ROOT}/rl-distill-scripts/data/gemma3_it_fewshot_math.jinja"
+      --chat-template "${CHAT_TEMPLATE}"
+      --stop-strings "${STOP_STRINGS}"
+      --stop-token-ids "${STOP_TOKEN_IDS}"
+      "${VOCAB_ARGS[@]}"
       --samples-per-question "${samples}"
       --global-seed "${GLOBAL_SEED}"
       --temperature 1.0
