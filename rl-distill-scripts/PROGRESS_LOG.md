@@ -36,6 +36,9 @@ Found in smoke: the untrained 4B samples Qwen3's LM-head padding ids (151,669-15
 validation -> --restrict-to-tokenizer-vocab (-100 logit bias on padding ids + processed_logprobs; vLLM caps allowed_token_ids at
 1024). Throughput is CPU-bound on top-128 processing: ~940 output tok/s per GPU, 32 prompts/shard -> 94 shards x ~11 min ~= 17 h
 and ~21 GB per band. Smoke shard (32 medium q x 16): teacher strict acc 21%, mean response 1,211 tokens, 2.3% hit 8192.
+**DONE 2026-10-07** (relaunched on 4 GPUs per band, GPUS=4): both bundles VALID + COMPLETE.json on S3 -- medium 48,300 rows /
+56.7M response tokens (20.6 GB train, COMPLETE 18:48 UTC), hard 48,300 rows / 60.6M tokens (22.1 GB, 19:17 UTC). The single-process
+final validation alone takes ~80-85 min per bundle (4.3x the E4B bundles' 17 min, proportional to size).
 
 ---
 
