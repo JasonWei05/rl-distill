@@ -9,6 +9,21 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-07 — Qwen3-4B-Base -> 30B-A3B distillation, step 1: top-128 teacher traces (ScaleTrain, 1 GPU per band)
+
+Same protocol as the E4B-base -> 12B/26B control (DISTILLATION_EXPERIMENTS.md §9): untrained Qwen3-4B-Base@906bfd4b teacher,
+Qwen3-30B medium + hard bands (JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k@be4dcd8b), 3,000 train q x 16 + 300 val
+q x 1, temp 1 / top-p 1 / top-k -1, 8192 response tokens, RL prompt (0-shot ChatML + boxed instruction), token ids + top-128
+logprobs. Specs q4b-base-{medium,hard} in run_gemma4_bestckpt_trace_collection.sh; ScaleTrain jobs q4b-tr-{med,hard}
+(job_db2stgbmjdjg07lcroq0 / job_db2stgcf8c4g08flbdug, 1 GPU, borrowing, supervisor `tr-q4b-tr-*`), bundles
+`s3://scale-ml/genai/rl-distill/qwen3-4b-base-traces-topk128-v1/q4b-base-{medium,hard}/` (S3-mirrored per shard, resumable).
+Found in smoke: the untrained 4B samples Qwen3's LM-head padding ids (151,669-151,935; ~1 per 800k tokens), which fail trace
+validation -> --restrict-to-tokenizer-vocab (-100 logit bias on padding ids + processed_logprobs; vLLM caps allowed_token_ids at
+1024). Throughput is CPU-bound on top-128 processing: ~940 output tok/s per GPU, 32 prompts/shard -> 94 shards x ~11 min ~= 17 h
+and ~21 GB per band. Smoke shard (32 medium q x 16): teacher strict acc 21%, mean response 1,211 tokens, 2.3% hit 8192.
+
+---
+
 ## 2026-10-06 — Qwen3 medium-band DAPO RL LAUNCHED: 30B-A3B (8 GPUs) + 4B (4 GPUs), ScaleTrain borrowing
 
 Supervisors `rl-q3-30b-rl-med` / `rl-q3-4b-rl-med` (+ `ckpt-janitor-*`), state `.scale_train_supervisors/q3-{30b,4b}-rl-med-20261006/`;
