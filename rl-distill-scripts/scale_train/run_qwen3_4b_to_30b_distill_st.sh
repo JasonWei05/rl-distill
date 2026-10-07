@@ -5,8 +5,9 @@
 # linear -> 2e-7), 1000 steps (~2.7 epochs), validation KL on 128 teacher val generations every 10 steps, one sequence per
 # micro-batch (4096 padded-token ceiling), KL over 1024-token vocab chunks, fp32 master + Adam, bf16 param views, grad ckpt.
 # Layout: FSDP2 DP8 on one node, no offload (30.5B x 16 B = 61 GB/GPU of params/grads/Adam; 4 GPUs would need CPU offload).
-# S3-only checkpoints: permanent every 250 steps, rolling every 50 (background upload, HF export kept under hf_exports/),
-# no Hub pushes. Preemption: the trainer restores the newest complete S3 checkpoint at startup (<= 50 steps lost).
+# S3-only checkpoints: permanent every 250 steps only (user, 2026-10-07: no rolling saves; ROLLING_CHECKPOINT_FREQ=50 restores
+# them), each with its HF export; no Hub pushes. Preemption: the trainer restores the newest complete S3 checkpoint at startup
+# (<= 250 steps lost).
 #   launched by launch_qwen3_4b_to_30b_distill_st.sh (8 GPUs, borrowing, priority high) via launch_st_with_code.sh
 set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "${PROJECT_ROOT}"
@@ -45,7 +46,7 @@ export LR_WARMUP_STEPS="${LR_WARMUP_STEPS:-100}" LR_SCHEDULER_TYPE="${LR_SCHEDUL
 export TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" FSDP_OFFLOAD="${FSDP_OFFLOAD:-false}" ALLOW_UNDERSIZED_STUDENT_LAYOUT="${ALLOW_UNDERSIZED_STUDENT_LAYOUT:-true}"
 # --- S3-only checkpoints --------------------------------------------------------------------------------------------
 export CHECKPOINT_SAVE_CONTENTS="${CHECKPOINT_SAVE_CONTENTS:-[\"model\",\"optimizer\",\"extra\",\"hf_model\"]}" MAX_CKPT_TO_KEEP="${MAX_CKPT_TO_KEEP:-1}"
-export REMOTE_CHECKPOINT_ENABLE=true ROLLING_CHECKPOINT_FREQ="${ROLLING_CHECKPOINT_FREQ:-50}" ROLLING_HF_EXPORT=true ROLLING_HF_EXPORT_S3=true
+export REMOTE_CHECKPOINT_ENABLE=true ROLLING_CHECKPOINT_FREQ="${ROLLING_CHECKPOINT_FREQ:-0}" ROLLING_HF_EXPORT=true ROLLING_HF_EXPORT_S3=true
 export REMOTE_CHECKPOINT_S3_URI="${REMOTE_CHECKPOINT_S3_URI:-s3://scale-ml/genai/rl-distill/qwen3-4b-base-distill-ckpts-v1/${TEACHER_SPEC}-to-${STUDENT}-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}-lr${LR}}"
 export HF_PUSH_ENABLE=false HF_PUSH_DELETE_LOCAL=false PROJECT_NAME="${PROJECT_NAME:-qwen3-4b-base-distill-v1}"
 export EXP_NAME="${EXP_NAME:-${TEACHER_SPEC}-to-${STUDENT}-base-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}-lr${LR}-g${n_gpus}}"
