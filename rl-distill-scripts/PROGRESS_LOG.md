@@ -9,6 +9,13 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-08 — Qwen3-4B-Base hard-band RL FINISHED (max steps 400)
+
+`q3-4b-rl-hard` reached its 400-step cap at 00:02Z (not early-stopped): best val mean@16 **0.3819 @ step 390** (0.371 @ 400, 1 miss);
+completion receipts verified by the supervisor; best_hf under s3://scale-ml/genai/rl-distill/qwen3-4b-base-rl/qwen3-4b-hard-es5/.
+
+---
+
 ## 2026-10-07 — Qwen3-4B-Base -> Qwen3-30B-A3B-Base distillation (step 2): PREPARED, NOT LAUNCHED
 
 Recipe = the E4B-base -> 26B-A4B student runs (DISTILLATION_EXPERIMENTS.md §9): off-policy top-128 forward KL on the q4b-base-<band>
