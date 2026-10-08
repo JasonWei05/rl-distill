@@ -13,6 +13,10 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 `q3-4b-rl-hard` reached its 400-step cap at 00:02Z (not early-stopped): best val mean@16 **0.3819 @ step 390** (0.371 @ 400, 1 miss);
 completion receipts verified by the supervisor; best_hf under s3://scale-ml/genai/rl-distill/qwen3-4b-base-rl/qwen3-4b-hard-es5/.
+**Extended to 600 steps (user, 00:30Z 10-08)** as for 4B medium: run_complete.json -> run_complete.step400.json, best_hf copied to
+best_hf_at_step400/, best_hf/_REMOTE_COMPLETE.json removed; supervisor `.scale_train_supervisors/q3-4b-rl-hard-20261008` (TOTAL_TRAINING_STEPS=600,
+same ES rule, same W&B id) resumes the step-400 permanent checkpoint (Adam + data cursor + ES state). First pod rejected by a bad node
+("GPU is lost" at admission); supervisor auto-relaunches after its 900 s backoff.
 
 ---
 
