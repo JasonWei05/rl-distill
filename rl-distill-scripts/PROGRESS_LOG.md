@@ -63,6 +63,13 @@ janitor tmux ckpt-janitor-q3-dist-4b30b) -> run_qwen3_4b_to_30b_distill_st.sh; c
 s3://scale-ml/genai/rl-distill/qwen3-4b-base-distill-ckpts-v1/q4b-base-<band>-to-q30b-bs128-s1000-lr2e-6, W&B project
 qwen3-4b-base-distill-v1. CPU dry run (VALIDATE_ONLY) passed for medium: view 48,000 / 128 rows, tokenizer + identities + direction OK.
 Untested on GPU (first step will confirm memory; fallback FSDP_OFFLOAD=true).
+**2026-10-08 launch issues (fixed):** (1) teacher top-k ids were bounded by tokenizer.vocab_size (Qwen 151,643 excludes
+<|endoftext|>/<|im_end|>) -> first val batch failed; now len(tokenizer) (b3f89482). (2) Both runs then HUNG in the initial validation
+(1 h+, all 8 GPUs 100% util at ~120 W = NCCL spin): the untied 30B lm_head was its own FSDP2 unit, and the loss calls lm_head once per
+1024-token chunk outside the forward, so every call resharded/all-gathered and ranks with different token counts deadlocked (Gemma's
+tied head lives in the root unit). Fix: VERL_FSDP2_WRAP_EMBED_LM_HEAD=0 keeps embed/lm_head in the root unit (set for STUDENT=q30b);
+2-rank CPU repro tests/special_distributed/run_fsdp2_untied_lm_head_chunked.py hangs without it and passes with identical grads with it.
+Relaunched as r4 (hourly retry on failure).
 
 ---
 

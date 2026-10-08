@@ -547,14 +547,19 @@ def _select_fsdp2_wrap_targets(model, fsdp_transformer_layer_cls_to_wrap):
     must not be wrapped separately.
     """
     _tie = getattr(model.config, "tie_word_embeddings", False)
-    _wrap_by_name = set() if _tie else {"embed_tokens", "lm_head"}
+    # VERL_FSDP2_WRAP_EMBED_LM_HEAD=0 keeps an untied model's embed_tokens/lm_head in the root unit, as for tied models.
+    # Required by the hidden-state distillation loss, which calls lm_head once per vocab chunk outside the model forward: as
+    # its own FSDP unit every call reshards/all-gathers, and ranks with different token counts deadlock (Qwen3-30B-A3B
+    # student, 2026-10-08: all 8 GPUs at 100% util / ~120 W in the first validation for 1 h+).
+    _separate = not _tie and os.environ.get("VERL_FSDP2_WRAP_EMBED_LM_HEAD", "1") != "0"
+    _wrap_by_name = {"embed_tokens", "lm_head"} if _separate else set()
 
     modules = []
     for name, module in model.named_modules():
         leaf_name = name.rsplit(".", 1)[-1] if "." in name else name
         if (
             module.__class__.__name__ in fsdp_transformer_layer_cls_to_wrap
-            or (isinstance(module, nn.Embedding) and not _tie)
+            or (isinstance(module, nn.Embedding) and _separate)
             or (leaf_name in _wrap_by_name and hasattr(module, "weight"))
         ):
             modules.append(module)

@@ -12,7 +12,7 @@ case "${BAND}" in medium) short=med ;; hard) short=hard ;; *) echo "FATAL: BAND 
 name="q3-dist-4b30b-${short}"; sup=".scale_train_supervisors/${name}-$(date -u +%Y%m%d)${SUP_TAG:-}"; mkdir -p "${sup}/pod-logs"; rm -f "${sup}/STOP"
 tmux kill-session -t "rl-${name}" 2>/dev/null || true
 tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scripts/scale_train/supervise_borrowing_job.py --name ${name} \
-  --relaunch-on-cancel --relaunch-on-failure --max-relaunches 30 --quick-cancel-seconds 300 --max-quick-cancels 3 --failure-backoff-seconds 900 \
+  --relaunch-on-cancel --relaunch-on-failure --max-relaunches ${MAX_RELAUNCHES:-30} --quick-cancel-seconds 300 --max-quick-cancels 3 --failure-backoff-seconds ${FAILURE_BACKOFF_SECONDS:-900} --max-failure-backoff-seconds ${MAX_FAILURE_BACKOFF_SECONDS:-0} \
   --launch-log ${sup}/launch.log --monitor-log ${sup}/monitor.log --state-file ${sup}/state.json --stop-file ${sup}/STOP --pod-log-dir ${sup}/pod-logs \
   -- env BAND=${BAND} JOB_NAME=${name} EXTRA_ENV_VARS=${EXTRA_ENV_VARS:-} bash rl-distill-scripts/scale_train/launch_qwen3_4b_to_30b_distill_st.sh --image ${IMG} 2>&1 | tee -a ${sup}/supervisor.out"
 # one janitor for the whole checkpoint root (both bands); idempotent

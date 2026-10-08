@@ -46,7 +46,8 @@ esac
 case "${STUDENT}" in
   12b)  export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Gemma4UnifiedTextDecoderLayer}" ;;
   # untied embeddings: the per-rank local load (VERL_FSDP2_LOCAL_LOAD=1) supports tied models only (as in the Qwen RL runs)
-  q30b) export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Qwen3MoeDecoderLayer}" VERL_FSDP2_LOCAL_LOAD="${VERL_FSDP2_LOCAL_LOAD:-0}" ;;
+  # untied: embed/lm_head stay in the root FSDP unit (the chunked-LM-head loss deadlocks when lm_head is its own unit)
+  q30b) export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Qwen3MoeDecoderLayer}" VERL_FSDP2_LOCAL_LOAD="${VERL_FSDP2_LOCAL_LOAD:-0}" VERL_FSDP2_WRAP_EMBED_LM_HEAD=0 ;;
   q4b)  export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Qwen3DecoderLayer}" ;;
   *)    export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Gemma4TextDecoderLayer}" ;;
 esac
