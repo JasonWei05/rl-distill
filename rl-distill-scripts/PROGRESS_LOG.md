@@ -84,6 +84,10 @@ tied head lives in the root unit). Fix: VERL_FSDP2_WRAP_EMBED_LM_HEAD=0 keeps em
 Relaunched as r4 (hourly retry on failure).
 r4 TRAINING since 03:17Z 10-08 (8 GPUs, no OOM, ~20 s/step -> ~6 h for 1000 steps): initial val KL medium 0.0620 (teacher mass
 0.989), hard 0.0983 (0.913); step-1 loss 0.079 / 0.086. W&B project qwen3-4b-base-distill-v1.
+**Hard band DONE 2026-10-08 21:14Z** (exit 0, receipts verified): 1000 steps, val KL 0.0983 -> 0.0369 (400) -> 0.0355 (500) -> 0.0332 (750)
+-> **0.0324 (1000)**; checkpoints 250/500/750/1000 (+HF exports) on S3. It was preempted 7x on borrowed capacity (only step 250 survived)
+and finished on dedicated capacity (ALLOW_BORROWING=false, user 15:20Z); exact resume verified (val KL at 250 identical to 7 digits).
+Medium moved to dedicated too (resumed from 500 at 19:17Z, exact).
 
 ---
 
