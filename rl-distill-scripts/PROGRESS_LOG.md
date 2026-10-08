@@ -100,6 +100,8 @@ r4 TRAINING since 03:17Z 10-08 (8 GPUs, no OOM, ~20 s/step -> ~6 h for 1000 step
 -> **0.0324 (1000)**; checkpoints 250/500/750/1000 (+HF exports) on S3. It was preempted 7x on borrowed capacity (only step 250 survived)
 and finished on dedicated capacity (ALLOW_BORROWING=false, user 15:20Z); exact resume verified (val KL at 250 identical to 7 digits).
 Medium moved to dedicated too (resumed from 500 at 19:17Z, exact).
+**Medium band DONE 2026-10-08 22:47Z** (receipts verified): val KL 0.0620 -> 0.0419 (250) -> 0.0398 (500) -> 0.0389 (750) -> **0.0387 (1000)**;
+checkpoints 250/500/750/1000 (+HF exports) on S3. Both 4B -> 30B-A3B students are done; evals of the students not yet requested.
 
 ---
 
