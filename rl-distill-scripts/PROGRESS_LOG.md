@@ -31,6 +31,9 @@ User request: distill the best 30B medium RL checkpoint into 4B and eval on the 
    tokens, strict boxed math_verify = the RL reward) -> mean@16 / pass@k / pass^k at s3://scale-ml/genai/rl-distill/qwen3-30b-rl-distill-evals-v1/.../step_*/summary.json.
    References on the same set/metric: 30B teacher 75.75 (RL val @320), 4B RL best 65.8 (@510, still running), 4B base 21.0 (RL step 0).
 All three stages resume after preemption (S3 shards / S3 checkpoints / per-step eval markers).
+**Stage 1 DONE 2026-10-08 18:15Z:** bundle VALID, 48,300 rows / 57.0M response tokens (~1,180 tokens/response; trace gen 07:21-16:52Z
+uninterrupted after a broken-node day: i-0dc001458af0d6a38 rejected every 4-GPU pod until ~05:40Z; one borrowing preemption was misreported
+COMPLETED -> supervisor --completion-marker-s3-uri). Stage 2 (4B distill, 4 GPUs) started 18:15Z.
 
 ---
 
