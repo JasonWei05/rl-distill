@@ -234,8 +234,12 @@ def _durable_completion_status(
     expected_step: int | None,
     max_step: int | None,
     expected_world_size: int | None,
+    marker_uris: list[str] = (),
 ) -> tuple[bool, str]:
     checks: list[tuple[bool, str]] = []
+    for uri in marker_uris:
+        present = _read_s3_json_object(uri) is not None
+        checks.append((present, f"{uri}:{'present' if present else 'missing'}"))
     if receipt_uris:
         assert expected_world_size is not None
         checks.append(
@@ -553,6 +557,13 @@ def main() -> None:
         help="Logical-run artifact root whose durable best-HF marker is required; repeat per run.",
     )
     parser.add_argument(
+        "--completion-marker-s3-uri",
+        action="append",
+        default=[],
+        help="Exact S3 object (JSON) whose existence marks the job done, for non-RL pipelines; repeat for several. A "
+        "COMPLETED status without it is treated as a misreported preemption and relaunched.",
+    )
+    parser.add_argument(
         "--pod-log-dir",
         type=Path,
         help="Persist a live kubectl log stream for each attempted pod in this directory.",
@@ -640,11 +651,12 @@ def main() -> None:
         if attempt - 1 >= args.max_relaunches and initial_job_id is None:
             _log(args.monitor_log, f"name={args.name} relaunch budget exhausted (max_relaunches={args.max_relaunches}); supervisor stopping")
             return
-        completion_configured = bool(args.completion_s3_uri or args.completion_best_hf_s3_uri)
+        completion_configured = bool(args.completion_s3_uri or args.completion_best_hf_s3_uri or args.completion_marker_s3_uri)
         if completion_configured:
             complete, detail = _durable_completion_status(
                 receipt_uris=args.completion_s3_uri,
                 best_hf_uris=args.completion_best_hf_s3_uri,
+                marker_uris=args.completion_marker_s3_uri,
                 expected_step=args.expected_completion_step,
                 max_step=args.max_completion_step,
                 expected_world_size=args.expected_completion_world_size,
@@ -703,6 +715,7 @@ def main() -> None:
                 complete, completion_detail = _durable_completion_status(
                     receipt_uris=args.completion_s3_uri,
                     best_hf_uris=args.completion_best_hf_s3_uri,
+                    marker_uris=args.completion_marker_s3_uri,
                     expected_step=args.expected_completion_step,
                     max_step=args.max_completion_step,
                     expected_world_size=args.expected_completion_world_size,
