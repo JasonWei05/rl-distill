@@ -604,6 +604,13 @@ def main() -> None:
         default=120,
         help="Wait this long times the number of consecutive failures (capped at 10x) before relaunching after FAILED/ERROR.",
     )
+    parser.add_argument(
+        "--max-failure-backoff-seconds",
+        type=int,
+        default=0,
+        help="Cap on the growing FAILED/ERROR backoff (0 = no cap). Equal to --failure-backoff-seconds gives a fixed retry "
+        "interval, e.g. 3600 + 3600 = retry hourly while pods keep landing on a broken node (2026-10-08).",
+    )
     parser.add_argument("launch_command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = list(args.launch_command)
@@ -805,6 +812,8 @@ def main() -> None:
                 if args.relaunch_on_failure:
                     consecutive_failures += 1
                     backoff = args.failure_backoff_seconds * min(consecutive_failures, 10)
+                    if args.max_failure_backoff_seconds > 0:
+                        backoff = min(backoff, args.max_failure_backoff_seconds)
                     _log(
                         args.monitor_log,
                         f"name={args.name} job_id={job_id} terminal={status}; consecutive_failures={consecutive_failures}; "

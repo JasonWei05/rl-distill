@@ -23,7 +23,7 @@ CKPT_URI="${S3_BASE}-full-checkpoints/qwen30b-${BAND}-${RUN_TAG}"
 sup=".scale_train_supervisors/${name}-$(date -u +%Y%m%d)${SUP_TAG:-}"; mkdir -p "${sup}/pod-logs"; rm -f "${sup}/STOP"
 tmux kill-session -t "rl-${name}" 2>/dev/null || true
 tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scripts/scale_train/supervise_borrowing_job.py --name ${name} \
-  --relaunch-on-cancel --relaunch-on-failure --max-relaunches 40 --quick-cancel-seconds 300 --max-quick-cancels 3 --failure-backoff-seconds 900 \
+  --relaunch-on-cancel --relaunch-on-failure --max-relaunches ${MAX_RELAUNCHES:-40} --quick-cancel-seconds 300 --max-quick-cancels 3 --failure-backoff-seconds ${FAILURE_BACKOFF_SECONDS:-900} --max-failure-backoff-seconds ${MAX_FAILURE_BACKOFF_SECONDS:-0} \
   --launch-log ${sup}/launch.log --monitor-log ${sup}/monitor.log --state-file ${sup}/state.json --stop-file ${sup}/STOP --pod-log-dir ${sup}/pod-logs \
   --completion-s3-uri ${CKPT_URI} --max-completion-step ${TOTAL_TRAINING_STEPS} --expected-completion-world-size ${GPUS} \
   --completion-best-hf-s3-uri ${S3_BASE}/${SLUG}-${BAND}-${RUN_TAG} \
