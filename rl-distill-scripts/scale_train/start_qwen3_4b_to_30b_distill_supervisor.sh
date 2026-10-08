@@ -16,7 +16,7 @@ tmux kill-session -t "rl-${name}" 2>/dev/null || true
 tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scripts/scale_train/supervise_borrowing_job.py --name ${name} \
   --relaunch-on-cancel --relaunch-on-failure --max-relaunches ${MAX_RELAUNCHES:-30} --quick-cancel-seconds 300 --max-quick-cancels 3 --failure-backoff-seconds ${FAILURE_BACKOFF_SECONDS:-900} --max-failure-backoff-seconds ${MAX_FAILURE_BACKOFF_SECONDS:-0} \
   --launch-log ${sup}/launch.log --monitor-log ${sup}/monitor.log --state-file ${sup}/state.json --stop-file ${sup}/STOP --pod-log-dir ${sup}/pod-logs --completion-marker-s3-uri ${MARKER}${INITIAL_JOB_ID:+ --initial-job-id ${INITIAL_JOB_ID}} \
-  -- env BAND=${BAND} JOB_NAME=${name} EXTRA_ENV_VARS=${EXTRA_ENV_VARS:-} bash rl-distill-scripts/scale_train/launch_qwen3_4b_to_30b_distill_st.sh --image ${IMG} 2>&1 | tee -a ${sup}/supervisor.out"
+  -- env BAND=${BAND} JOB_NAME=${name} ALLOW_BORROWING=${ALLOW_BORROWING:-true} EXTRA_ENV_VARS=${EXTRA_ENV_VARS:-} bash rl-distill-scripts/scale_train/launch_qwen3_4b_to_30b_distill_st.sh --image ${IMG} 2>&1 | tee -a ${sup}/supervisor.out"
 # one janitor for the whole checkpoint root (both bands); idempotent
 if ! tmux has-session -t ckpt-janitor-q3-dist-4b30b 2>/dev/null; then
   tmux new-session -d -s ckpt-janitor-q3-dist-4b30b "CKPT_S3_ROOTS=s3://scale-ml/genai/rl-distill/qwen3-4b-base-distill-ckpts-v1 PRUNE_INTERVAL_MIN=30 \

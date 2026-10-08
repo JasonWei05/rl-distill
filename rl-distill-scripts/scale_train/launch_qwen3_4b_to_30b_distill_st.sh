@@ -9,5 +9,6 @@ case "${BAND}" in medium) short=med ;; hard) short=hard ;; *) echo "FATAL: BAND 
 ENV_VARS="TEACHER_SPEC=q4b-base-${BAND}"
 [ -n "${EXTRA_ENV_VARS:-}" ] && ENV_VARS+=",${EXTRA_ENV_VARS}"   # e.g. LR=...,TOTAL_TRAINING_STEPS=... (changes the S3 prefix + W&B name)
 echo "LAUNCH_ENV ${ENV_VARS}"
-exec bash launch_st_with_code.sh --gpus-per-instance 8 --priority high --allow-borrowing --active-deadline-hours 120 \
+BORROW_FLAG="--allow-borrowing"; [ "${ALLOW_BORROWING:-true}" = false ] && BORROW_FLAG=""   # ALLOW_BORROWING=false -> dedicated (non-preemptible) capacity
+exec bash launch_st_with_code.sh --gpus-per-instance 8 --priority high ${BORROW_FLAG} --active-deadline-hours 120 \
   --run-file run_qwen3_4b_to_30b_distill_st.sh --job-name "${JOB_NAME:-q3-dist-4b30b-${short}}" --env-vars "${ENV_VARS}" "$@"
