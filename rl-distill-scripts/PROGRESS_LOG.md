@@ -70,6 +70,8 @@ Untested on GPU (first step will confirm memory; fallback FSDP_OFFLOAD=true).
 tied head lives in the root unit). Fix: VERL_FSDP2_WRAP_EMBED_LM_HEAD=0 keeps embed/lm_head in the root unit (set for STUDENT=q30b);
 2-rank CPU repro tests/special_distributed/run_fsdp2_untied_lm_head_chunked.py hangs without it and passes with identical grads with it.
 Relaunched as r4 (hourly retry on failure).
+r4 TRAINING since 03:17Z 10-08 (8 GPUs, no OOM, ~20 s/step -> ~6 h for 1000 steps): initial val KL medium 0.0620 (teacher mass
+0.989), hard 0.0983 (0.913); step-1 loss 0.079 / 0.086. W&B project qwen3-4b-base-distill-v1.
 
 ---
 
