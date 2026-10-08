@@ -170,7 +170,8 @@ export WANDB_DIR="${WANDB_DIR:-/tmp/wandb}"; export VLLM_CACHE_ROOT="${VLLM_CACH
 export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/triton_cache}"
 # ScaleTrain pods on ml-gpu-batch are IPv6-only (pod IP 2602:fb33:...), interface eth0.
 export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${NETWORK_INTERFACE_NAME:-eth0}}"
-export NCCL_SOCKET_FAMILY="${NCCL_SOCKET_FAMILY:-AF_INET6}"
+# EKS (ml-gpu-batch) pods are IPv6-only; GKE (a3-mega) pods are IPv4 (launch_st_job.py exports SCALE_CLUSTER)
+if [ "${SCALE_CLUSTER:-eks}" = gke ]; then export NCCL_SOCKET_FAMILY="${NCCL_SOCKET_FAMILY:-AF_INET}"; else export NCCL_SOCKET_FAMILY="${NCCL_SOCKET_FAMILY:-AF_INET6}"; fi
 export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${NETWORK_INTERFACE_NAME:-eth0}}"
 
 if [ -n "${CUDA_VISIBLE_DEVICES:-}" ]; then

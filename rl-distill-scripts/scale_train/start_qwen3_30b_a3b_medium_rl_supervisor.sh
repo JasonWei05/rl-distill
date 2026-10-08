@@ -6,6 +6,7 @@
 #   bash start_qwen3_30b_a3b_medium_rl_supervisor.sh       # stop: touch <state>/STOP; tmux kill-session -t rl-q3-30b-rl-med
 #   QWEN_SIZE=4b bash start_qwen3_30b_a3b_medium_rl_supervisor.sh   # Qwen3-4B-Base, 4 GPUs (sessions rl-q3-4b-rl-med, ...)
 #   BAND=hard [QWEN_SIZE=4b] bash start_qwen3_30b_a3b_medium_rl_supervisor.sh   # hard band (sessions rl-q3-<size>-rl-hard)
+#   ST_CLUSTER=gke ...   # GKE a3-mega capacity instead of EKS p5 (same S3 checkpoints)
 #   ROLLING_CHECKPOINT_ENABLED=False ASYNC_CHECKPOINT_UPLOAD=True ...   # permanent saves only, background S3 upload (30B: ~34% -> ~10% ckpt time)
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
@@ -26,7 +27,7 @@ tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scrip
   --launch-log ${sup}/launch.log --monitor-log ${sup}/monitor.log --state-file ${sup}/state.json --stop-file ${sup}/STOP --pod-log-dir ${sup}/pod-logs \
   --completion-s3-uri ${CKPT_URI} --max-completion-step ${TOTAL_TRAINING_STEPS} --expected-completion-world-size ${GPUS} \
   --completion-best-hf-s3-uri ${S3_BASE}/${SLUG}-${BAND}-${RUN_TAG} \
-  -- env QWEN_SIZE=${QWEN_SIZE} BAND=${BAND} RUN_TAG=${RUN_TAG} S3_BASE=${S3_BASE} TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS} ROLLING_CHECKPOINT_ENABLED=${ROLLING_CHECKPOINT_ENABLED:-True} ASYNC_CHECKPOINT_UPLOAD=${ASYNC_CHECKPOINT_UPLOAD:-False} bash rl-distill-scripts/scale_train/launch_qwen3_30b_a3b_medium_rl.sh --image ${IMG} 2>&1 | tee -a ${sup}/supervisor.out"
+  -- env QWEN_SIZE=${QWEN_SIZE} BAND=${BAND} RUN_TAG=${RUN_TAG} S3_BASE=${S3_BASE} TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS} ROLLING_CHECKPOINT_ENABLED=${ROLLING_CHECKPOINT_ENABLED:-True} ASYNC_CHECKPOINT_UPLOAD=${ASYNC_CHECKPOINT_UPLOAD:-False} bash rl-distill-scripts/scale_train/launch_qwen3_30b_a3b_medium_rl.sh --image ${IMG}${ST_CLUSTER:+ --cluster ${ST_CLUSTER}} 2>&1 | tee -a ${sup}/supervisor.out"
 # cleanup-rolling never deletes the committed rolling step (or anything newer); it only removes superseded ones.
 tmux kill-session -t "ckpt-janitor-${name}" 2>/dev/null || true
 tmux new-session -d -s "ckpt-janitor-${name}" "while [ ! -e ${sup}/STOP ]; do \
