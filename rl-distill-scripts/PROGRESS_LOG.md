@@ -34,6 +34,18 @@ All three stages resume after preemption (S3 shards / S3 checkpoints / per-step 
 **Stage 1 DONE 2026-10-08 18:15Z:** bundle VALID, 48,300 rows / 57.0M response tokens (~1,180 tokens/response; trace gen 07:21-16:52Z
 uninterrupted after a broken-node day: i-0dc001458af0d6a38 rejected every 4-GPU pod until ~05:40Z; one borrowing preemption was misreported
 COMPLETED -> supervisor --completion-marker-s3-uri). Stage 2 (4B distill, 4 GPUs) started 18:15Z.
+**DONE 2026-10-08 21:24Z** (receipts verified). Distill: 1000 steps at ~9 s/step, val KL 0.0808 (step 10) -> 0.0495 (100) -> 0.0469 (250)
+-> 0.0460 (500) -> 0.0456 (750) -> 0.0455 (1000), i.e. flat after ~250. Medium-val eval (300 q x 16, temp 1, 8192 tok, strict boxed):
+
+| student step | mean@16 | pass@2 | pass@4 | pass@8 | pass@16 | pass^4 | pass^16 | boxed | trunc | mean len |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 250 | 48.8 | 65.0 | 78.5 | 87.3 | 92.7 | 20.2 | 9.0 | 99.6% | 0.1% | 1253 |
+| 500 | 51.9 | 68.0 | 81.2 | 90.0 | 95.0 | 23.4 | 11.0 | 99.6% | 0.3% | 1252 |
+| 750 | 51.5 | 67.1 | 79.8 | 88.1 | 93.3 | 23.6 | 10.3 | 99.8% | 0.1% | 1252 |
+| 1000 | **52.2** | 68.2 | 81.0 | 89.4 | 93.3 | 23.6 | 9.0 | 99.6% | 0.1% | 1244 |
+
+Same set, same metric (mean@16): Qwen3-4B-Base 21.0 (RL step 0), **4B distilled from 30B-RL 52.2**, 4B RL best 65.8 (@510), 30B RL teacher
+75.75 (@320). Distillation recovers ~57% of the base->teacher gap but stays ~14 pts below direct 4B RL; most of the gain lands by step 250.
 
 ---
 
