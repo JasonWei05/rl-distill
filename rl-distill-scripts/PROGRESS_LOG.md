@@ -9,6 +9,16 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-08 — Qwen3-30B-A3B medium RL FINISHED (early stopping @420); 4B hard resume moved to GKE
+
+`q3-30b-rl-med` early-stopped at step 420 (5 consecutive validations > 1 point below the best; 360-420 after the ckpt-fix relaunch):
+best val mean@16 **0.7575 @ step 320**; run_outcome early_stopping / final 420 / best 320, best_hf + receipts verified on S3
+(s3://scale-ml/genai/rl-distill/qwen3-30b-a3b-base-rl/qwen3-30b-a3b-medium-es5/). 4B hard 400->600 extension moved to GKE at the user's
+request (e9b1136c: ST_CLUSTER=gke passthrough, NCCL AF_INET on GKE): job_db3e9nsf8c4g07jroe1g (a3.megagpu.8g:4), supervisor
+`.scale_train_supervisors/q3-4b-rl-hard-20261008-gke`; first GKE launch of this code -- S3 access / log capture unverified at launch.
+
+---
+
 ## 2026-10-08 — Qwen3-4B-Base hard-band RL FINISHED (max steps 400)
 
 `q3-4b-rl-hard` reached its 400-step cap at 00:02Z (not early-stopped): best val mean@16 **0.3819 @ step 390** (0.371 @ 400, 1 miss);
