@@ -9,6 +9,15 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-08 — Qwen3-4B-Base medium RL FINISHED (400 -> 600 extension early-stopped @590)
+
+`q3-4b-rl-med` (resumed from step 400 with Adam + data cursor) early-stopped at step 590 (5 consecutive misses after the best):
+best val mean@16 **0.6581 @ step 510** (was 0.644 @350 / 0.649 @440); 590 scored 0.611. best_hf (step 510) + run receipts verified
+on S3 (s3://scale-ml/genai/rl-distill/qwen3-4b-base-rl/qwen3-4b-medium-es5/; the step-400 best is kept under best_hf_at_step400/).
+The trailing wandb teardown ConnectionResetError is harmless (run synced; RUN_DONE rc=0).
+
+---
+
 ## 2026-10-08 — Best Qwen3-30B-A3B medium RL ckpt (step 320) -> Qwen3-4B-Base: traces + distill + medium-val eval LAUNCHED
 
 User request: distill the best 30B medium RL checkpoint into 4B and eval on the medium val set, normal protocol. One 4-GPU ScaleTrain job
