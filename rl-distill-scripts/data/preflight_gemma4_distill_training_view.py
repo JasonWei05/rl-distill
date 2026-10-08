@@ -59,6 +59,8 @@ ALLOWED_DIRECTIONS = {
     # Untrained Qwen3-4B-Base teacher -> Qwen3-30B-A3B-Base student, 16 samples.
     "q4b_base_medium_to_30b",
     "q4b_base_hard_to_30b",
+    # Qwen3-30B-A3B medium RL teacher (best step 320) -> Qwen3-4B-Base student, 16 samples.
+    "q30bm_medium_r320_to_4b",
 }
 
 
@@ -68,6 +70,7 @@ QWEN3_SAMPLING_OVERRIDES = {"stop": ["\nHuman:", "\nuser\n"], "stop_token_ids": 
 SAMPLING_OVERRIDES_BY_DIRECTION = {
     "q4b_base_medium_to_30b": QWEN3_SAMPLING_OVERRIDES,
     "q4b_base_hard_to_30b": QWEN3_SAMPLING_OVERRIDES,
+    "q30bm_medium_r320_to_4b": QWEN3_SAMPLING_OVERRIDES,
 }
 
 

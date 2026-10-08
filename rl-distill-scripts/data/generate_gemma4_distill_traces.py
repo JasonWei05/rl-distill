@@ -97,6 +97,8 @@ DIRECTIONS = (
     # boxed instruction, stops on <|im_end|>/<|endoftext|>/<|im_start|> ids and "\nHuman:"/"\nuser\n"), 16 train samples.
     "q4b_base_medium_to_30b",
     "q4b_base_hard_to_30b",
+    # Qwen3-30B-A3B medium RL teacher (best val step 320) -> Qwen3-4B-Base student, same Qwen prompt/stop contract, 16 train samples.
+    "q30bm_medium_r320_to_4b",
 )
 SPLITS = ("train", "validation")
 

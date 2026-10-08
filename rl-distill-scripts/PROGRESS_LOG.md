@@ -9,6 +9,22 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-08 — Best Qwen3-30B-A3B medium RL ckpt (step 320) -> Qwen3-4B-Base: traces + distill + medium-val eval LAUNCHED
+
+User request: distill the best 30B medium RL checkpoint into 4B and eval on the medium val set, normal protocol. One 4-GPU ScaleTrain job
+(`run_qwen3_30bm_to_4b_distill_st.sh`, supervisor `start_qwen3_30bm_to_4b_distill_supervisor.sh` -> tmux rl-q3-30bm-dist-4b, EKS, borrowing):
+1. traces: spec q30bm-medium (teacher = s3 .../qwen3-30b-a3b-base-rl-full-checkpoints/qwen30b-medium-es5/global_step_320/actor/huggingface),
+   3000 train q x 16 + 300 val q x 1, top-128, 2 vLLM engines x TP 2, per-shard S3 mirror -> s3://scale-ml/genai/rl-distill/qwen3-30b-rl-traces-topk128-v1/q30bm-medium/
+2. distill into Qwen3-4B-Base@906bfd4b (STUDENT=q4b, Qwen3DecoderLayer wrap): §9 recipe (bs 128, 2e-6 -> 2e-7, 100 warmup, 1000 steps, val KL
+   every 10) with the 26bd/12br micro-batching (4 seqs / 8192 cap, KL chunk 4096); permanent S3 checkpoint + HF export every 250 steps ->
+   s3://scale-ml/genai/rl-distill/qwen3-30b-rl-distill-ckpts-v1/q30bm-medium-to-q4b-bs128-s1000-lr2e-6/
+3. eval of steps 250/500/750/1000 on the medium validation split (300 q = the RL val set), Qwen band-eval protocol (n=16, temp 1, 8192
+   tokens, strict boxed math_verify = the RL reward) -> mean@16 / pass@k / pass^k at s3://scale-ml/genai/rl-distill/qwen3-30b-rl-distill-evals-v1/.../step_*/summary.json.
+   References on the same set/metric: 30B teacher 75.75 (RL val @320), 4B RL best 65.8 (@510, still running), 4B base 21.0 (RL step 0).
+All three stages resume after preemption (S3 shards / S3 checkpoints / per-step eval markers).
+
+---
+
 ## 2026-10-08 — Qwen3-30B-A3B medium RL FINISHED (early stopping @420); 4B hard resume moved to GKE
 
 `q3-30b-rl-med` early-stopped at step 420 (5 consecutive validations > 1 point below the best; 360-420 after the ckpt-fix relaunch):

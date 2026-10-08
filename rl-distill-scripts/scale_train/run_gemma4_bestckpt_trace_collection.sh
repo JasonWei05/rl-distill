@@ -67,6 +67,9 @@ case "${TRACE_SPEC}" in
   # Qwen3-30B-defined bands (JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k); 16 samples per training question.
   q4b-base-medium) RUN_KEY=qwen3-4b-base; BAND=medium; BEST_STEP=0; DIRECTION=q4b_base_medium_to_30b; TEACHER_HF_REPO=Qwen/Qwen3-4B-Base; TEACHER_HF_REVISION=906bfd4b4dc7f14ee4320094d8b41684abff8539; TEACHER_HF_ROOT=1 ;;
   q4b-base-hard)   RUN_KEY=qwen3-4b-base; BAND=hard;   BEST_STEP=0; DIRECTION=q4b_base_hard_to_30b;   TEACHER_HF_REPO=Qwen/Qwen3-4B-Base; TEACHER_HF_REVISION=906bfd4b4dc7f14ee4320094d8b41684abff8539; TEACHER_HF_ROOT=1 ;;
+  # Qwen3-30B-A3B-Base medium RL (es5 run: early stop @420, best val mean@16 0.7575 @ step 320) as the teacher for a Qwen3-4B-Base
+  # student; S3 full checkpoint only (permanent every 10 steps carries actor/huggingface). 16 train samples.
+  q30bm-medium) RUN_KEY=qwen30b-medium-es5; BAND=medium; BEST_STEP=320; DIRECTION=q30bm_medium_r320_to_4b; TEACHER_HF_REPO=""; TEACHER_HF_REVISION=""; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-30b-a3b-base-rl-full-checkpoints}" ;;
   *)
     echo "FATAL: unsupported TRACE_SPEC=${TRACE_SPEC}" >&2
     exit 2
@@ -75,7 +78,7 @@ esac
 TEACHER_HF_ROOT="${TEACHER_HF_ROOT:-0}"
 # Prompt contract + source data per model family (Gemma 4: 12-shot template, turn-string stops, 26B-PT bands; Qwen3 base:
 # 0-shot native ChatML with the boxed instruction already appended by the data prep, token-id stops, Qwen3-30B bands).
-if [[ ${RUN_KEY} == qwen3-* ]]; then
+if [[ ${RUN_KEY} == qwen3-* || ${RUN_KEY} == qwen30b-* ]]; then
   CHAT_TEMPLATE="${PROJECT_ROOT}/rl-distill-scripts/data/qwen3_base_native_chat.jinja"
   STOP_STRINGS='\nHuman:,\nuser\n'
   STOP_TOKEN_IDS=151645,151643,151644   # <|im_end|>, <|endoftext|> (eos), <|im_start|>
@@ -196,7 +199,7 @@ fi
 # tokens, i.e. corrupting the top-k logprobs) and leaking <image|> into most responses. The
 # base model's processor_config is byte-compatible (identical multimodal token ids). Added
 # before the content hash, which covers weights only, so the teacher identity is unchanged.
-if [[ ${RUN_KEY} != qwen3-* && ! -f ${MODEL_DIR}/processor_config.json ]]; then   # Qwen3 is text-only
+if [[ ${RUN_KEY} != qwen3-* && ${RUN_KEY} != qwen30b-* && ! -f ${MODEL_DIR}/processor_config.json ]]; then   # Qwen3 is text-only
   case "${RUN_KEY}" in
     e2b-*)     BASE_MODEL_REPO=google/gemma-4-E2B ;;
     e4b-*)     BASE_MODEL_REPO=google/gemma-4-E4B ;;
@@ -231,7 +234,7 @@ fi
 
 # --- Source: the band's training + validation data (same as RL) ---
 GLOBAL_SEED="${GLOBAL_SEED:-42}"
-case "${TRACE_SPEC}" in e4b-base-*|q4b-base-*|12bd-*|12br-*|12bo-*|26bd-*|26bw-*) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" ;; *) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}" ;; esac
+case "${TRACE_SPEC}" in e4b-base-*|q4b-base-*|q30bm-*|12bd-*|12br-*|12bo-*|26bd-*|26bw-*) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" ;; *) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}" ;; esac
 VALIDATION_SAMPLES_PER_QUESTION="${VALIDATION_SAMPLES_PER_QUESTION:-1}"
 PROMPTS_PER_SHARD="${PROMPTS_PER_SHARD:-8}"
 ROW_GROUP_ROWS="${ROW_GROUP_ROWS:-2}"
@@ -252,6 +255,7 @@ MAX_WORKER_ATTEMPTS="${MAX_WORKER_ATTEMPTS:-5}"
 case "${TRACE_SPEC}" in
   e4b-base-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/gemma4_e4b_base_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-e4b-base-traces-topk128-v1}" ;;
   q4b-base-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/qwen3_4b_base_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-base-traces-topk128-v1}" ;;
+  q30bm-*)    TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/qwen3_30b_rl_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-30b-rl-traces-topk128-v1}" ;;
   *)          TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/gemma4_bestckpt_traces_v2}";  TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2}" ;;
 esac
 OUTPUT_ROOT="${OUTPUT_ROOT:-${TRACE_LOCAL_BASE}/${TRACE_SPEC}}"
