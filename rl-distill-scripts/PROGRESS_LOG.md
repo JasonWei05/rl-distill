@@ -106,6 +106,9 @@ hard student step 500 on the math suite (q3-ms-30bh-1p7b-s500): hard 11.2 mean@1
 Math suite, 30B medium RL -> 1.7B step 1000 (SINGLE_PASS, all 7 sets in one generate call, ~31 min wall on 1 GPU incl. prep/grading;
 medium identical to the pipeline eval because each request carries the same fixed seed), mean@n / pass@n: easy 64.2 / 95.0,
 medium 25.9 / 75.7, hard 11.5 / 49.3, GSM8K 80.2 / 96.9, MATH500 61.4 / 89.4, AIME25 2.9 / 20.0, AIME26 2.1 / 23.3.
+**Hard DONE 2026-10-09 22:30Z** (job_db4gaaoc78j0089ltagg; ~20 s/step on 2 GPUs). Hard-val mean@16 / pass@4 / pass@16 (val KL):
+step 250 9.8 / 25.7 / 49.3 (0.1238), 500 11.2 / 27.5 / 50.0 (0.1206), 750 11.1 / 28.2 / 52.0 (0.1190), 1000 **11.3** / 28.3 / **53.0** (0.1185).
+Same set: 1.7B base 3.8, 1.7B hard RL 8.3 @180 (running), 30B teacher 62.5. KL to the 30B teacher stays ~1.6x the 4B student's (0.073).
 Math suite, 30B hard RL -> 1.7B step 500 (sequential, ~1h40): easy 61.1 / 93.0, medium 24.1 / 77.7, hard 11.2 / 50.0, GSM8K 78.7 / 97.1,
 MATH500 61.8 / 88.6, AIME25 4.8 / 26.7, AIME26 2.1 / 26.7 -- at half the steps it matches the medium-teacher step-1000 student (better
 pass@16 on medium/hard/AIME, ~1-3 pts lower mean on easy/medium/GSM8K).
