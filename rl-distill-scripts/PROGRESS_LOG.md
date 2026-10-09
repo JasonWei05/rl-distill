@@ -63,6 +63,25 @@ supervisor `start_qwen3_passk32_evals_supervisor.sh` -> tmux rl-q3-passk32-evals
 shared queue by 4 TP-2 vLLM engines -- q30b-base + q4b-base on medium and hard, q4b30b-<band>-s{250,500,750,1000} on their own band
 (bases + step 1000 first). Protocol = Qwen band-eval at n=32 (300 q, 0-shot ChatML + boxed instruction, temp 1, 8192 tokens, strict
 boxed math_verify): mean@32, unbiased pass@k / pass^k for k = 1..32. Results: s3://scale-ml/genai/rl-distill/qwen3-passk32-evals-v1/<model>/<band>/summary.json.
+**DONE 2026-10-09 16:34Z** (all 12, ~22 min per eval per TP-2 engine). 300 q x 32 per row; q4b30b-<band>-sN = 30B student at distill step N:
+
+| band | model | mean@32 | pass@2 | pass@4 | pass@8 | pass@16 | pass@32 | pass^2 | pass^4 | boxed | trunc | mean len |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| medium | Qwen3-4B-Base (teacher) | 20.8 | 34.9 | 52.9 | 70.9 | 84.8 | 92.7 | 6.7 | 1.4 | 80.8% | 2.1% | 1163 |
+| medium | Qwen3-30B-A3B-Base | 27.9 | 45.9 | 67.3 | 85.6 | 95.8 | 99.0 | 9.8 | 2.1 | 82.4% | 0.6% | 874 |
+| medium | 4B->30B s250 | 18.0 | 30.8 | 47.9 | 66.2 | 81.5 | 91.0 | 5.1 | 0.8 | 86.6% | 1.4% | 1029 |
+| medium | 4B->30B s500 | 17.8 | 30.8 | 48.2 | 66.9 | 82.1 | 91.7 | 4.9 | 0.7 | 85.7% | 1.3% | 1012 |
+| medium | 4B->30B s750 | 16.8 | 29.0 | 45.5 | 63.5 | 78.9 | 89.3 | 4.6 | 0.7 | 84.1% | 1.1% | 1000 |
+| medium | 4B->30B s1000 | 18.2 | 31.1 | 48.1 | 66.0 | 80.6 | 90.3 | 5.3 | 0.9 | 84.6% | 1.4% | 1017 |
+| hard | Qwen3-4B-Base (teacher) | 8.6 | 15.7 | 26.7 | 41.5 | 57.7 | 72.0 | 1.5 | 0.1 | 79.7% | 2.3% | 1175 |
+| hard | Qwen3-30B-A3B-Base | 13.0 | 23.2 | 38.1 | 56.2 | 73.1 | 86.0 | 2.8 | 0.3 | 81.8% | 0.6% | 912 |
+| hard | 4B->30B s250 | 7.5 | 13.7 | 23.5 | 37.2 | 53.3 | 69.7 | 1.2 | 0.1 | 85.9% | 1.2% | 1045 |
+| hard | 4B->30B s500 | 7.2 | 13.3 | 23.1 | 37.1 | 53.8 | 70.3 | 1.1 | 0.1 | 84.6% | 1.4% | 1031 |
+| hard | 4B->30B s750 | 7.7 | 14.2 | 24.5 | 39.1 | 56.6 | 73.0 | 1.3 | 0.1 | 85.4% | 1.2% | 1036 |
+| hard | 4B->30B s1000 | 7.9 | 14.5 | 25.0 | 39.6 | 56.8 | 73.7 | 1.3 | 0.1 | 84.5% | 1.4% | 1049 |
+
+Distilling the untrained 4B into the 30B erases the 30B's advantage within 250 steps: the student sits at (hard) or 2-3 pts below
+(medium) the 4B teacher across the whole pass@k curve and stays flat through step 1000. pass^32 = 0 for every model (best question 26/32).
 
 ---
 
