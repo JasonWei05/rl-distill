@@ -391,7 +391,7 @@ run_worker() {
     fi
     echo "[supervisor] split=${split} worker=${worker_id}/${NUM_WORKERS} gpus=${gpu_slice} attempt=${attempt}" | tee -a "${log_path}"
     setsid env CUDA_VISIBLE_DEVICES="${gpu_slice}" PYTHONDONTWRITEBYTECODE=1 \
-      "${VENV}/bin/python" "${generator_args[@]}" > >(tee -a "${log_path}" | grep --line-buffered TRACE_SHARD_DONE) 2>&1 &   # per-shard tok/s -> pod log
+      "${VENV}/bin/python" "${generator_args[@]}" > >(tee -a "${log_path}" | _progress_to_pod_log "${worker_id}") 2>&1 &   # tok/s -> pod log
     worker_pid=$!
     # Capture wait's status directly: `status=$?` after `if wait ...; fi` reads the if
     # statement's own status (always 0), which hid every real exit code and defeated the
@@ -411,6 +411,18 @@ run_worker() {
     ((attempt < MAX_WORKER_ATTEMPTS)) && sleep 10
   done
   return 1
+}
+
+# Forward per-shard TRACE_SHARD_DONE lines and vLLM's live tqdm throughput ("est. speed ... output: N toks/s"; tqdm
+# separates updates with \r) to the pod log, at most one progress line per worker per minute.
+_progress_to_pod_log() {
+  local worker=$1 last=-60 line
+  { stdbuf -oL tr '\r' '\n' 2>/dev/null || tr '\r' '\n'; } | while IFS= read -r line; do
+    case "${line}" in
+      *TRACE_SHARD_DONE*) echo "${line}" ;;
+      *"est. speed"*) if (( SECONDS - last >= 60 )); then echo "[progress] worker=${worker} ${line##*|}"; last=${SECONDS}; fi ;;
+    esac
+  done
 }
 
 # Launch NUM_WORKERS DP workers for one split, each owning TENSOR_PARALLEL_SIZE GPUs.
