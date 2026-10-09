@@ -77,8 +77,8 @@ case "${TEACHER_SPEC}" in
     TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}"
     PROJECT_NAME="${PROJECT_NAME:-qwen3-4b-base-distill-v1}"
     ;;
-  q30bm-*)
-    # Qwen3-30B-A3B medium RL teacher (run_gemma4_bestckpt_trace_collection.sh q30bm-* specs): 16 train samples, S3 only.
+  q30bm-*|q30bh-*)
+    # Qwen3-30B-A3B medium / hard RL teacher (run_gemma4_bestckpt_trace_collection.sh q30bm-* specs): 16 train samples, S3 only.
     TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-30b-rl-traces-topk128-v1}"
     TRACE_LOCAL_ROOT="${TRACE_LOCAL_ROOT:-/tmp/qwen3_30b_rl_traces_v1/${TEACHER_SPEC}}"
     TRACE_HF_DATASET_BASE="${TRACE_HF_DATASET_BASE-}"

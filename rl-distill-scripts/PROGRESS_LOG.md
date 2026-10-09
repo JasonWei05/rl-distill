@@ -18,6 +18,18 @@ The trailing wandb teardown ConnectionResetError is harmless (run synced; RUN_DO
 
 ---
 
+## 2026-10-09 — Best Qwen3-30B-A3B *hard* RL ckpt (step 410, still training) -> Qwen3-4B-Base: traces + distill + hard-val eval LAUNCHED
+
+User request: same pipeline as the medium one, from the current best 30B hard checkpoint (val mean@16 0.6252 @ step 410; the RL run keeps
+going to 500), borrowing OFF. Spec q30bh-hard (teacher s3 .../qwen30b-hard-es5/global_step_410/actor/huggingface, hard band 3000 q x 16 +
+300 val q x 1, TP2 x 2 engines) -> 4B distill (same recipe, ckpt every 250) -> n=16 eval on the hard validation split (the RL hard val set).
+Supervisor `TEACHER_SPEC=q30bh-hard ALLOW_BORROWING=false bash start_qwen3_30bm_to_4b_distill_supervisor.sh` (tmux rl-q3-30bh-dist-4b).
+Outputs: traces s3://scale-ml/genai/rl-distill/qwen3-30b-rl-traces-topk128-v1/q30bh-hard/, ckpts .../qwen3-30b-rl-distill-ckpts-v1/q30bh-hard-to-q4b-bs128-s1000-lr2e-6/,
+evals .../qwen3-30b-rl-distill-evals-v1/q30bh-hard-to-q4b-bs128-s1000-lr2e-6/step_*/summary.json. References on the hard val set: 4B base
+(RL step 0) 8.6, 4B hard RL best 41.2 (@560, still running), 30B hard teacher 62.5 (@410).
+
+---
+
 ## 2026-10-08 — Best Qwen3-30B-A3B medium RL ckpt (step 320) -> Qwen3-4B-Base: traces + distill + medium-val eval LAUNCHED
 
 User request: distill the best 30B medium RL checkpoint into 4B and eval on the medium val set, normal protocol. One 4-GPU ScaleTrain job

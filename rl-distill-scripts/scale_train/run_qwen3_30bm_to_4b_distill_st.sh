@@ -21,6 +21,8 @@ if [ -n "${CODE_S3_URI:-}" ]; then
   echo "CODE_REFRESHED $(sha256sum /tmp/rl-distill-code.tar.gz | cut -c1-16)"
 fi
 TEACHER_SPEC="${TEACHER_SPEC:-q30bm-medium}"; STUDENT=q4b
+# q30bh-hard: the same pipeline from the 30B *hard* RL run (best step 410), hard-band traces, evals on the hard validation split
+case "${TEACHER_SPEC}" in q30bm-medium) BAND=medium ;; q30bh-hard) BAND=hard ;; *) echo "FATAL: TEACHER_SPEC must be q30bm-medium|q30bh-hard" >&2; exit 2 ;; esac
 if [ -f .env ]; then set -a; source .env; set +a; fi
 : "${HF_TOKEN:?HF_TOKEN missing (forward it with --dotenv-keys)}"
 : "${WANDB_API_KEY:?WANDB_API_KEY missing (forward it with --dotenv-keys)}"
@@ -77,13 +79,13 @@ fi
 # --- stage 3: medium-val evals of the saved checkpoints ------------------------------------------------------------------------
 EVAL_S3="${EVAL_S3:-s3://scale-ml/genai/rl-distill/qwen3-30b-rl-distill-evals-v1/${TEACHER_SPEC}-to-${STUDENT}-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}-lr${LR}}"
 EVAL_STEPS="${EVAL_STEPS:-250 500 750 1000}"; N="${EVAL_N:-16}"
-WORK=/tmp/q30bm_evals; mkdir -p "${WORK}"
-VAL_PARQUET="${WORK}/medium_validation.parquet"
-"${VENV}/bin/python" - "${VAL_PARQUET}" <<'PY'
+WORK=/tmp/q30b_evals_${TEACHER_SPEC}; mkdir -p "${WORK}"
+VAL_PARQUET="${WORK}/${BAND}_validation.parquet"
+"${VENV}/bin/python" - "${VAL_PARQUET}" "${BAND}" <<'PY'
 import shutil, sys
 from huggingface_hub import hf_hub_download
 # the Qwen3-30B medium validation split = the RL validation set (raw problems; the generator appends the boxed instruction)
-p = hf_hub_download("JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k", "medium/validation.parquet", repo_type="dataset",
+p = hf_hub_download("JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k", f"{sys.argv[2]}/validation.parquet", repo_type="dataset",
                     revision="be4dcd8b1fad7d5eb7bf721f0210baf78277aaa9")
 shutil.copy(p, sys.argv[1])
 PY
