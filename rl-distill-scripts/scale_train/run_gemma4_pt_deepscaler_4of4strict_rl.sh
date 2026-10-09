@@ -11,7 +11,8 @@
 #     that overflows the default 2GB FSDP->vLLM weight-sync bucket).
 #
 # Which model via GEMMA4_MODEL env (google/gemma-4-E2B | google/gemma-4-E4B |
-# google/gemma-4-12B | google/gemma-4-26B-A4B | Qwen/Qwen3-30B-A3B-Base | Qwen/Qwen3-4B-Base). Per-seed via DATA_SEED.
+# google/gemma-4-12B | google/gemma-4-26B-A4B | Qwen/Qwen3-30B-A3B-Base | Qwen/Qwen3-4B-Base |
+# Qwen/Qwen3-1.7B-Base). Per-seed via DATA_SEED.
 # Qwen3-30B-A3B-Base runs on the same stack and recipe with its own prompt contract: 0-shot native ChatML
 # (data/qwen3_base_native_chat.jinja, instruction appended to each problem by the data prep), stops on the
 # <|im_end|>/<|im_start|> token ids and the plain-text turn starts "\nHuman:" / "\nuser\n", Qwen3MoeDecoderLayer wrap,
@@ -41,6 +42,7 @@ case "${GEMMA4_MODEL}" in
   *26B-A4B*) MODEL_TAG=gemma4-26b-a4b; WRAP_LAYER_CLS_DEFAULT=Gemma4TextDecoderLayer ;;
   Qwen/Qwen3-30B-A3B-Base) MODEL_TAG=qwen3-30b-a3b-base; WRAP_LAYER_CLS_DEFAULT=Qwen3MoeDecoderLayer ;;
   Qwen/Qwen3-4B-Base) MODEL_TAG=qwen3-4b-base; WRAP_LAYER_CLS_DEFAULT=Qwen3DecoderLayer ;;
+  Qwen/Qwen3-1.7B-Base) MODEL_TAG=qwen3-1.7b-base; WRAP_LAYER_CLS_DEFAULT=Qwen3DecoderLayer ;;
   *)
     MODEL_TAG="$(echo "${GEMMA4_MODEL}" | tr '/A-Z' '-a-z')"
     echo "FATAL: unsupported GEMMA4_MODEL=${GEMMA4_MODEL}" >&2
@@ -50,7 +52,7 @@ esac
 
 WRAP_LAYER_CLS="${WRAP_LAYER_CLS:-${WRAP_LAYER_CLS_DEFAULT}}"
 # Prompt contract per model family: chat template, extra stop strings (literal "\n" = newline) and stop token ids.
-if [[ "${MODEL_TAG}" == qwen3-* ]]; then   # Qwen3 base family (30B-A3B, 4B): same prompt contract
+if [[ "${MODEL_TAG}" == qwen3-* ]]; then   # Qwen3 base family (30B-A3B, 4B, 1.7B): same prompt contract
   CHAT_TEMPLATE_DEFAULT="${PROJECT_ROOT}/rl-distill-scripts/data/qwen3_base_native_chat.jinja"
   ROLLOUT_EXTRA_STOP_DEFAULT='\nHuman:,\nuser\n'
   ROLLOUT_EXTRA_STOP_TOKEN_IDS_DEFAULT=151645,151643,151644   # <|im_end|>, <|endoftext|> (= eos), <|im_start|>

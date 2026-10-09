@@ -16,6 +16,8 @@
 # Use start_qwen3_30b_a3b_medium_rl_supervisor.sh to run it under the relaunching supervisor + rolling-checkpoint janitor.
 # QWEN_SIZE=4b: the same recipe on Qwen3-4B-Base (dense, tied embeddings) on 4 GPUs -- FSDP2 DP4 training, vLLM DP4
 # (one TP-1 engine per GPU), no router replay (no experts); everything else identical.
+# QWEN_SIZE=1.7b: Qwen3-1.7B-Base (dense, tied) on 2 GPUs -- FSDP2 DP2, vLLM DP2 (TP 1); same recipe.
+# ALLOW_BORROWING=false: dedicated capacity instead of borrowing (default true).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 QWEN_SIZE="${QWEN_SIZE:-30b-a3b}"
@@ -41,7 +43,13 @@ case "${QWEN_SIZE}" in
     # 4 GPUs: FSDP2 DP4 (fp32 master + Adam ~16 GiB/GPU stays resident, no offload), vLLM DP4 = one TP-1 engine per GPU (8 GiB
     # bf16 weights) with a 24 GiB KV cache (144 KiB/token -> ~175k tokens per engine), sleep mode during the update
     LAYOUT="GEN_TP=1,FSDP_CPU_OFFLOAD_POLICY=False,OFFLOAD=False,VLLM_SLEEP_MODE=True,MAX_PADDED_TOKENS_PER_MICROBATCH=8192,MICRO_BATCH_SIZE_PER_GPU=4,ROLLOUT_GPU_MEMORY_UTILIZATION=0.10,VLLM_KV_CACHE_MEMORY_BYTES=25769803776" ;;
-  *) echo "FATAL: QWEN_SIZE must be 30b-a3b or 4b, got ${QWEN_SIZE}" >&2; exit 2 ;;
+  1.7b)
+    MODEL=Qwen/Qwen3-1.7B-Base; REVISION=ea980cb0a6c2ae4b936e82123acc929f1cec04c1; GPUS=2; SLUG=qwen3-1.7b; WANDB_SLUG=q3-1.7b
+    DEFAULT_JOB_NAME=q3-1p7b-rl-${BAND_SHORT}; ROUTER_REPLAY=disabled
+    # 2 GPUs: FSDP2 DP2 (fp32 master + grad + Adam of 2.0B params ~16 GiB/GPU, no offload), vLLM DP2 = one TP-1 engine per GPU
+    # (3.4 GiB bf16 weights) with a 24 GiB KV cache (112 KiB/token -> ~225k tokens per engine), sleep mode during the update
+    LAYOUT="GEN_TP=1,FSDP_CPU_OFFLOAD_POLICY=False,OFFLOAD=False,VLLM_SLEEP_MODE=True,MAX_PADDED_TOKENS_PER_MICROBATCH=8192,MICRO_BATCH_SIZE_PER_GPU=4,ROLLOUT_GPU_MEMORY_UTILIZATION=0.10,VLLM_KV_CACHE_MEMORY_BYTES=25769803776" ;;
+  *) echo "FATAL: QWEN_SIZE must be 30b-a3b, 4b or 1.7b, got ${QWEN_SIZE}" >&2; exit 2 ;;
 esac
 S3_BASE="${S3_BASE:-s3://scale-ml/genai/rl-distill/${SLUG}-base-rl}"
 ENV_VARS="GEMMA4_MODEL=${MODEL},GEMMA4_MODEL_REVISION=${REVISION}"
@@ -61,5 +69,6 @@ ENV_VARS+=",HF_PUSH_ENABLE=False,HF_PUSH_REQUIRED=False,MAX_ACTOR_CKPT_TO_KEEP=2
 ENV_VARS+=",ROLLING_CHECKPOINT_ENABLED=${ROLLING_CHECKPOINT_ENABLED:-True},ROLLING_CHECKPOINT_FREQ=5,ASYNC_CHECKPOINT_UPLOAD=${ASYNC_CHECKPOINT_UPLOAD:-False},FULL_CHECKPOINT_S3_URI=${S3_BASE}-full-checkpoints/qwen30b-${BAND}-${RUN_TAG},RUN_ARTIFACT_S3_URI=${S3_BASE}/${SLUG}-${BAND}-${RUN_TAG}"
 ENV_VARS+=",WANDB_RUN_ID=${WANDB_SLUG}-${BAND}-${RUN_TAG}-s42-v1,WANDB_RESUME=allow"
 echo "LAUNCH_ENV ${ENV_VARS}"
-exec bash launch_st_with_code.sh --gpus-per-instance "${GPUS}" --priority high --allow-borrowing --active-deadline-hours 240 \
+BORROW_FLAG="--allow-borrowing"; [ "${ALLOW_BORROWING:-true}" = false ] && BORROW_FLAG=""
+exec bash launch_st_with_code.sh --gpus-per-instance "${GPUS}" --priority high ${BORROW_FLAG} --active-deadline-hours 240 \
   --run-file run_gemma4_pt_deepscaler_4of4strict_rl.sh --job-name "${JOB_NAME:-${DEFAULT_JOB_NAME}}" --env-vars "${ENV_VARS}" "$@"
