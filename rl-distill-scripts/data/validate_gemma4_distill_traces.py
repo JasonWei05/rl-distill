@@ -21,7 +21,9 @@ import argparse
 import json
 import os
 import sys
+import multiprocessing
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -151,6 +153,8 @@ def validate_dataset(
     allow_incomplete: bool = False,
     allow_empty_responses: bool = False,
     fail_on_question_overlap: bool = False,
+    workers: int = 1,
+    tokenizer_args: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not split_dirs:
         raise TraceValidationError("at least one split directory is required")
@@ -176,6 +180,16 @@ def validate_dataset(
     split_indexes: dict[str, Any] = {}
     total_rows = 0
     total_response_tokens = 0
+    # workers > 1: per-shard checks (hashing + decode, the slow part) run in a process pool, each worker with its own
+    # tokenizer; every cross-shard check below still runs here in shard order, so the index is identical to serial.
+    pool = None
+    if workers > 1:
+        pool = ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=_init_validation_worker,
+            initargs=(tokenizer_args,),
+        )
 
     for split, split_dir in sorted(normalized_dirs.items()):
         split_expected_samples = expected_samples[split]
@@ -207,13 +221,23 @@ def validate_dataset(
         uid_to_question: dict[str, str] = {}
         question_hashes: set[str] = set()
         shard_entries: list[dict[str, Any]] = []
+        futures = {}
+        if pool is not None:
+            futures = {
+                shard_id: pool.submit(_validate_one_shard, parquet_path, run_config, max_response_tokens)
+                for shard_id, parquet_path in sorted(discovered.items())
+            }
         for shard_id, parquet_path in sorted(discovered.items()):
-            manifest, validation = validate_shard_bundle(
-                parquet_path,
-                run_config=run_config,
-                decoder=decoder,
-                external_stats=aggregate_stats,
-            )
+            if pool is not None:
+                manifest, validation, shard_stats = futures[shard_id].result()
+                _merge_statistics(aggregate_stats, shard_stats)
+            else:
+                manifest, validation = validate_shard_bundle(
+                    parquet_path,
+                    run_config=run_config,
+                    decoder=decoder,
+                    external_stats=aggregate_stats,
+                )
             if int(manifest["shard_id"]) != shard_id:
                 raise TraceValidationError(f"{parquet_path} manifest declares the wrong shard ID")
             duplicates = all_trace_ids.intersection(validation.trace_ids)
@@ -293,6 +317,9 @@ def validate_dataset(
             "shards": shard_entries,
         }
 
+    if pool is not None:
+        pool.shutdown()
+
     question_overlap: set[str] = set()
     if "train" in split_uid_questions and "validation" in split_uid_questions:
         uid_overlap = set(split_uid_questions["train"]).intersection(split_uid_questions["validation"])
@@ -334,6 +361,42 @@ def validate_dataset(
     return index
 
 
+_WORKER_DECODER: Callable[[Sequence[int]], str] | None = None
+
+
+def _init_validation_worker(tokenizer_args: Mapping[str, Any] | None) -> None:
+    """Process-pool initializer: each worker loads (and fingerprint-checks) its own tokenizer."""
+    global _WORKER_DECODER
+    if tokenizer_args is None:
+        _WORKER_DECODER = None
+        return
+    tokenizer = _load_tokenizer(**tokenizer_args)
+    _WORKER_DECODER = lambda ids: normalized_decode(tokenizer, ids)  # noqa: E731
+
+
+def _validate_one_shard(
+    parquet_path: Path, run_config: Mapping[str, Any], max_response_tokens: int
+) -> tuple[dict[str, Any], Any, TraceStatistics]:
+    stats = TraceStatistics(max_response_tokens=max_response_tokens)
+    manifest, validation = validate_shard_bundle(
+        parquet_path, run_config=run_config, decoder=_WORKER_DECODER, external_stats=stats
+    )
+    return manifest, validation, stats
+
+
+def _merge_statistics(total: TraceStatistics, shard: TraceStatistics) -> None:
+    """Fold one shard's statistics into the split aggregate (sums and histograms, so order-independent and exact)."""
+    for name in (
+        "row_count", "response_token_count", "prompt_token_count", "reached_cap_count",
+        "strict_correct_count", "empty_response_count",
+    ):
+        setattr(total, name, getattr(total, name) + getattr(shard, name))
+    for name in ("response_length_histogram", "topk_mass_histogram"):
+        merged = getattr(total, name)
+        for bin_index, count in enumerate(getattr(shard, name)):
+            merged[bin_index] += count
+
+
 def _parse_split_dir(value: str) -> tuple[str, str]:
     split, separator, path = value.partition("=")
     if not separator or split not in {"train", "validation"} or not path:
@@ -352,6 +415,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--allow-incomplete", action="store_true")
     parser.add_argument("--allow-empty-responses", action="store_true")
     parser.add_argument("--fail-on-question-overlap", action="store_true")
+    parser.add_argument("--workers", type=int, default=1, help="processes for the per-shard checks (1 = serial)")
     parser.add_argument("--expected-train-questions", type=int, default=EXPECTED_QUESTIONS["train"])
     parser.add_argument("--expected-validation-questions", type=int, default=EXPECTED_QUESTIONS["validation"])
     parser.add_argument("--expected-samples-per-question", type=int, default=EXPECTED_SAMPLES_PER_QUESTION)
@@ -401,6 +465,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             allow_incomplete=args.allow_incomplete,
             allow_empty_responses=args.allow_empty_responses,
             fail_on_question_overlap=args.fail_on_question_overlap,
+            workers=args.workers,
+            tokenizer_args=None
+            if args.skip_decode_check
+            else {
+                "run_configs": run_configs,
+                "model_override": args.tokenizer_model,
+                "revision_override": args.tokenizer_revision,
+                "local_files_only": args.local_files_only,
+            },
         )
     except (OSError, RuntimeError, ValueError, TraceValidationError) as error:
         print(f"ERROR: {error}", file=sys.stderr)

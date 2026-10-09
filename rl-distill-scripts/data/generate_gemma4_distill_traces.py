@@ -25,6 +25,7 @@ import argparse
 import fcntl
 import importlib.metadata
 import json
+import time
 import math
 import os
 import platform
@@ -502,6 +503,43 @@ def file_lock(path: Path):
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def _pin_engine_identity(
+    run_config: dict[str, Any], reference_path: Path, output_dir: Path, worker_id: int, mirror: Any
+) -> dict[str, Any]:
+    """Keep an in-flight bundle's identity across an engine-only change (e.g. TP 2 -> TP 1 to add vLLM engines).
+
+    The engine block (TP size, batching limits, memory fraction) and the generator source hash only change speed and
+    floating-point batching noise -- sampling is already not bitwise reproducible across batch compositions -- but both
+    are hashed into the generation identity, so changing them would orphan every completed shard. With
+    --pin-engine-identity the recorded ``engine``/``generator`` blocks are copied from the reference run config (the
+    train split's, so the validation split matches it too); everything else must already be identical. The actual
+    engine and source hash are kept outside the hash (``runtime``) and appended to ``engine_changes.jsonl``.
+    """
+    if not reference_path.is_file():
+        print(f"[pin-engine] reference {reference_path} absent; using this worker's own engine identity", flush=True)
+        return run_config
+    reference = json.loads(reference_path.read_text(encoding="utf-8"))["semantic_config"]
+    semantic = dict(run_config["semantic_config"])
+    actual = {"engine": semantic["engine"], "generator": semantic["generator"]}
+    pinned = {"engine": reference["engine"], "generator": reference["generator"]}
+    if actual == pinned:
+        return run_config
+    semantic.update(pinned)
+    pinned_config = dict(run_config)
+    pinned_config["semantic_config"] = semantic
+    pinned_config["generation_config_sha256"] = hash_json(semantic)
+    pinned_config["runtime"] = {**run_config["runtime"], "actual_engine": actual["engine"], "actual_generator": actual["generator"]}
+    change = {"at": utc_now(), "worker_id": worker_id, "pinned_from": str(reference_path), **pinned_config["runtime"]}
+    change.pop("llm_kwargs", None)
+    with file_lock(output_dir / ".engine_changes.lock"):
+        with (output_dir / "engine_changes.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(change, sort_keys=True) + "\n")
+    if mirror is not None:
+        mirror.upload_file(output_dir / "engine_changes.jsonl", root=output_dir)
+    print(f"[pin-engine] recorded identity pinned to {reference_path}; actual engine {actual['engine']}", flush=True)
+    return pinned_config
+
+
 def ensure_run_config(output_dir: Path, run_config: Mapping[str, Any]) -> None:
     config_path = output_dir / "run_config.json"
     with file_lock(output_dir / ".run_config.lock"):
@@ -853,6 +891,8 @@ def run_generation(args: argparse.Namespace) -> None:
         teacher_identity=teacher_identity,
     )
     run_config["runtime"] = {"llm_kwargs": llm_kwargs, "creator_worker_id": args.worker_id}
+    if args.pin_engine_identity:
+        run_config = _pin_engine_identity(run_config, Path(args.pin_engine_identity), output_dir, args.worker_id, mirror)
     ensure_run_config(output_dir, run_config)
     if mirror is not None:
         mirror.upload_file(output_dir / "run_config.json", root=output_dir)
@@ -900,7 +940,9 @@ def run_generation(args: argparse.Namespace) -> None:
                     f"requests={len(prompt_requests)}",
                     flush=True,
                 )
+                generate_started = time.monotonic()
                 outputs = llm.generate(prompt_requests, sampling_params, use_tqdm=True)
+                generate_seconds = time.monotonic() - generate_started
                 if len(outputs) != len(prepared):
                     raise RuntimeError(f"vLLM returned {len(outputs)} outputs for {len(prepared)} requests")
                 timestamp = utc_now()
@@ -936,6 +978,13 @@ def run_generation(args: argparse.Namespace) -> None:
                 )
                 generated_shards += 1
                 print(f"[saved] {parquet_path} ({len(records)} rows)", flush=True)
+                response_tokens = sum(len(output.outputs[0].token_ids) for output in outputs)
+                print(
+                    f"TRACE_SHARD_DONE split={args.split} shard={shard_id} worker={args.worker_id} rows={len(records)} "
+                    f"response_tokens={response_tokens} generate_s={generate_seconds:.0f} "
+                    f"tok_s={response_tokens / max(generate_seconds, 1e-9):.0f}",
+                    flush=True,
+                )
                 if mirror is not None and upload_executor is not None:
                     pending_uploads.append(upload_executor.submit(mirror.upload_shard, parquet_path, root=output_dir))
                     if len(pending_uploads) >= 2:
@@ -995,6 +1044,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--distributed-executor-backend", default=None)
     parser.add_argument("--mm-encoder-attn-backend", default=None)
     parser.add_argument("--s3-mirror-uri", default=None)
+    # Path to a run_config.json whose engine/generator identity this worker records (see _pin_engine_identity).
+    parser.add_argument("--pin-engine-identity", default=None)
     return parser.parse_args(argv)
 
 

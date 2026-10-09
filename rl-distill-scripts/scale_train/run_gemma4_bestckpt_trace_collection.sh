@@ -383,9 +383,15 @@ run_worker() {
     if [[ ${TRACE_S3_MIRROR_ENABLE,,} == true ]]; then
       generator_args+=(--s3-mirror-uri "${TRACE_OUTPUT_S3_URI}/${s3_subdir}")
     fi
+    # TRACE_PIN_ENGINE_IDENTITY=1: resume an in-flight bundle after an engine-only change (TP size, batching) without
+    # orphaning its shards -- both splits record the train split's engine/generator identity, actual values are logged
+    # to engine_changes.jsonl (generate_gemma4_distill_traces.py --pin-engine-identity).
+    if [[ ${TRACE_PIN_ENGINE_IDENTITY:-0} == 1 ]]; then
+      generator_args+=(--pin-engine-identity "${TRAIN_DIR}/run_config.json")
+    fi
     echo "[supervisor] split=${split} worker=${worker_id}/${NUM_WORKERS} gpus=${gpu_slice} attempt=${attempt}" | tee -a "${log_path}"
     setsid env CUDA_VISIBLE_DEVICES="${gpu_slice}" PYTHONDONTWRITEBYTECODE=1 \
-      "${VENV}/bin/python" "${generator_args[@]}" >>"${log_path}" 2>&1 &
+      "${VENV}/bin/python" "${generator_args[@]}" > >(tee -a "${log_path}" | grep --line-buffered TRACE_SHARD_DONE) 2>&1 &   # per-shard tok/s -> pod log
     worker_pid=$!
     # Capture wait's status directly: `status=$?` after `if wait ...; fi` reads the if
     # statement's own status (always 0), which hid every real exit code and defeated the
@@ -426,6 +432,7 @@ run_split train      "${TRAIN_SAMPLES_PER_QUESTION}"      "${TRAIN_PARQUET}"    
 run_split validation "${VALIDATION_SAMPLES_PER_QUESTION}" "${VALIDATION_PARQUET}" "${VALIDATION_DIR}" validation
 
 "${VENV}/bin/python" rl-distill-scripts/data/validate_gemma4_distill_traces.py \
+  --workers "${TRACE_VALIDATION_WORKERS:-16}" \
   --split-dir "train=${TRAIN_DIR}" \
   --split-dir "validation=${VALIDATION_DIR}" \
   --output-index "${OUTPUT_ROOT}/dataset_index.json" \
