@@ -59,6 +59,11 @@ Qwen/Qwen3-1.7B-Base@ea980cb0 on FSDP2 DP2, stage 3 = n=16 evals of steps 250/50
 MAX_FAILURE_BACKOFF_SECONDS=3600 bash start_qwen3_30bm_to_4b_distill_supervisor.sh` -> tmux rl-q3-30b{m,h}-dist-1p7b; jobs
 job_db4gaaoc78j007hglkgg (medium) / job_db4gaaoc78j0089ltagg (hard), p5.48xlarge:2. Ckpts .../qwen3-30b-rl-distill-ckpts-v1/<spec>-to-q1p7b-bs128-s1000-lr2e-6/,
 evals .../qwen3-30b-rl-distill-evals-v1/<spec>-to-q1p7b-bs128-s1000-lr2e-6/step_*/summary.json.
+**Medium DONE 2026-10-09 19:27Z** (job_db4gaaoc78j007hglkgg; ~8-9 s/step on 2 GPUs, val KL 0.109 (10) -> 0.0753 (250) -> 0.0731 (1000)).
+Medium-val mean@16 / pass@4 / pass@16: step 250 22.8 / 46.5 / 71.3, 500 23.7 / 47.3 / 71.3, 750 25.3 / 49.7 / 74.7, 1000 **25.9** / 51.1 / 75.7
+(boxed ~99.5%). Same set: 1.7B base 9.1, 1.7B medium RL 21.5 @100 (running), 30B teacher 75.75. Still rising at step 1000.
+Step-1000 student also queued on the math suite (q3-ms-30bm-1p7b-s1000, 1 GPU, SINGLE_PASS=1 = all 7 sets in one vLLM generate call);
+hard student step 500 on the math suite (q3-ms-30bh-1p7b-s500): hard 11.2 mean@16 / 50.0 pass@16.
 
 ---
 
