@@ -18,6 +18,32 @@ The trailing wandb teardown ConnectionResetError is harmless (run synced; RUN_DO
 
 ---
 
+## 2026-10-09 — Gemma 4 medium-trained E4B models evaluated on a 300-question sample of the medium TRAIN split (local GPUs)
+
+User request: for the E4B RL and distilled models trained on the medium band, eval on a random 300-question sample of the training
+set (avg@16 / pass@16, normal Gemma 4 sampling). Sample: 300 text-deduplicated questions (seed 42) from
+JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k@a0ba3c3d medium/train.parquet (`data/prepare_gemma4_train_sample_eval_data.py`).
+Protocol = the study's recorded eval config (eval_math_passk.py: 12-shot template, temp 1, top-p 1, 8192 tokens, strict boxed, monte-carlo
+pass@k, no logprobs, 2 vLLM slots/GPU at util 0.4 + 16 GiB KV), local GPUs 0/1/5/6 (`run_gemma4_train_sample_eval_local.sh`, d90e6478),
+~20-30 min. The registry URI for distill_26bw_lr2e6_medium_to_e4b_step1000 is empty; the reported 26bw student is the `-n8` run
+(.../26bw-medium-to-e4b-bs128-s1000-lr2e-6-n8/global_step_1000), whose stored val scores match the doc. Results:
+s3://scale-ml/genai/rl-distill/gemma4-train-sample-evals-v1/train_medium/<tag>/metrics.json.
+
+| model | train sample avg@16 / pass@16 | medium val avg@16 / pass@16 | train - val |
+|---|---|---|---|
+| E4B RL seed 43 (step 120) | 32.4 / 80.7 | 31.1 / 78.3 | +1.3 / +2.4 |
+| E4B RL 4x batch seed 46 (step 100) | 57.6 / 81.0 | 39.9 / 71.0 | +17.7 / +10.0 |
+| Untrained 12B RL -> E4B (12br, step 1000) | 46.9 / 89.0 | 38.8 / 85.0 | +8.1 / +4.0 |
+| Off-policy distilled 12B RL -> E4B (12bd, step 1000) | 53.5 / 87.7 | 36.6 / 82.3 | +16.9 / +5.4 |
+| Untrained 26B RL -> E4B (26bw, step 1000) | 53.1 / **92.0** | 42.0 / 90.7 | +11.1 / +1.3 |
+| Off-policy distilled 26B RL -> E4B (26bd, step 1000) | **65.4** / 89.7 | 42.6 / 85.3 | +22.8 / +4.4 |
+
+The 64-prompt RL run barely separates train from val (~2.6 passes over the 3,000 train q); the 4x-batch run (~8.5 passes) and every
+distilled student (16 teacher traces per train question) score much higher on train questions, and the gap is largest for the
+distilled-lineage teachers (12bd, 26bd) whose traces are sharper. pass@16 gaps stay small (+1 to +5) except the 4x RL run.
+
+---
+
 ## 2026-10-09 — Best 4B medium / hard RL ckpts -> Qwen3-1.7B-Base distillation (traces + distill + evals) LAUNCHED
 
 User request: complete the teacher/student grid for both bands -- 30B RL -> 4B (done), 30B RL -> 1.7B (medium done, hard training),
