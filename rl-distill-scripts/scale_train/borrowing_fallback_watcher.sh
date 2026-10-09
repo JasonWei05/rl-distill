@@ -17,6 +17,7 @@ JOBS=(
   "q3-30bh-dist-1p7b|${SUP_ROOT}/q3-30bh-dist-1p7b-20261009|TEACHER_SPEC=q30bh-hard STUDENT=q1p7b GPUS=2 ${RETRY} bash ${S}/start_qwen3_30bm_to_4b_distill_supervisor.sh"
   "q3-1p7b-rl-med|${SUP_ROOT}/q3-1p7b-rl-med-20261009|QWEN_SIZE=1.7b BAND=medium TOTAL_TRAINING_STEPS=600 ${RETRY} bash ${S}/start_qwen3_30b_a3b_medium_rl_supervisor.sh"
   "q3-1p7b-rl-hard|${SUP_ROOT}/q3-1p7b-rl-hard-20261009|QWEN_SIZE=1.7b BAND=hard TOTAL_TRAINING_STEPS=600 ${RETRY} bash ${S}/start_qwen3_30b_a3b_medium_rl_supervisor.sh"
+  "q3-math-suite|${SUP_ROOT}/q3-math-suite-20261009|${RETRY} bash ${S}/start_qwen3_math_suite_supervisor.sh"
   "q3-passk32-evals|${SUP_ROOT}/q3-passk32-evals-20261009|${RETRY} bash ${S}/start_qwen3_passk32_evals_supervisor.sh"
   "q3-30bh-dist-4b|${SUP_ROOT}/q3-30bh-dist-4b-20261009-tp1|TEACHER_SPEC=q30bh-hard GPUS=8 EXTRA_ENV_VARS=TRACE_TP=1,MAX_NUM_SEQS=48,GPU_MEMORY_UTILIZATION=0.92,TRACE_PIN_ENGINE_IDENTITY=1,TRACE_VALIDATION_WORKERS=16 ${RETRY} bash ${S}/start_qwen3_30bm_to_4b_distill_supervisor.sh"
 )
