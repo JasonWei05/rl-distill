@@ -18,6 +18,18 @@ The trailing wandb teardown ConnectionResetError is harmless (run synced; RUN_DO
 
 ---
 
+## 2026-10-09 — Qwen3-1.7B-Base medium + hard DAPO RL LAUNCHED (2 GPUs each, borrowing off, 600 steps)
+
+Same recipe as the 4B / 30B Qwen runs (GRPO n=16, bsz 64 / mini 32, lr 1e-6, 8k responses, val mean@16 every 10 steps, early stopping
+patience 5 with a 1-point miss tolerance incl. the initial validation), max 600 steps. New `QWEN_SIZE=1.7b` layout (738f26d4):
+Qwen/Qwen3-1.7B-Base@ea980cb0, FSDP2 DP2 (no offload) + vLLM DP2 (TP 1, 24 GiB KV), Qwen3DecoderLayer wrap; launcher gained
+`ALLOW_BORROWING=false`. `QWEN_SIZE=1.7b BAND=<b> ALLOW_BORROWING=false TOTAL_TRAINING_STEPS=600 MAX_RELAUNCHES=200 FAILURE_BACKOFF_SECONDS=3600
+MAX_FAILURE_BACKOFF_SECONDS=3600 bash start_qwen3_30b_a3b_medium_rl_supervisor.sh` -> tmux rl-q3-1p7b-rl-{med,hard}; jobs
+job_db4g91bmjdjg07lcrs2g (medium) / job_db4g91bmjdjg088cejmg (hard), p5.48xlarge:2. Checkpoints
+s3://scale-ml/genai/rl-distill/qwen3-1.7b-base-rl-full-checkpoints/qwen30b-<band>-es5, best_hf under .../qwen3-1.7b-base-rl/qwen3-1.7b-<band>-es5/.
+
+---
+
 ## 2026-10-09 — pass@32 evals: Qwen3-30B-A3B-Base vs Qwen3-4B-Base vs 4B->30B distilled students LAUNCHED
 
 User request: eval the 4B->30B distilled 30B students on their own band's validation set, plus Qwen3-4B-Base (the teacher) and
