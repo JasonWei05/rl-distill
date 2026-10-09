@@ -390,7 +390,10 @@ run_worker() {
       generator_args+=(--pin-engine-identity "${TRAIN_DIR}/run_config.json")
     fi
     echo "[supervisor] split=${split} worker=${worker_id}/${NUM_WORKERS} gpus=${gpu_slice} attempt=${attempt}" | tee -a "${log_path}"
-    setsid env CUDA_VISIBLE_DEVICES="${gpu_slice}" PYTHONDONTWRITEBYTECODE=1 \
+    # Per-worker compile caches: 8 TP-1 workers compiling into one shared vLLM/inductor/Triton cache raced at startup
+    # (2026-10-09: 4 of 8 workers exited 2 during engine init; their retries on the same GPUs then ran fine).
+    setsid env CUDA_VISIBLE_DEVICES="${gpu_slice}" PYTHONDONTWRITEBYTECODE=1 VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT}-w${worker_id}" \
+      TORCHINDUCTOR_CACHE_DIR="/tmp/inductor-cache-w${worker_id}" TRITON_CACHE_DIR="/tmp/triton-cache-w${worker_id}" \
       "${VENV}/bin/python" "${generator_args[@]}" > >(tee -a "${log_path}" | _progress_to_pod_log "${worker_id}") 2>&1 &   # tok/s -> pod log
     worker_pid=$!
     # Capture wait's status directly: `status=$?` after `if wait ...; fi` reads the if
@@ -435,6 +438,7 @@ run_split() {
     gpu_slice="$(IFS=,; echo "${GPU_IDS[*]:worker_id*TENSOR_PARALLEL_SIZE:TENSOR_PARALLEL_SIZE}")"
     run_worker "${worker_id}" "${gpu_slice}" "${split}" "${samples}" "${input_parquet}" "${output_dir}" "${s3_subdir}" &
     child_pids+=("$!")
+    (( worker_id + 1 < NUM_WORKERS )) && sleep "${TRACE_WORKER_STAGGER_S:-20}"   # stagger engine init (startup race above)
   done
   for pid in "${child_pids[@]}"; do wait "${pid}" || status=1; done
   child_pids=()
