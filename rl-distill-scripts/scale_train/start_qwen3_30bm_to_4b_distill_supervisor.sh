@@ -16,5 +16,5 @@ tmux kill-session -t "rl-${name}" 2>/dev/null || true
 tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scripts/scale_train/supervise_borrowing_job.py --name ${name} \
   --relaunch-on-cancel --relaunch-on-failure --max-relaunches ${MAX_RELAUNCHES:-40} --quick-cancel-seconds 300 --max-quick-cancels 3 --failure-backoff-seconds ${FAILURE_BACKOFF_SECONDS:-900} --max-failure-backoff-seconds ${MAX_FAILURE_BACKOFF_SECONDS:-0} \
   --launch-log ${sup}/launch.log --monitor-log ${sup}/monitor.log --state-file ${sup}/state.json --stop-file ${sup}/STOP --pod-log-dir ${sup}/pod-logs${MARKERS}${INITIAL_JOB_ID:+ --initial-job-id ${INITIAL_JOB_ID}} \
-  -- env JOB_NAME=${name} TEACHER_SPEC=${TEACHER_SPEC} ALLOW_BORROWING=${ALLOW_BORROWING:-true} EXTRA_ENV_VARS=${EXTRA_ENV_VARS:-} bash rl-distill-scripts/scale_train/launch_qwen3_30bm_to_4b_distill_st.sh --image ${IMG} 2>&1 | tee -a ${sup}/supervisor.out"
+  -- env JOB_NAME=${name} TEACHER_SPEC=${TEACHER_SPEC} GPUS=${GPUS:-4} ALLOW_BORROWING=${ALLOW_BORROWING:-true} EXTRA_ENV_VARS=${EXTRA_ENV_VARS:-} bash rl-distill-scripts/scale_train/launch_qwen3_30bm_to_4b_distill_st.sh --image ${IMG} 2>&1 | tee -a ${sup}/supervisor.out"
 echo "started supervisor rl-${name} (state ${sup})"

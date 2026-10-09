@@ -8,5 +8,5 @@ ENV_VARS="TEACHER_SPEC=${TEACHER_SPEC:-q30bm-medium}"
 [ -n "${EXTRA_ENV_VARS:-}" ] && ENV_VARS+=",${EXTRA_ENV_VARS}"
 echo "LAUNCH_ENV ${ENV_VARS}"
 BORROW_FLAG="--allow-borrowing"; [ "${ALLOW_BORROWING:-true}" = false ] && BORROW_FLAG=""   # ALLOW_BORROWING=false -> dedicated capacity
-exec bash launch_st_with_code.sh --gpus-per-instance 4 --priority high ${BORROW_FLAG} --active-deadline-hours 120 \
+exec bash launch_st_with_code.sh --gpus-per-instance "${GPUS:-4}" --priority high ${BORROW_FLAG} --active-deadline-hours 120 \
   --run-file run_qwen3_30bm_to_4b_distill_st.sh --job-name "${JOB_NAME:-q3-30bm-dist-4b}" --env-vars "${ENV_VARS}" "$@"
