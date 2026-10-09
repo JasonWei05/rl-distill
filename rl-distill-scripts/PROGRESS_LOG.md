@@ -18,6 +18,17 @@ The trailing wandb teardown ConnectionResetError is harmless (run synced; RUN_DO
 
 ---
 
+## 2026-10-09 — pass@32 evals: Qwen3-30B-A3B-Base vs Qwen3-4B-Base vs 4B->30B distilled students LAUNCHED
+
+User request: eval the 4B->30B distilled 30B students on their own band's validation set, plus Qwen3-4B-Base (the teacher) and
+Qwen3-30B-A3B-Base on both, pass@k up to 32, compare directly. One 8-GPU ScaleTrain job, borrowing off (`run_qwen3_passk32_evals_st.sh`,
+supervisor `start_qwen3_passk32_evals_supervisor.sh` -> tmux rl-q3-passk32-evals, job_db4g7qrmjdjg07lcrs1g): 12 tasks pulled from a
+shared queue by 4 TP-2 vLLM engines -- q30b-base + q4b-base on medium and hard, q4b30b-<band>-s{250,500,750,1000} on their own band
+(bases + step 1000 first). Protocol = Qwen band-eval at n=32 (300 q, 0-shot ChatML + boxed instruction, temp 1, 8192 tokens, strict
+boxed math_verify): mean@32, unbiased pass@k / pass^k for k = 1..32. Results: s3://scale-ml/genai/rl-distill/qwen3-passk32-evals-v1/<model>/<band>/summary.json.
+
+---
+
 ## 2026-10-09 — Qwen3-30B-A3B hard RL FINISHED (early stopping @500 = max steps)
 
 `q3-30b-rl-hard` (job_db38lnjmjdjg088cefb0, ckpt-fix relaunch from 195) stopped at step 500, which was both the step cap and the 5th
