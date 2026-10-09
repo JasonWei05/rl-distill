@@ -79,6 +79,8 @@ completion receipts verified by the supervisor; best_hf under s3://scale-ml/gena
 best_hf_at_step400/, best_hf/_REMOTE_COMPLETE.json removed; supervisor `.scale_train_supervisors/q3-4b-rl-hard-20261008` (TOTAL_TRAINING_STEPS=600,
 same ES rule, same W&B id) resumes the step-400 permanent checkpoint (Adam + data cursor + ES state). First pod rejected by a bad node
 ("GPU is lost" at admission); supervisor auto-relaunches after its 900 s backoff.
+**4B hard 400 -> 600 DONE 2026-10-09 06:29Z** (max steps, receipts verified): best val mean@16 **0.4117 @ step 560** (was 0.3819 @390 before
+the extension; 0.4096 @440, 0.4098 @550); step 600 scored 0.362. best_hf (step 560) on S3; the step-390 best kept under best_hf_at_step400/.
 
 ---
 
