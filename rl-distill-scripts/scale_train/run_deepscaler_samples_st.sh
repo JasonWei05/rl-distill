@@ -6,6 +6,7 @@
 #   - a background loop mirrors finished chunk parquets (never *.tmp) to OUT_S3 every SYNC_SECONDS;
 #   - when every shard finishes, the merged shard outputs + all.parquet + RUN_COMPLETE.json are uploaded.
 # Env: MODEL_REPO, MODEL_REVISION (pinned), OUT_S3 (required); PROMPT_INSTRUCTION, N, MAX_TOKENS, CHUNK_SIZE optional.
+# SEED (default 42; use a new value to resample questions already sampled), MAX_NUM_SEQS (512), GPU_MEMORY_UTILIZATION (0.9).
 # TP (default 1): tensor-parallel GPUs per generator; DP = #GPUs / TP generators, generator i on GPUs [i*TP, (i+1)*TP).
 #   bash launch_st_with_code.sh --gpus-per-instance 4 --priority high --allow-borrowing \
 #     --run-file run_deepscaler_samples_st.sh --job-name q3-8b-ds-n8 \
@@ -75,7 +76,8 @@ for g in $(seq 0 $((n_dp - 1))); do
     --temperature 1.0 --top-p 1.0 --top-k -1 --stop-strings "${STOP_STRINGS}" --stop-token-ids "${STOP_TOKEN_IDS}" \
     --append-boxed-instruction --boxed-instruction "${PROMPT_INSTRUCTION}" \
     --attention-backend "${ATTENTION_BACKEND}" \
-    --chunk-size "${CHUNK_SIZE}" --max-questions "${MAX_QUESTIONS}" --max-num-seqs 512 --gpu-memory-utilization 0.9 \
+    --chunk-size "${CHUNK_SIZE}" --max-questions "${MAX_QUESTIONS}" --max-num-seqs "${MAX_NUM_SEQS:-512}" --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.9}" \
+    --seed "${SEED:-42}" \
     > "${WORK}/out/shard${g}.log" 2>&1 &
   pids+=($!)
 done
