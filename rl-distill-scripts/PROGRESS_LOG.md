@@ -18,6 +18,19 @@ The trailing wandb teardown ConnectionResetError is harmless (run synced; RUN_DO
 
 ---
 
+## 2026-10-09 — Qwen math suite (easy/medium/hard val, GSM8K, MATH500, AIME25/26) on 4B RL-best vs 30B->4B distilled LAUNCHED
+
+User request: put the best 4B RL medium / hard checkpoints and the 30B medium / hard -> 4B distilled students through the extensive math
+eval, AIME duplicated 32x. Models: q4b-rl-medium-best (step 510), q4b-rl-hard-best (step 560), q30bm-to-q4b-s1000, q30bh-to-q4b-s1000
+(final distill step; there is no step-100 save), plus Qwen3-4B-Base as the reference. Sets: Qwen3-30B-band easy / medium / hard validation
+(300 q each), GSM8K test (1,319), MATH500 (500), AIME 2025 / 2026 (30 each) at the Gemma 4 suite's pinned revisions; 16 samples/question,
+AIME 32. Qwen RL prompt contract (0-shot ChatML + boxed instruction, temp 1, 8192 tokens, strict last-box math_verify) -> mean@n,
+pass@k / pass^k. One 4-GPU ScaleTrain job, borrowing off (fallback watcher), one TP-1 engine per GPU on a shared (model, set) queue:
+`run_qwen3_math_suite_st.sh` / `start_qwen3_math_suite_supervisor.sh` (192a3b9a). Results:
+s3://scale-ml/genai/rl-distill/qwen3-math-suite-v1/<model>/<set>/summary.json.
+
+---
+
 ## 2026-10-09 — Best 30B medium / hard RL ckpts -> Qwen3-1.7B-Base distillation LAUNCHED (2 GPUs each, borrowing off)
 
 Same pipeline as the 4B students, student swapped (`STUDENT=q1p7b`, acbea94c): stage 1 skipped (reuses the q30bm-medium / q30bh-hard
