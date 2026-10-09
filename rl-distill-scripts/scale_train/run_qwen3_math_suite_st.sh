@@ -109,26 +109,29 @@ NL=$'\n'; STOP_STRINGS="<|im_end|>,${NL}Human:,${NL}user${NL}"; STOP_TOKEN_IDS=1
 echo 0 > "${WORK}/next"
 claim_task() { ( flock 8; i="$(cat "${WORK}/next")"; (( i < ${#tasks[@]} )) && { echo "${i}"; echo $((i + 1)) > "${WORK}/next"; } || true ) 8>"${WORK}/next.lock"; }
 
-run_task() {   # gpu name set src
-  local gpu="$1" name="$2" set="$3" src="$4" out model attempt n
-  out="${WORK}/out/${name}/${set}"; mkdir -p "${out}"; n="$(n_for "${set}")"
-  model="$(fetch_model "${src}")"
-  echo "EVAL_START $(date -u +%FT%TZ) ${name}/${set} gpu=${gpu} n=${n}"
+# generate <gpu> <model dir> <input parquet> <out dir> <n> <chunk size> <max seqs> <label>: one vLLM engine; one retry
+generate() {
+  local gpu="$1" model="$2" input="$3" out="$4" n="$5" chunk="$6" seqs="$7" label="$8" attempt
   for attempt in 1 2; do   # one retry: concurrent vLLM engine start-up can lose a compile-cache race
     CUDA_VISIBLE_DEVICES="${gpu}" VLLM_CACHE_ROOT="/tmp/vllm_cache_gpu${gpu}" TORCHINDUCTOR_CACHE_DIR="/tmp/inductor_cache_gpu${gpu}" \
       TRITON_CACHE_DIR="/tmp/triton_cache_gpu${gpu}" "${VENV}/bin/python" rl-distill-scripts/data/generate_deepscaler_4bpt_samples.py \
-      --model "${model}" --input "${WORK}/data/${set}.parquet" --chat-template rl-distill-scripts/data/qwen3_base_native_chat.jinja \
+      --model "${model}" --input "${input}" --chat-template rl-distill-scripts/data/qwen3_base_native_chat.jinja \
       --output "${out}/samples.parquet" --shard-id 0 --num-shards 1 --n "${n}" \
       --max-tokens 8192 --max-model-len 12288 --max-prompt-tokens 4096 \
       --temperature 1.0 --top-p 1.0 --top-k -1 --stop-strings "${STOP_STRINGS}" --stop-token-ids "${STOP_TOKEN_IDS}" \
       --append-boxed-instruction --boxed-instruction "${DEFAULT_INSTRUCTION}" --attention-backend TRITON_ATTN \
-      --chunk-size 300 --max-num-seqs 512 --gpu-memory-utilization 0.9 > "${out}/log.txt" 2>&1 && break
-    echo "EVAL_ATTEMPT_FAILED ${name}/${set} attempt=${attempt}: $(grep -aE 'Error|error' "${out}/log.txt" | tail -1 | cut -c1-200)" >&2
+      --chunk-size "${chunk}" --max-num-seqs "${seqs}" --gpu-memory-utilization 0.9 > "${out}/log.txt" 2>&1 && return 0
+    echo "EVAL_ATTEMPT_FAILED ${label} attempt=${attempt}: $(grep -aE 'Error|error' "${out}/log.txt" | tail -1 | cut -c1-200)" >&2
     if (( attempt == 2 )); then
-      tail -n 30 "${out}/log.txt" >&2; aws s3 cp --only-show-errors "${out}/log.txt" "${EVAL_S3}/${name}/${set}/log.failed.txt"; return 1
+      tail -n 30 "${out}/log.txt" >&2; aws s3 cp --only-show-errors "${out}/log.txt" "${EVAL_S3}/${label}/log.failed.txt"; return 1
     fi
     sleep 30
   done
+}
+
+# finish_set <name> <set> <src> <out dir with samples.parquet + log.txt>: grade, summarize, upload (summary last = done)
+finish_set() {
+  local name="$1" set="$2" src="$3" out="$4"
   PYTHONPATH="${PROJECT_ROOT}" "${VENV}/bin/python" rl-distill-scripts/data/grade_band_eval_samples.py "${out}/samples.parquet"
   "${VENV}/bin/python" - "${out}/grades.json" "${out}/summary.json" "${name}" "${set}" "${src}" <<'PY'
 import json, sys
@@ -144,8 +147,34 @@ summary = {"model": sys.argv[3], "set": sys.argv[4], "source": sys.argv[5], "que
 json.dump(summary, open(sys.argv[2], "w"), indent=2)
 print("EVAL_SUMMARY", json.dumps(summary))
 PY
-  for f in log.txt samples.parquet grades.json summary.json; do aws s3 cp --only-show-errors "${out}/${f}" "${EVAL_S3}/${name}/${set}/${f}"; done   # summary last: marks done
+  for f in log.txt samples.parquet grades.json summary.json; do aws s3 cp --only-show-errors "${out}/${f}" "${EVAL_S3}/${name}/${set}/${f}"; done
   echo "EVAL_DONE $(date -u +%FT%TZ) ${name}/${set}"
+}
+
+# SINGLE_PASS=1 (one model): every remaining set goes into ONE vLLM generate call (per-row n_samples: AIME 32, others 16;
+# --chunk-size covers all rows) so continuous batching never waits on a set or chunk boundary; split per set afterwards.
+if [ "${SINGLE_PASS:-0}" = 1 ]; then
+  read -r name _ src <<<"${tasks[0]}"
+  for t in "${tasks[@]}"; do [ "${t%% *}" = "${name}" ] || { echo "FATAL: SINGLE_PASS needs exactly one model" >&2; exit 2; }; done
+  sets=""; for t in "${tasks[@]}"; do read -r _ s _ <<<"${t}"; sets+=" ${s}"; done
+  combo="${WORK}/out/${name}/_single_pass"; mkdir -p "${combo}"
+  rows="$(SET_N="${SET_N:-16}" AIME_N="${AIME_N:-32}" "${VENV}/bin/python" rl-distill-scripts/data/math_suite_single_pass.py combine "${WORK}/data" "${combo}/input.parquet" ${sets})"
+  model="$(fetch_model "${src}")"
+  echo "EVAL_START $(date -u +%FT%TZ) ${name}/{${sets# }} single-pass rows=${rows} gpu=0"
+  generate 0 "${model}" "${combo}/input.parquet" "${combo}" "${SET_N:-16}" "${rows}" "${SINGLE_PASS_MAX_SEQS:-1024}" "${name}/_single_pass"
+  "${VENV}/bin/python" rl-distill-scripts/data/math_suite_single_pass.py split "${combo}/samples.parquet" "${WORK}/out/${name}" ${sets}
+  for s in ${sets}; do cp "${combo}/log.txt" "${WORK}/out/${name}/${s}/log.txt"; finish_set "${name}" "${s}" "${src}" "${WORK}/out/${name}/${s}"; done
+  echo "MATH_SUITE_DONE $(date -u +%FT%TZ) evals=${EVAL_S3} (single pass)"
+  exit 0
+fi
+
+run_task() {   # gpu name set src
+  local gpu="$1" name="$2" set="$3" src="$4" out model n
+  out="${WORK}/out/${name}/${set}"; mkdir -p "${out}"; n="$(n_for "${set}")"
+  model="$(fetch_model "${src}")"
+  echo "EVAL_START $(date -u +%FT%TZ) ${name}/${set} gpu=${gpu} n=${n}"
+  generate "${gpu}" "${model}" "${WORK}/data/${set}.parquet" "${out}" "${n}" 300 512 "${name}/${set}"
+  finish_set "${name}" "${set}" "${src}" "${out}"
 }
 
 pids=()

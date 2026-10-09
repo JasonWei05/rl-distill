@@ -58,6 +58,8 @@ def normalize_input(path: Path, append_boxed_instruction: bool, instruction: str
             f"got {sorted(df.columns)}"
         )
 
+    if "n_samples" in df.columns:   # optional per-row sample count (overrides --n), e.g. AIME x32 next to x16 sets in one pass
+        out["n_samples"] = df["n_samples"].astype(int).to_numpy()
     out.insert(0, "source_index", range(len(out)))
     out["problem"] = out["problem"].astype(str).str.strip()
     out["answer"] = out["answer"].astype(str).str.strip()
@@ -146,6 +148,8 @@ def main() -> None:
     shard = full[full["source_index"] % args.num_shards == args.shard_id].reset_index(drop=True)
     if args.max_questions > 0:
         shard = shard.iloc[: args.max_questions].copy()
+    per_row_n = "n_samples" in shard.columns
+    shard["n_expected"] = shard["n_samples"].astype(int) if per_row_n else args.n
     print(
         f"SHARD_START shard={args.shard_id}/{args.num_shards} questions={len(shard)} n={args.n}",
         flush=True,
@@ -161,6 +165,7 @@ def main() -> None:
         "num_shards": args.num_shards,
         "questions": len(shard),
         "n": args.n,
+        **({"per_row_n": True} if per_row_n else {}),
         "max_tokens": args.max_tokens,
         "max_model_len": args.max_model_len,
         "max_prompt_tokens": args.max_prompt_tokens,
@@ -242,8 +247,8 @@ def main() -> None:
                 len(existing) != end - start
                 or observed_indices != expected_indices
                 or existing["source_index"].duplicated().any()
-                or not existing["response_texts"].map(len).eq(args.n).all()
-                or not existing["response_lens"].map(len).eq(args.n).all()
+                or existing["response_texts"].map(len).tolist() != chunk["n_expected"].astype(int).tolist()
+                or existing["response_lens"].map(len).tolist() != chunk["n_expected"].astype(int).tolist()
                 or not valid_response_lengths.all()
                 or not existing["prompt_length"].astype(int).between(1, args.max_prompt_tokens).all()
             ):
@@ -274,16 +279,21 @@ def main() -> None:
             )
             tokenizer = llm.get_tokenizer()
             chat_template = template_path.read_text()
-            sampling = SamplingParams(
-                n=args.n,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                top_k=args.top_k,
-                max_tokens=args.max_tokens,
-                seed=args.seed + args.shard_id,
-                stop=stop_strings,
-                stop_token_ids=stop_token_ids or None,
-            )
+            sampling_by_n = {}
+
+            def sampling(n: int):
+                if n not in sampling_by_n:
+                    sampling_by_n[n] = SamplingParams(
+                        n=n,
+                        temperature=args.temperature,
+                        top_p=args.top_p,
+                        top_k=args.top_k,
+                        max_tokens=args.max_tokens,
+                        seed=args.seed + args.shard_id,
+                        stop=stop_strings,
+                        stop_token_ids=stop_token_ids or None,
+                    )
+                return sampling_by_n[n]
 
         assert tokenizer is not None and chat_template is not None and sampling is not None
         requests = []
@@ -304,12 +314,12 @@ def main() -> None:
             requests.append({"prompt_token_ids": token_ids})
             prompt_lengths.append(len(token_ids))
 
-        outputs = llm.generate(requests, sampling, use_tqdm=True)
+        outputs = llm.generate(requests, [sampling(int(n)) for n in chunk["n_expected"]], use_tqdm=True)
         records = []
         for row, prompt_length, output in zip(chunk.itertuples(index=False), prompt_lengths, outputs):
-            if len(output.outputs) != args.n:
+            if len(output.outputs) != int(row.n_expected):
                 raise RuntimeError(
-                    f"source_index={row.source_index}: expected {args.n} outputs, got {len(output.outputs)}"
+                    f"source_index={row.source_index}: expected {row.n_expected} outputs, got {len(output.outputs)}"
                 )
             texts = [completion.text for completion in output.outputs]
             lengths = [len(completion.token_ids) for completion in output.outputs]
@@ -330,7 +340,7 @@ def main() -> None:
         atomic_parquet(pd.DataFrame(records), part_path)
         print(
             f"CHUNK_COMPLETE shard={args.shard_id} start={start} end={end} "
-            f"mean_response_tokens={sum(sum(r['response_lens']) for r in records) / ((end-start)*args.n):.1f}",
+            f"mean_response_tokens={sum(sum(r['response_lens']) for r in records) / sum(len(r['response_lens']) for r in records):.1f}",
             flush=True,
         )
 
@@ -344,9 +354,10 @@ def main() -> None:
         or merged["source_index"].duplicated().any()
     ):
         raise RuntimeError("Shard coverage validation failed")
-    if not merged["response_texts"].map(len).eq(args.n).all():
+    expected_n = shard.sort_values("source_index")["n_expected"].astype(int).tolist()
+    if merged["response_texts"].map(len).tolist() != expected_n:
         raise RuntimeError("At least one row does not contain the requested number of responses")
-    if not merged["response_lens"].map(len).eq(args.n).all():
+    if merged["response_lens"].map(len).tolist() != expected_n:
         raise RuntimeError("At least one row does not contain the requested number of response lengths")
     if not merged["response_lens"].map(
         lambda values: all(0 <= int(value) <= args.max_tokens for value in values)
