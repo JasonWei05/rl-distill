@@ -23,7 +23,14 @@ if [ -n "${CODE_S3_URI:-}" ]; then
 fi
 TEACHER_SPEC="${TEACHER_SPEC:-q30bm-medium}"; STUDENT="${STUDENT:-q4b}"
 # q30bh-hard: the same pipeline from the 30B *hard* RL run (best step 410), hard-band traces, evals on the hard validation split
-case "${TEACHER_SPEC}" in q30bm-medium) BAND=medium ;; q30bh-hard) BAND=hard ;; *) echo "FATAL: TEACHER_SPEC must be q30bm-medium|q30bh-hard" >&2; exit 2 ;; esac
+# q4bm-medium / q4bh-hard: the 4B medium / hard RL teachers (best steps 510 / 560) -> STUDENT=q1p7b; traces on 1-GPU (TP 1) engines
+case "${TEACHER_SPEC}" in
+  q30bm-medium) BAND=medium; FAMILY=qwen3-30b-rl; TRACE_TP_DEFAULT=2 ;;
+  q30bh-hard)   BAND=hard;   FAMILY=qwen3-30b-rl; TRACE_TP_DEFAULT=2 ;;
+  q4bm-medium)  BAND=medium; FAMILY=qwen3-4b-rl;  TRACE_TP_DEFAULT=1 ;;
+  q4bh-hard)    BAND=hard;   FAMILY=qwen3-4b-rl;  TRACE_TP_DEFAULT=1 ;;
+  *) echo "FATAL: TEACHER_SPEC must be q30bm-medium|q30bh-hard|q4bm-medium|q4bh-hard" >&2; exit 2 ;;
+esac
 if [ -f .env ]; then set -a; source .env; set +a; fi
 : "${HF_TOKEN:?HF_TOKEN missing (forward it with --dotenv-keys)}"
 : "${WANDB_API_KEY:?WANDB_API_KEY missing (forward it with --dotenv-keys)}"
@@ -46,12 +53,12 @@ GPU_IDS_CSV="$(seq -s, 0 $((n_gpus - 1)))"
 unset CUDA_VISIBLE_DEVICES
 
 # --- stage 1: traces -----------------------------------------------------------------------------------------------------------
-TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-30b-rl-traces-topk128-v1}"
+TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/${FAMILY}-traces-topk128-v1}"
 if aws s3 ls "${TRACE_S3_BASE}/${TEACHER_SPEC}/COMPLETE.json" >/dev/null 2>&1; then
   echo "Q30BM stage1: S3 bundle ${TRACE_S3_BASE}/${TEACHER_SPEC} already complete -> skipping"
 else
   echo "Q30BM stage1: trace collection start $(date -u +%FT%TZ)"
-  TRACE_SPEC="${TEACHER_SPEC}" TEACHER_SOURCE=s3 TRACE_GPU_IDS="${GPU_IDS_CSV}" TENSOR_PARALLEL_SIZE="${TRACE_TP:-2}" TRACE_S3_BASE="${TRACE_S3_BASE}" \
+  TRACE_SPEC="${TEACHER_SPEC}" TEACHER_SOURCE=s3 TRACE_GPU_IDS="${GPU_IDS_CSV}" TENSOR_PARALLEL_SIZE="${TRACE_TP:-${TRACE_TP_DEFAULT}}" TRACE_S3_BASE="${TRACE_S3_BASE}" \
     PROMPTS_PER_SHARD="${PROMPTS_PER_SHARD:-32}" MAX_NUM_SEQS="${MAX_NUM_SEQS:-256}" \
     TRAIN_SAMPLES_PER_QUESTION=16 VALIDATION_SAMPLES_PER_QUESTION=1 TRACE_S3_MIRROR_ENABLE=true \
     bash rl-distill-scripts/scale_train/run_gemma4_bestckpt_trace_collection.sh
@@ -65,8 +72,8 @@ export TRAIN_SAMPLES_PER_QUESTION=16 MICRO_BATCH_SIZE_PER_GPU="${MICRO_BATCH_SIZ
 export FULL_VOCAB_KL_CHUNK_SIZE="${FULL_VOCAB_KL_CHUNK_SIZE:-4096}" VERL_FAIL_ON_NONFINITE_GRAD="${VERL_FAIL_ON_NONFINITE_GRAD:-0}"
 export CHECKPOINT_SAVE_CONTENTS="${CHECKPOINT_SAVE_CONTENTS:-[\"model\",\"optimizer\",\"extra\",\"hf_model\"]}" MAX_CKPT_TO_KEEP="${MAX_CKPT_TO_KEEP:-1}"
 export REMOTE_CHECKPOINT_ENABLE=true ROLLING_CHECKPOINT_FREQ="${ROLLING_CHECKPOINT_FREQ:-0}" ROLLING_HF_EXPORT=true ROLLING_HF_EXPORT_S3=true
-export REMOTE_CHECKPOINT_S3_URI="${REMOTE_CHECKPOINT_S3_URI:-s3://scale-ml/genai/rl-distill/qwen3-30b-rl-distill-ckpts-v1/${TEACHER_SPEC}-to-${STUDENT}-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}-lr${LR}}"
-export HF_PUSH_ENABLE=false HF_PUSH_DELETE_LOCAL=false PROJECT_NAME="${PROJECT_NAME:-qwen3-30b-rl-distill-v1}" FSDP_OFFLOAD=false ALLOW_UNDERSIZED_STUDENT_LAYOUT=true
+export REMOTE_CHECKPOINT_S3_URI="${REMOTE_CHECKPOINT_S3_URI:-s3://scale-ml/genai/rl-distill/${FAMILY}-distill-ckpts-v1/${TEACHER_SPEC}-to-${STUDENT}-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}-lr${LR}}"
+export HF_PUSH_ENABLE=false HF_PUSH_DELETE_LOCAL=false PROJECT_NAME="${PROJECT_NAME:-${FAMILY}-distill-v1}" FSDP_OFFLOAD=false ALLOW_UNDERSIZED_STUDENT_LAYOUT=true
 export EXP_NAME="${EXP_NAME:-${TEACHER_SPEC}-to-${STUDENT}-base-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}-lr${LR}-g${n_gpus}}"
 if aws s3 ls "${REMOTE_CHECKPOINT_S3_URI}/global_step_${TOTAL_TRAINING_STEPS}/_REMOTE_COMPLETE.json" >/dev/null 2>&1; then
   echo "Q30BM stage2: step ${TOTAL_TRAINING_STEPS} already on S3 -> skipping"
@@ -79,7 +86,7 @@ else
 fi
 
 # --- stage 3: medium-val evals of the saved checkpoints ------------------------------------------------------------------------
-EVAL_S3="${EVAL_S3:-s3://scale-ml/genai/rl-distill/qwen3-30b-rl-distill-evals-v1/${TEACHER_SPEC}-to-${STUDENT}-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}-lr${LR}}"
+EVAL_S3="${EVAL_S3:-s3://scale-ml/genai/rl-distill/${FAMILY}-distill-evals-v1/${TEACHER_SPEC}-to-${STUDENT}-bs${TRAIN_BATCH_SIZE}-s${TOTAL_TRAINING_STEPS}-lr${LR}}"
 EVAL_STEPS="${EVAL_STEPS:-250 500 750 1000}"; N="${EVAL_N:-16}"
 WORK=/tmp/q30b_evals_${TEACHER_SPEC}; mkdir -p "${WORK}"
 VAL_PARQUET="${WORK}/${BAND}_validation.parquet"

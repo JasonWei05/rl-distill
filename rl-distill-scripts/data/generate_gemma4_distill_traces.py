@@ -101,6 +101,9 @@ DIRECTIONS = (
     # Qwen3-30B-A3B medium RL teacher (best val step 320) -> Qwen3-4B-Base student, same Qwen prompt/stop contract, 16 train samples.
     "q30bm_medium_r320_to_4b",
     "q30bh_hard_r410_to_4b",
+    # Qwen3-4B-Base medium / hard RL teachers (best val steps 510 / 560) -> Qwen3-1.7B-Base student, same Qwen contract, 16 train samples.
+    "q4bm_medium_r510_to_1p7b",
+    "q4bh_hard_r560_to_1p7b",
 )
 SPLITS = ("train", "validation")
 

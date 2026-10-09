@@ -73,6 +73,10 @@ case "${TRACE_SPEC}" in
   # Qwen3-30B-A3B-Base hard RL (es5 run, still training at 450/500 on 2026-10-09; best val mean@16 0.6252 @ step 410 at that time) as the
   # teacher for a Qwen3-4B-Base student; S3 full checkpoint only. 16 train samples.
   q30bh-hard) RUN_KEY=qwen30b-hard-es5; BAND=hard; BEST_STEP=410; DIRECTION=q30bh_hard_r410_to_4b; TEACHER_HF_REPO=""; TEACHER_HF_REVISION=""; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-30b-a3b-base-rl-full-checkpoints}" ;;
+  # Qwen3-4B-Base medium / hard RL (es5 runs: best val mean@16 0.6581 @ 510 / 0.4117 @ 560) as teachers for a Qwen3-1.7B-Base student;
+  # S3 full checkpoints only (RUN_KEY is the S3 run prefix under the 4B full-checkpoint base). 16 train samples.
+  q4bm-medium) RUN_KEY=qwen30b-medium-es5; BAND=medium; BEST_STEP=510; DIRECTION=q4bm_medium_r510_to_1p7b; TEACHER_HF_REPO=""; TEACHER_HF_REVISION=""; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-base-rl-full-checkpoints}" ;;
+  q4bh-hard)   RUN_KEY=qwen30b-hard-es5;   BAND=hard;   BEST_STEP=560; DIRECTION=q4bh_hard_r560_to_1p7b;   TEACHER_HF_REPO=""; TEACHER_HF_REVISION=""; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-base-rl-full-checkpoints}" ;;
   *)
     echo "FATAL: unsupported TRACE_SPEC=${TRACE_SPEC}" >&2
     exit 2
@@ -237,7 +241,7 @@ fi
 
 # --- Source: the band's training + validation data (same as RL) ---
 GLOBAL_SEED="${GLOBAL_SEED:-42}"
-case "${TRACE_SPEC}" in e4b-base-*|q4b-base-*|q30bm-*|q30bh-*|12bd-*|12br-*|12bo-*|26bd-*|26bw-*) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" ;; *) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}" ;; esac
+case "${TRACE_SPEC}" in e4b-base-*|q4b-base-*|q30bm-*|q30bh-*|q4bm-*|q4bh-*|12bd-*|12br-*|12bo-*|26bd-*|26bw-*) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}" ;; *) TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-8}" ;; esac
 VALIDATION_SAMPLES_PER_QUESTION="${VALIDATION_SAMPLES_PER_QUESTION:-1}"
 PROMPTS_PER_SHARD="${PROMPTS_PER_SHARD:-8}"
 ROW_GROUP_ROWS="${ROW_GROUP_ROWS:-2}"
@@ -259,6 +263,7 @@ case "${TRACE_SPEC}" in
   e4b-base-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/gemma4_e4b_base_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-e4b-base-traces-topk128-v1}" ;;
   q4b-base-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/qwen3_4b_base_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-base-traces-topk128-v1}" ;;
   q30bm-*|q30bh-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/qwen3_30b_rl_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-30b-rl-traces-topk128-v1}" ;;
+  q4bm-*|q4bh-*)   TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/qwen3_4b_rl_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-rl-traces-topk128-v1}" ;;
   *)          TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/gemma4_bestckpt_traces_v2}";  TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2}" ;;
 esac
 OUTPUT_ROOT="${OUTPUT_ROOT:-${TRACE_LOCAL_BASE}/${TRACE_SPEC}}"

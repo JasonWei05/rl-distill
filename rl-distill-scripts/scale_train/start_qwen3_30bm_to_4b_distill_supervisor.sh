@@ -9,8 +9,14 @@ IMG="${ST_IMAGE:-692474966980.dkr.ecr.us-west-2.amazonaws.com/scale_train/shared
 TEACHER_SPEC="${TEACHER_SPEC:-q30bm-medium}"   # q30bh-hard: the 30B hard RL teacher (best step 410) -> 4B, hard-band traces + hard-val evals
 STUDENT="${STUDENT:-q4b}"   # q1p7b: Qwen3-1.7B-Base student (GPUS=2), reusing the teacher's trace bundle
 case "${STUDENT}" in q4b) stag=4b ;; q1p7b) stag=1p7b ;; *) echo "FATAL: STUDENT must be q4b|q1p7b" >&2; exit 2 ;; esac
-case "${TEACHER_SPEC}" in q30bm-medium) name=q3-30bm-dist-${stag} ;; q30bh-hard) name=q3-30bh-dist-${stag} ;; *) echo "FATAL: TEACHER_SPEC must be q30bm-medium|q30bh-hard" >&2; exit 2 ;; esac
-EVAL_S3=s3://scale-ml/genai/rl-distill/qwen3-30b-rl-distill-evals-v1/${TEACHER_SPEC}-to-${STUDENT}-bs128-s1000-lr2e-6
+case "${TEACHER_SPEC}" in
+  q30bm-medium) name=q3-30bm-dist-${stag}; FAMILY=qwen3-30b-rl ;;
+  q30bh-hard)   name=q3-30bh-dist-${stag}; FAMILY=qwen3-30b-rl ;;
+  q4bm-medium)  name=q3-4bm-dist-${stag};  FAMILY=qwen3-4b-rl ;;   # 4B medium RL teacher (step 510), use STUDENT=q1p7b
+  q4bh-hard)    name=q3-4bh-dist-${stag};  FAMILY=qwen3-4b-rl ;;   # 4B hard RL teacher (step 560), use STUDENT=q1p7b
+  *) echo "FATAL: TEACHER_SPEC must be q30bm-medium|q30bh-hard|q4bm-medium|q4bh-hard" >&2; exit 2 ;;
+esac
+EVAL_S3=s3://scale-ml/genai/rl-distill/${FAMILY}-distill-evals-v1/${TEACHER_SPEC}-to-${STUDENT}-bs128-s1000-lr2e-6
 # ScaleTrain can report a preempted borrowing pod as COMPLETED: done = all four eval summaries on S3, otherwise relaunch.
 MARKERS=""; for s in 250 500 750 1000; do MARKERS+=" --completion-marker-s3-uri ${EVAL_S3}/step_${s}/summary.json"; done
 sup=".scale_train_supervisors/${name}-$(date -u +%Y%m%d)${SUP_TAG:-}"; mkdir -p "${sup}/pod-logs"; rm -f "${sup}/STOP"

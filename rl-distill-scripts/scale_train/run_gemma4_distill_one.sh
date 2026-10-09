@@ -87,6 +87,14 @@ case "${TEACHER_SPEC}" in
     TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}"
     PROJECT_NAME="${PROJECT_NAME:-qwen3-30b-rl-distill-v1}"
     ;;
+  q4bm-*|q4bh-*)
+    # Qwen3-4B-Base medium / hard RL teacher (run_gemma4_bestckpt_trace_collection.sh q4bm-* specs): 16 train samples, S3 only.
+    TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-rl-traces-topk128-v1}"
+    TRACE_LOCAL_ROOT="${TRACE_LOCAL_ROOT:-/tmp/qwen3_4b_rl_traces_v1/${TEACHER_SPEC}}"
+    TRACE_HF_DATASET_BASE="${TRACE_HF_DATASET_BASE-}"
+    TRAIN_SAMPLES_PER_QUESTION="${TRAIN_SAMPLES_PER_QUESTION:-16}"
+    PROJECT_NAME="${PROJECT_NAME:-qwen3-4b-rl-distill-v1}"
+    ;;
   12bd-*|12br-*|12bo-*|26bd-*|26bw-*)
     # RL-on-distilled 12B teacher (§9.0 step 190): bestckpt-v2 trace family on S3, 16 train samples (§9 recipe), no HF dataset mirror.
     TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2}"
