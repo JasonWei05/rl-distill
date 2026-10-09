@@ -18,6 +18,18 @@ The trailing wandb teardown ConnectionResetError is harmless (run synced; RUN_DO
 
 ---
 
+## 2026-10-09 — Best 30B medium / hard RL ckpts -> Qwen3-1.7B-Base distillation LAUNCHED (2 GPUs each, borrowing off)
+
+Same pipeline as the 4B students, student swapped (`STUDENT=q1p7b`, acbea94c): stage 1 skipped (reuses the q30bm-medium / q30bh-hard
+trace bundles), stage 2 = §9 recipe (bs 128, 2e-6 -> 2e-7, 100 warmup, 1000 steps, 4 seqs/micro, KL chunk 4096, ckpt every 250) into
+Qwen/Qwen3-1.7B-Base@ea980cb0 on FSDP2 DP2, stage 3 = n=16 evals of steps 250/500/750/1000 on the band's validation split.
+`TEACHER_SPEC=<q30bm-medium|q30bh-hard> STUDENT=q1p7b GPUS=2 ALLOW_BORROWING=false MAX_RELAUNCHES=200 FAILURE_BACKOFF_SECONDS=3600
+MAX_FAILURE_BACKOFF_SECONDS=3600 bash start_qwen3_30bm_to_4b_distill_supervisor.sh` -> tmux rl-q3-30b{m,h}-dist-1p7b; jobs
+job_db4gaaoc78j007hglkgg (medium) / job_db4gaaoc78j0089ltagg (hard), p5.48xlarge:2. Ckpts .../qwen3-30b-rl-distill-ckpts-v1/<spec>-to-q1p7b-bs128-s1000-lr2e-6/,
+evals .../qwen3-30b-rl-distill-evals-v1/<spec>-to-q1p7b-bs128-s1000-lr2e-6/step_*/summary.json.
+
+---
+
 ## 2026-10-09 — Qwen3-1.7B-Base medium + hard DAPO RL LAUNCHED (2 GPUs each, borrowing off, 600 steps)
 
 Same recipe as the 4B / 30B Qwen runs (GRPO n=16, bsz 64 / mini 32, lr 1e-6, 8k responses, val mean@16 every 10 steps, early stopping
