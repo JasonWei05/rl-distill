@@ -419,7 +419,8 @@ _progress_to_pod_log() {
   local worker=$1 last=-60 line
   { stdbuf -oL tr '\r' '\n' 2>/dev/null || tr '\r' '\n'; } | while IFS= read -r line; do
     case "${line}" in
-      *TRACE_SHARD_DONE*) echo "${line}" ;;
+      *TRACE_SHARD_DONE*|*pin-engine*) echo "${line}" ;;
+      ERROR:*|*Traceback*|*Error:*|*"out of memory"*) echo "[worker ${worker}] ${line}" ;;   # failure reasons, not just progress
       *"est. speed"*) if (( SECONDS - last >= 60 )); then echo "[progress] worker=${worker} ${line##*|}"; last=${SECONDS}; fi ;;
     esac
   done
