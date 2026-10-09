@@ -5,6 +5,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ENV_VARS="AIME_N=${AIME_N:-32}"
+[ -n "${MODEL_NAME:-}" ] && ENV_VARS+=",MODEL_NAME=${MODEL_NAME},MODEL_SRC=${MODEL_SRC:?MODEL_SRC required with MODEL_NAME}"
 [ -n "${EXTRA_ENV_VARS:-}" ] && ENV_VARS+=",${EXTRA_ENV_VARS}"
 echo "LAUNCH_ENV ${ENV_VARS}"
 BORROW_FLAG=""; [ "${ALLOW_BORROWING:-false}" = true ] && BORROW_FLAG="--allow-borrowing"

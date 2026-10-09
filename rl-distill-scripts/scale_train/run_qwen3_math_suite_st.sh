@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ScaleTrain pod entry: the Qwen math suite for 4B-class checkpoints, one vLLM engine (TP 1) per GPU pulling (model, set) tasks
+# ScaleTrain pod entry: the Qwen math suite for 4B / 1.7B-class checkpoints, one vLLM engine (TP 1) per GPU pulling (model, set) tasks
 # from a shared queue. Sets: the Qwen3-30B-defined DeepScaleR easy / medium / hard validation splits (300 q each, the RL val
 # sets), GSM8K test (1,319), MATH500 (500), AIME 2025 and AIME 2026 (30 each), at the pinned revisions of the Gemma 4 suite
 # (data/prepare_gemma4_three_model_eval_data.py). Samples per question: 16, AIME 32 (= the x32 duplication).
@@ -38,7 +38,8 @@ unset CUDA_VISIBLE_DEVICES
 EVAL_S3="${EVAL_S3:-s3://scale-ml/genai/rl-distill/qwen3-math-suite-v1}"
 RL=s3://scale-ml/genai/rl-distill/qwen3-4b-base-rl
 DIST=s3://scale-ml/genai/rl-distill/qwen3-30b-rl-distill-ckpts-v1
-# name=source (hf:<repo>@<rev> | s3:<HF export prefix>)
+# name=source (hf:<repo>@<rev> | s3:<HF export prefix>); MODEL_NAME + MODEL_SRC select a single model instead (1-GPU jobs)
+[ -n "${MODEL_NAME:-}" ] && MODELS="${MODEL_NAME}=${MODEL_SRC:?MODEL_SRC required with MODEL_NAME}"
 MODELS="${MODELS:-q4b-rl-medium-best=s3:${RL}/qwen3-4b-medium-es5/best_hf q4b-rl-hard-best=s3:${RL}/qwen3-4b-hard-es5/best_hf q30bm-to-q4b-s1000=s3:${DIST}/q30bm-medium-to-q4b-bs128-s1000-lr2e-6/global_step_1000/huggingface q30bh-to-q4b-s1000=s3:${DIST}/q30bh-hard-to-q4b-bs128-s1000-lr2e-6/global_step_1000/huggingface q4b-base=hf:Qwen/Qwen3-4B-Base@906bfd4b4dc7f14ee4320094d8b41684abff8539}"
 # queue order: longest sets first so the tail is short
 SETS="${SETS:-hard aime2025 aime2026 medium math500 easy gsm8k}"
