@@ -77,6 +77,9 @@ Medium-val mean@16 / pass@4 / pass@16: step 250 22.8 / 46.5 / 71.3, 500 23.7 / 4
 (boxed ~99.5%). Same set: 1.7B base 9.1, 1.7B medium RL 21.5 @100 (running), 30B teacher 75.75. Still rising at step 1000.
 Step-1000 student also queued on the math suite (q3-ms-30bm-1p7b-s1000, 1 GPU, SINGLE_PASS=1 = all 7 sets in one vLLM generate call);
 hard student step 500 on the math suite (q3-ms-30bh-1p7b-s500): hard 11.2 mean@16 / 50.0 pass@16.
+Math suite, 30B medium RL -> 1.7B step 1000 (SINGLE_PASS, all 7 sets in one generate call, ~31 min wall on 1 GPU incl. prep/grading;
+medium identical to the pipeline eval because each request carries the same fixed seed), mean@n / pass@n: easy 64.2 / 95.0,
+medium 25.9 / 75.7, hard 11.5 / 49.3, GSM8K 80.2 / 96.9, MATH500 61.4 / 89.4, AIME25 2.9 / 20.0, AIME26 2.1 / 23.3.
 
 ---
 
