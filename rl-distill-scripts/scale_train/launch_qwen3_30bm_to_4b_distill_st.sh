@@ -4,7 +4,7 @@
 #   bash launch_qwen3_30bm_to_4b_distill_st.sh --image <uri>
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
-ENV_VARS="TEACHER_SPEC=${TEACHER_SPEC:-q30bm-medium}"
+ENV_VARS="TEACHER_SPEC=${TEACHER_SPEC:-q30bm-medium},STUDENT=${STUDENT:-q4b}"
 [ -n "${EXTRA_ENV_VARS:-}" ] && ENV_VARS+=",${EXTRA_ENV_VARS}"
 echo "LAUNCH_ENV ${ENV_VARS}"
 BORROW_FLAG="--allow-borrowing"; [ "${ALLOW_BORROWING:-true}" = false ] && BORROW_FLAG=""   # ALLOW_BORROWING=false -> dedicated capacity

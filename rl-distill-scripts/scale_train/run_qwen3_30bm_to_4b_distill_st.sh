@@ -9,6 +9,7 @@
 #   stage 3  eval of the step-250/500/750/1000 HF exports on the Qwen3-30B medium validation split (300 q, the RL val set) with the
 #            Qwen band-eval protocol (n=16, temp 1, 8192 tokens, strict boxed math_verify = the RL reward): mean@16 / pass@k / pass^k
 # Preemption: every stage resumes (trace shards on S3; the trainer restores the newest complete S3 checkpoint; finished evals skipped).
+# STUDENT=q1p7b: the same stages 2-3 into Qwen3-1.7B-Base on 2 GPUs (stage 1 is skipped: the teacher bundles already exist).
 #   launched by launch_qwen3_30bm_to_4b_distill_st.sh / start_qwen3_30bm_to_4b_distill_supervisor.sh
 set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "${PROJECT_ROOT}"
@@ -20,7 +21,7 @@ if [ -n "${CODE_S3_URI:-}" ]; then
   tar -xzf /tmp/rl-distill-code.tar.gz --unlink-first --recursive-unlink -C "${PROJECT_ROOT}"
   echo "CODE_REFRESHED $(sha256sum /tmp/rl-distill-code.tar.gz | cut -c1-16)"
 fi
-TEACHER_SPEC="${TEACHER_SPEC:-q30bm-medium}"; STUDENT=q4b
+TEACHER_SPEC="${TEACHER_SPEC:-q30bm-medium}"; STUDENT="${STUDENT:-q4b}"
 # q30bh-hard: the same pipeline from the 30B *hard* RL run (best step 410), hard-band traces, evals on the hard validation split
 case "${TEACHER_SPEC}" in q30bm-medium) BAND=medium ;; q30bh-hard) BAND=hard ;; *) echo "FATAL: TEACHER_SPEC must be q30bm-medium|q30bh-hard" >&2; exit 2 ;; esac
 if [ -f .env ]; then set -a; source .env; set +a; fi
@@ -39,7 +40,8 @@ export HF_HOME="${HF_HOME:-/tmp/hf_cache}" HF_HUB_CACHE="${HF_HUB_CACHE:-/tmp/hf
 # ScaleTrain pods on ml-gpu-batch (EKS) are IPv6-only, interface eth0
 export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${NETWORK_INTERFACE_NAME:-eth0}}" NCCL_SOCKET_FAMILY="${NCCL_SOCKET_FAMILY:-AF_INET6}" GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${NETWORK_INTERFACE_NAME:-eth0}}"
 n_gpus="$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)"
-(( n_gpus >= 4 )) || { echo "FATAL: needs 4 GPUs (2 x TP-2 trace engines; FSDP2 DP4 for the 4B student), got ${n_gpus}" >&2; exit 2; }
+case "${STUDENT}" in q4b) min_gpus=4 ;; q1p7b) min_gpus=2 ;; *) echo "FATAL: STUDENT must be q4b|q1p7b" >&2; exit 2 ;; esac
+(( n_gpus >= min_gpus )) || { echo "FATAL: needs ${min_gpus} GPUs (FSDP2 DP${min_gpus} for the ${STUDENT} student; 4 for trace collection), got ${n_gpus}" >&2; exit 2; }
 GPU_IDS_CSV="$(seq -s, 0 $((n_gpus - 1)))"
 unset CUDA_VISIBLE_DEVICES
 

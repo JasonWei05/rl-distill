@@ -26,7 +26,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${PROJECT_ROOT}"
 
 TEACHER_SPEC="${TEACHER_SPEC:?e.g. 12b-easy (any trace spec of run_gemma4_bestckpt_trace_collection.sh)}"
-STUDENT="${STUDENT:?e4b, e2b, 12b, 26b, q30b or q4b}"
+STUDENT="${STUDENT:?e4b, e2b, 12b, 26b, q30b, q4b or q1p7b}"
 DISTILL_GPU_IDS="${DISTILL_GPU_IDS:?comma-separated physical GPU indices for this run}"
 IFS=',' read -r -a GPU_IDS <<< "${DISTILL_GPU_IDS}"
 
@@ -41,14 +41,16 @@ case "${STUDENT}" in
   q30b) STUDENT_REPO=Qwen/Qwen3-30B-A3B-Base; STUDENT_REVISION_DEFAULT=1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9; STUDENT_MIN_GPUS=8; KL_CHUNK_DEFAULT=1024 ;;
   # Qwen3-4B-Base student (RL'd Qwen3-30B-A3B teacher traces): dense, tied embeddings, 4 GPUs as for e4b.
   q4b)  STUDENT_REPO=Qwen/Qwen3-4B-Base;      STUDENT_REVISION_DEFAULT=906bfd4b4dc7f14ee4320094d8b41684abff8539; STUDENT_MIN_GPUS=4; KL_CHUNK_DEFAULT=4096 ;;
-  *) echo "FATAL: STUDENT must be e4b, e2b, 12b, 26b, q30b or q4b, got ${STUDENT}" >&2; exit 2 ;;
+  # Qwen3-1.7B-Base student (same RL'd 30B traces): dense, tied; fp32 master + grad + Adam of 2.0B params = 16 GB/GPU on 2.
+  q1p7b) STUDENT_REPO=Qwen/Qwen3-1.7B-Base;   STUDENT_REVISION_DEFAULT=ea980cb0a6c2ae4b936e82123acc929f1cec04c1; STUDENT_MIN_GPUS=2; KL_CHUNK_DEFAULT=4096 ;;
+  *) echo "FATAL: STUDENT must be e4b, e2b, 12b, 26b, q30b, q4b or q1p7b, got ${STUDENT}" >&2; exit 2 ;;
 esac
 case "${STUDENT}" in
   12b)  export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Gemma4UnifiedTextDecoderLayer}" ;;
   # untied embeddings: the per-rank local load (VERL_FSDP2_LOCAL_LOAD=1) supports tied models only (as in the Qwen RL runs)
   # untied: embed/lm_head stay in the root FSDP unit (the chunked-LM-head loss deadlocks when lm_head is its own unit)
   q30b) export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Qwen3MoeDecoderLayer}" VERL_FSDP2_LOCAL_LOAD="${VERL_FSDP2_LOCAL_LOAD:-0}" VERL_FSDP2_WRAP_EMBED_LM_HEAD=0 ;;
-  q4b)  export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Qwen3DecoderLayer}" ;;
+  q4b|q1p7b) export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Qwen3DecoderLayer}" ;;
   *)    export FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP="${FSDP_TRANSFORMER_LAYER_CLS_TO_WRAP:-Gemma4TextDecoderLayer}" ;;
 esac
 if (( ${#GPU_IDS[@]} < STUDENT_MIN_GPUS )) && [[ ${ALLOW_UNDERSIZED_STUDENT_LAYOUT:-false} != true ]]; then
