@@ -18,6 +18,19 @@ The trailing wandb teardown ConnectionResetError is harmless (run synced; RUN_DO
 
 ---
 
+## 2026-10-09 — Best 4B medium / hard RL ckpts -> Qwen3-1.7B-Base distillation (traces + distill + evals) LAUNCHED
+
+User request: complete the teacher/student grid for both bands -- 30B RL -> 4B (done), 30B RL -> 1.7B (medium done, hard training),
+and the new 4B RL -> 1.7B. New trace specs q4bm-medium (teacher = s3 .../qwen3-4b-base-rl-full-checkpoints/qwen30b-medium-es5/global_step_510,
+val 0.6581) and q4bh-hard (.../qwen30b-hard-es5/global_step_560, val 0.4117), directions q4bm_medium_r510_to_1p7b / q4bh_hard_r560_to_1p7b,
+same trace contract (3000 train q x 16 + 300 val q x 1, top-128, temp 1, 8192 tokens); pipeline family qwen3-4b-rl (d7c99a5c): traces
+s3://scale-ml/genai/rl-distill/qwen3-4b-rl-traces-topk128-v1/<spec>/, ckpts .../qwen3-4b-rl-distill-ckpts-v1/<spec>-to-q1p7b-bs128-s1000-lr2e-6/,
+evals .../qwen3-4b-rl-distill-evals-v1/<same>/step_*/summary.json, W&B qwen3-4b-rl-distill-v1. One 8-GPU job per band (borrowing off +
+fallback watcher): 8 x TP-1 trace engines, then the same §9 1.7B distill recipe (bs 128, 2e-6 -> 2e-7, 100 warmup, 1000 steps, ckpt every
+250), then n=16 evals of steps 250/500/750/1000 on the band's validation split. Supervisors rl-q3-4b{m,h}-dist-1p7b.
+
+---
+
 ## 2026-10-09 — Qwen math suite (easy/medium/hard val, GSM8K, MATH500, AIME25/26) on 4B RL-best vs 30B->4B distilled LAUNCHED
 
 User request: put the best 4B RL medium / hard checkpoints and the 30B medium / hard -> 4B distilled students through the extensive math
