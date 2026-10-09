@@ -28,6 +28,25 @@ AIME 32. Qwen RL prompt contract (0-shot ChatML + boxed instruction, temp 1, 819
 pass@k / pass^k. One 4-GPU ScaleTrain job, borrowing off (fallback watcher), one TP-1 engine per GPU on a shared (model, set) queue:
 `run_qwen3_math_suite_st.sh` / `start_qwen3_math_suite_supervisor.sh` (192a3b9a). Results:
 s3://scale-ml/genai/rl-distill/qwen3-math-suite-v1/<model>/<set>/summary.json.
+**DONE 2026-10-09 19:19Z** (35/35; moved to borrowing at the user's request after 18 min queued, ran 16:06-19:19Z on 4 GPUs).
+mean@n / pass@n (n = 16, AIME 32):
+
+| model | easy | medium | hard | gsm8k | math500 | aime2025 | aime2026 | avg mean / pass |
+|---|---|---|---|---|---|---|---|---|
+| Qwen3-4B-Base | 44.8 / 97.3 | 21.0 / 83.3 | 8.3 / 52.3 | 42.2 / 97.3 | 39.9 / 90.4 | 2.8 / 30.0 | 2.7 / 16.7 | 23.1 / 66.8 |
+| 4B RL medium best (@510) | **89.1** / 98.7 | 64.5 / 95.3 | 37.4 / 78.0 | **93.3** / 98.3 | 83.7 / 93.4 | 17.3 / 36.7 | 14.0 / 30.0 | 57.1 / 75.8 |
+| 4B RL hard best (@560) | 87.6 / 98.3 | **65.2** / 94.7 | **39.4** / 83.7 | 92.8 / 98.4 | **84.0** / 95.4 | **19.1 / 53.3** | **15.8 / 36.7** | **57.7 / 80.1** |
+| 30B medium RL -> 4B (s1000) | 85.2 / **99.7** | 52.1 / 93.3 | 27.1 / 73.7 | 91.8 / 98.2 | 77.4 / 94.2 | 10.7 / 40.0 | 9.1 / 23.3 | 50.5 / 74.6 |
+| 30B hard RL -> 4B (s1000) | 85.2 / 99.0 | 57.3 / **96.7** | 34.4 / **86.7** | 91.6 / **98.6** | 81.4 / **95.8** | 16.1 / 43.3 | 11.2 / 30.0 | 53.9 / 78.6 |
+
+pass^n (consistency): RL medium 62.3 / 23.0 / 5.3 / 81.1 / 63.0 / 3.3 / 0.0; RL hard 61.0 / 20.3 / 6.3 / 79.3 / 62.2 / 3.3 / 0.0;
+distill medium 50.0 / 9.0 / 2.7 / 75.3 / 48.4 / 0 / 0; distill hard 50.3 / 13.3 / 2.3 / 71.6 / 53.0 / 3.3 / 0 (same set order). All trained
+models box ~100% (base 70-81%). Direct 4B RL beats distillation from the 30B RL teacher on mean@n on every set (hard-RL best overall);
+the hard-teacher distill has the best pass@16 on all five non-AIME sets but trails RL on AIME (30 q, 1 question = 3.3 pts of pass@32).
+Hard-band training (RL or teacher) transfers down to medium / MATH500 / AIME better than medium-band training.
+Grader note: a first-call math_verify pool cold start took 28 s locally (load ~70) vs the 30 s per-call timeout; re-grading the first
+sample of all 59 finished eval sets with a warmed pool gave 0 mismatches, so pod results are unaffected; grade_band_eval_samples.py now
+warms the pool first (c84c92fc).
 
 ---
 
