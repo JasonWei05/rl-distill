@@ -18,6 +18,15 @@ The trailing wandb teardown ConnectionResetError is harmless (run synced; RUN_DO
 
 ---
 
+## 2026-10-09 — Qwen3-30B-A3B hard RL FINISHED (early stopping @500 = max steps)
+
+`q3-30b-rl-hard` (job_db38lnjmjdjg088cefb0, ckpt-fix relaunch from 195) stopped at step 500, which was both the step cap and the 5th
+consecutive miss: best val mean@16 **0.6252 @ step 410**; 490 scored 0.603, 500 scored 0.611. run_outcome early_stopping / final 500 /
+best 410; best_hf (step 410) + _REMOTE_COMPLETE verified on S3 (s3://scale-ml/genai/rl-distill/qwen3-30b-a3b-base-rl/qwen3-30b-a3b-hard-es5/).
+The 30B-hard -> 4B distill below already uses this step-410 checkpoint as its teacher.
+
+---
+
 ## 2026-10-09 — Best Qwen3-30B-A3B *hard* RL ckpt (step 410, still training) -> Qwen3-4B-Base: traces + distill + hard-val eval LAUNCHED
 
 User request: same pipeline as the medium one, from the current best 30B hard checkpoint (val mean@16 0.6252 @ step 410; the RL run keeps
