@@ -36,6 +36,12 @@ Supervisor `TEACHER_SPEC=q30bh-hard ALLOW_BORROWING=false bash start_qwen3_30bm_
 Outputs: traces s3://scale-ml/genai/rl-distill/qwen3-30b-rl-traces-topk128-v1/q30bh-hard/, ckpts .../qwen3-30b-rl-distill-ckpts-v1/q30bh-hard-to-q4b-bs128-s1000-lr2e-6/,
 evals .../qwen3-30b-rl-distill-evals-v1/q30bh-hard-to-q4b-bs128-s1000-lr2e-6/step_*/summary.json. References on the hard val set: 4B base
 (RL step 0) 8.6, 4B hard RL best 41.2 (@560, still running), 30B hard teacher 62.5 (@410).
+**Stage 1 DONE 2026-10-09 11:38Z:** bundle VALID, 48,300 rows / 143.2M response tokens (~2,970 tokens/response, 2.5x medium).
+Moved to 8 GPUs, then cut over mid-run (06:0xZ) from TP2 x 4 to TP1 x 8 engines with `--pin-engine-identity` so the 24 finished TP2 shards
+were kept; TP1 ran ~1,000-1,100 tok/s per GPU (vs ~435 per GPU at TP2), train split 94 shards done 11:17Z, validation split 11:24Z,
+parallel bundle validation (16 procs) 14 min. Only incident: vLLM engine-init race (status 2) on 4/8 workers at the cutover and 1/8 at the
+validation split, each self-healed by the supervisor's retry (per-worker caches + staggered start fix it for future pods, e67c511d).
+Stage 2 (4B distill, 8 GPUs) started 11:38Z.
 
 ---
 
