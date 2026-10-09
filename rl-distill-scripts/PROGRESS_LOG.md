@@ -90,6 +90,18 @@ were kept; TP1 ran ~1,000-1,100 tok/s per GPU (vs ~435 per GPU at TP2), train sp
 parallel bundle validation (16 procs) 14 min. Only incident: vLLM engine-init race (status 2) on 4/8 workers at the cutover and 1/8 at the
 validation split, each self-healed by the supervisor's retry (per-worker caches + staggered start fix it for future pods, e67c511d).
 Stage 2 (4B distill, 8 GPUs) started 11:38Z.
+**DONE 2026-10-09 16:16Z** (job COMPLETED). Distill: 1000 steps at ~11 s/step (8 GPUs), val KL 0.1415 (step 10) -> 0.0813 (100) -> 0.0765 (250)
+-> 0.0741 (500) -> 0.0731 (750) -> 0.0727 (1000). Hard-val eval (300 q x 16, temp 1, 8192 tok, strict boxed):
+
+| student step | mean@16 | pass@2 | pass@4 | pass@8 | pass@16 | pass^4 | pass^16 | boxed | trunc | mean len |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 250 | 29.5 | 44.4 | 60.2 | 73.7 | 83.0 | 6.4 | 1.7 | 99.5% | 0.1% | 2958 |
+| 500 | 32.7 | 48.0 | 63.1 | 75.4 | 84.0 | 7.9 | 1.7 | 99.5% | 0.1% | 3116 |
+| 750 | 32.3 | 47.5 | 63.0 | 76.1 | 85.3 | 8.2 | 2.0 | 99.6% | 0.1% | 3127 |
+| 1000 | **34.4** | 49.7 | 64.7 | 77.3 | 86.7 | 9.5 | 2.3 | 99.8% | 0.0% | 3033 |
+
+Same set, same metric (mean@16): Qwen3-4B-Base 8.6, **4B distilled from 30B hard RL 34.4**, 4B hard RL best 41.2 (@560), 30B hard RL teacher
+62.5 (@410). Recovers ~48% of the base->teacher gap (medium: ~57%), ~7 pts below direct 4B RL; unlike medium it still rises to step 1000.
 
 ---
 
