@@ -18,6 +18,27 @@ The trailing wandb teardown ConnectionResetError is harmless (run synced; RUN_DO
 
 ---
 
+## 2026-10-10 — Resample of the 9,182 DeepScaleR questions Qwen3-30B-A3B-Base solved 0/8: 16 new samples each
+
+User request: of the 38,796 deduplicated DeepScaleR questions, 9,182 (23.7%) were 0/8 in the 2026-10-05 30B n=8 run (their responses: mean 1,213 /
+median 771 / std 1,458 / min 4 / max 8,192 tokens, 1.80% at the cap, vs 915 / 642 / 1,056 for the rest). Resampled each 16x with the identical
+protocol (0-shot ChatML + boxed instruction, temp 1, top-p 1, 8192 tokens, same stops, vLLM 0.15.1) but seed 1042 (the default seed would
+repeat the n=8 draws): 2 GPUs (DP 2 x TP 1, 64 seqs/engine), borrowing, job_db4ltvjmjdjg07lcrt20, 21:39 -> 08:16Z (~1,840 tok/s/engine).
+`start_qwen3_30b_zero8_resample_supervisor.sh` + SEED/MAX_NUM_SEQS knobs in `run_deepscaler_samples_st.sh` (c70258af). The pod's final merge
+asserted the full-set size (38,796) and failed after all chunks were done; merged locally (fix 66c01686).
+Output: s3://scale-ml/genai/rl-distill/qwen3-deepscaler-samples/qwen3-30b-a3b-base-0shot-qwenmath-zero8-n16-seed1042-8k/ (`all.parquet`,
+`grades_strict_n16.parquet`, `summary.json`). Strict boxed grading, k/16:
+
+| k/16 | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 13 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| questions | 5,548 | 1,785 | 833 | 471 | 250 | 142 | 71 | 38 | 29 | 6 | 6 | 2 | 1 |
+
+**39.6% (3,634) are solved at least once in 16 new samples; 60.4% (5,548) stay 0/16**; mean per-sample accuracy 5.2%; half of the recovered
+questions are 1/16. New responses: mean 967 / median 733 / std 981 tokens, 0.52% at the cap -- shorter than the same questions' original
+0/8 samples (selection effect: "all 8 failed" over-selects long/truncated runaways).
+
+---
+
 ## 2026-10-09 — Gemma 4 medium-trained E4B models evaluated on a 300-question sample of the medium TRAIN split (local GPUs)
 
 User request: for the E4B RL and distilled models trained on the medium band, eval on a random 300-question sample of the training
