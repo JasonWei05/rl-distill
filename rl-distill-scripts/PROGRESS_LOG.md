@@ -36,6 +36,15 @@ Output: s3://scale-ml/genai/rl-distill/qwen3-deepscaler-samples/qwen3-30b-a3b-ba
 **39.6% (3,634) are solved at least once in 16 new samples; 60.4% (5,548) stay 0/16**; mean per-sample accuracy 5.2%; half of the recovered
 questions are 1/16. New responses: mean 967 / median 733 / std 981 tokens, 0.52% at the cap -- shorter than the same questions' original
 0/8 samples (selection effect: "all 8 failed" over-selects long/truncated runaways).
+**`very_hard` config added to the Hub dataset (2026-10-10):** user request -- from the 3,634 >=1/16 questions sample 3,300 and split
+3,000 / 300, add to `JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k` like the other bands and document the methodology.
+`data/build_deepscaler_qwen3_30b_very_hard_band.py` (f80144b6): same SHA-256 hash-rank selection (seed 42) / validation split (seed 43)
+with band name `very_hard`, same verl schema, extra_info + `resample_{n_correct,n_samples,pass_rate,accs,seed}`; validated no overlap with
+easy/medium/hard and the exact split sizes. Re-grade with per-trace flags matched the first grading exactly (grades:
+`.../zero8-n16-seed1042-8k/grades_strict_n16_accs.parquet`). Train resample scores 1/16: 1,488, 2/16: 692, 3/16: 372, 4-13/16: 448;
+validation 1/16: 138, 2/16: 69, 3/16: 49, 4-9/16: 44. Hub commit **9bec69ca** (parent be4dcd8b; README gains a "Very-hard configuration"
+section, manifest gains `very_hard`). Local build: /mnt/efs/jasonwei/verl/data/deepscaler_easy_medium_hard_very_hard_qwen3_30b_a3b_base_20261010/.
+Existing training/eval code pins revision be4dcd8b and is unaffected; use revision 9bec69ca for `very_hard`.
 
 ---
 
