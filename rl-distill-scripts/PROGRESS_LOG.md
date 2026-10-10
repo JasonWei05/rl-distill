@@ -169,6 +169,10 @@ s3://scale-ml/genai/rl-distill/qwen3-1.7b-base-rl-full-checkpoints/qwen30b-<band
 **Hard DONE 2026-10-10 13:08Z** (max steps 600, never early-stopped; ~2.2 min/step): hard-val mean@16 3.8 (step 0) -> 7.7 (110) -> 9.0 (250)
 -> 10.9 (340) -> 12.3 (430) -> best **12.6 @ 550**, 12.2 at 600. best_hf (step 550) + run_outcome verified on S3; the trailing wandb teardown
 ConnectionResetError is harmless (RUN_DONE rc=0). Beats both 1.7B hard distillations (30B RL -> 1.7B 11.3, 4B RL -> 1.7B 11.9).
+**Medium DONE 2026-10-10 14:42Z** (max steps 600, never early-stopped): medium-val mean@16 9.1 (0) -> 14.0 (30) -> 20.25 (70) -> 25.1 (160)
+-> 28.4 (250) -> 31.8 (380) -> best **33.8 @ 520**, 32.4 at 600. best_hf (step 520) + run_outcome verified on S3 (RUN_DONE rc=0).
+Beats both 1.7B medium distillations (30B RL -> 1.7B 25.9, 4B RL -> 1.7B 28.6). Final Qwen3 direct-RL vs distillation (val mean@16):
+4B: RL 65.8 / 41.2 vs best distill (30B teacher) 52.2 / 34.4; 1.7B: RL 33.8 / 12.6 vs best distill (4B teacher) 28.6 / 11.9 (medium / hard).
 
 ---
 
