@@ -92,7 +92,7 @@ fi
 import glob, json, pandas as pd
 parts = sorted(glob.glob("${WORK}/out/shard*.parquet"))
 df = pd.concat([pd.read_parquet(p) for p in parts], ignore_index=True).sort_values("source_index").reset_index(drop=True)
-assert len(df) == df["source_index"].nunique() and (${MAX_QUESTIONS} > 0 or len(df) == 38796), len(df)
+assert len(df) == df["source_index"].nunique() and (${MAX_QUESTIONS} > 0 or len(df) == len(pd.read_parquet("${WORK}/input.parquet", columns=["uid"]))), len(df)   # every input question
 df.to_parquet("${WORK}/all.parquet", index=False)
 json.dump({"rows": len(df), "n": ${N}, "max_tokens": ${MAX_TOKENS}, "model": "${MODEL_REPO}@${MODEL_REVISION}",
            "mean_response_tokens": float(df["mean_len"].mean())}, open("${WORK}/RUN_COMPLETE.json", "w"), indent=2)
