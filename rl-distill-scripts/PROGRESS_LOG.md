@@ -54,6 +54,11 @@ s3://scale-ml/genai/rl-distill/qwen3-4b-rl-traces-topk128-v1/<spec>/, ckpts .../
 evals .../qwen3-4b-rl-distill-evals-v1/<same>/step_*/summary.json, W&B qwen3-4b-rl-distill-v1. One 8-GPU job per band (borrowing off +
 fallback watcher): 8 x TP-1 trace engines, then the same §9 1.7B distill recipe (bs 128, 2e-6 -> 2e-7, 100 warmup, 1000 steps, ckpt every
 250), then n=16 evals of steps 250/500/750/1000 on the band's validation split. Supervisors rl-q3-4b{m,h}-dist-1p7b.
+**Medium DONE 2026-10-10 03:38Z** (job_db4kik3mjdjg088ceklg): traces 48,300 rows / 111.1M tokens (TP1 x 8, ~1,050 tok/s/engine,
+20:11-01:14Z); distill ~5.4 s/step on 8 GPUs, val KL 0.214 (10) -> 0.109 (100) -> 0.0997 (250) -> 0.0956 (500) -> 0.0940 (750) -> 0.0933 (1000).
+Medium-val mean@16 / pass@4 / pass@16: step 250 25.9 / 49.7 / 73.7, 500 26.2 / 50.5 / 74.3, 750 **28.6** / 53.3 / **78.3**, 1000 27.7 / 51.1 / 74.0.
+Same set: 1.7B base 9.1, 30B medium RL -> 1.7B 25.9 (@1000), 1.7B medium RL 29.6 (@280/310, running). The weaker 4B teacher (65.8) gives a
+better 1.7B student than the 30B teacher (75.75) despite a higher KL to its teacher.
 
 ---
 
