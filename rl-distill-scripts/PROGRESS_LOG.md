@@ -18,6 +18,21 @@ The trailing wandb teardown ConnectionResetError is harmless (run synced; RUN_DO
 
 ---
 
+## 2026-10-10 — Qwen3 30B-A3B / 4B / 1.7B DAPO RL on the new `very_hard` band LAUNCHED (borrowing on)
+
+User request: run all three sizes on the `very_hard` config exactly as before, borrowing true. Same recipe as the medium/hard runs (GRPO
+n=16, bsz 64 / mini 32, lr 1e-6, 8k responses + 2k overlong buffer, val mean@16 every 10 steps on the 300 very_hard validation q,
+early stopping patience 5 / 1-point tolerance incl. step 0). Data prep now accepts `very_hard` (Hub revision 9bec69ca, pinned SHA-256s;
+easy/medium/hard still read be4dcd8b) and the launch chain takes `BAND=very_hard` (job tag `vhard`) -- 6d498841.
+- 30B-A3B: 8 GPUs, R3, max 500 steps, permanent ckpt every 10 + async S3 upload (no rolling), as the ckpt-fix runs.
+- 4B: 4 GPUs, max 600 steps, rolling ckpt every 5. 1.7B: 2 GPUs, max 600 steps, rolling ckpt every 5.
+`QWEN_SIZE=<30b-a3b|4b|1.7b> BAND=very_hard TOTAL_TRAINING_STEPS=<500|600> ALLOW_BORROWING=true MAX_RELAUNCHES=200 FAILURE_BACKOFF_SECONDS=3600
+MAX_FAILURE_BACKOFF_SECONDS=3600 bash start_qwen3_30b_a3b_medium_rl_supervisor.sh` -> tmux rl-q3-{30b,4b,1p7b}-rl-vhard; checkpoints
+s3://scale-ml/genai/rl-distill/qwen3-<size>-base-rl-full-checkpoints/qwen30b-very_hard-es5 (30B: qwen3-30b-a3b-base-rl-full-checkpoints/...),
+W&B DAPO runs q3-{30b-a3b,4b,1.7b}-very_hard-es5-s42-v1.
+
+---
+
 ## 2026-10-10 — Resample of the 9,182 DeepScaleR questions Qwen3-30B-A3B-Base solved 0/8: 16 new samples each
 
 User request: of the 38,796 deduplicated DeepScaleR questions, 9,182 (23.7%) were 0/8 in the 2026-10-05 30B n=8 run (their responses: mean 1,213 /
