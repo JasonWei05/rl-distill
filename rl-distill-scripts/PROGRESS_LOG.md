@@ -166,6 +166,9 @@ Qwen/Qwen3-1.7B-Base@ea980cb0, FSDP2 DP2 (no offload) + vLLM DP2 (TP 1, 24 GiB K
 MAX_FAILURE_BACKOFF_SECONDS=3600 bash start_qwen3_30b_a3b_medium_rl_supervisor.sh` -> tmux rl-q3-1p7b-rl-{med,hard}; jobs
 job_db4g91bmjdjg07lcrs2g (medium) / job_db4g91bmjdjg088cejmg (hard), p5.48xlarge:2. Checkpoints
 s3://scale-ml/genai/rl-distill/qwen3-1.7b-base-rl-full-checkpoints/qwen30b-<band>-es5, best_hf under .../qwen3-1.7b-base-rl/qwen3-1.7b-<band>-es5/.
+**Hard DONE 2026-10-10 13:08Z** (max steps 600, never early-stopped; ~2.2 min/step): hard-val mean@16 3.8 (step 0) -> 7.7 (110) -> 9.0 (250)
+-> 10.9 (340) -> 12.3 (430) -> best **12.6 @ 550**, 12.2 at 600. best_hf (step 550) + run_outcome verified on S3; the trailing wandb teardown
+ConnectionResetError is harmless (RUN_DONE rc=0). Beats both 1.7B hard distillations (30B RL -> 1.7B 11.3, 4B RL -> 1.7B 11.9).
 
 ---
 
