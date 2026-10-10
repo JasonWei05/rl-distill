@@ -59,6 +59,22 @@ fallback watcher): 8 x TP-1 trace engines, then the same §9 1.7B distill recipe
 Medium-val mean@16 / pass@4 / pass@16: step 250 25.9 / 49.7 / 73.7, 500 26.2 / 50.5 / 74.3, 750 **28.6** / 53.3 / **78.3**, 1000 27.7 / 51.1 / 74.0.
 Same set: 1.7B base 9.1, 30B medium RL -> 1.7B 25.9 (@1000), 1.7B medium RL 29.6 (@280/310, running). The weaker 4B teacher (65.8) gives a
 better 1.7B student than the 30B teacher (75.75) despite a higher KL to its teacher.
+**Hard DONE 2026-10-10 05:40Z** (job_db4kik0c78j0089ltbl0): traces 48,300 rows / 150.1M tokens (20:08-02:51Z); distill ~6.4 s/step on 8 GPUs,
+val KL 0.240 (10) -> 0.136 (100) -> 0.125 (250) -> 0.120 (500) -> 0.118 (750) -> 0.117 (1000). Hard-val mean@16 / pass@4 / pass@16:
+step 250 10.3 / 27.0 / 52.3, 500 11.1 / 28.2 / 52.7, 750 11.5 / 28.8 / 53.0, 1000 **11.9** / 29.6 / **54.0**. Same set: 1.7B base 3.8,
+30B hard RL -> 1.7B 11.3 / 53.0 (@1000), 1.7B hard RL 10.9 (@340, running).
+
+**Teacher -> student grid complete (2026-10-10), in-distribution val mean@16 / pass@16 at the best distill checkpoint:**
+
+| teacher -> student | medium | hard |
+|---|---|---|
+| 30B RL -> 4B | 52.2 / 93.3 | 34.4 / 86.7 |
+| 30B RL -> 1.7B | 25.9 / 75.7 | 11.3 / 53.0 |
+| 4B RL -> 1.7B | **28.6 / 78.3** | **11.9 / 54.0** |
+| direct RL 4B (best) | 65.8 | 41.2 |
+| direct RL 1.7B (running, 2026-10-10 05:40Z) | 30.9 | 10.9 |
+
+The 4B RL teacher beats the 30B RL teacher for a 1.7B student on both bands, despite a weaker teacher (65.8 / 41.2 vs 75.75 / 62.5).
 
 ---
 
