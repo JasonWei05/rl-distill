@@ -20,10 +20,12 @@ from pathlib import Path
 import pandas as pd
 
 REPO_ID = "JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k"
-REVISION = "be4dcd8b1fad7d5eb7bf721f0210baf78277aaa9"
+REVISION = "be4dcd8b1fad7d5eb7bf721f0210baf78277aaa9"   # easy / medium / hard (unchanged files at later revisions too)
+# very_hard (0/8 on the n=8 run, >=1/16 on the 16-sample resample) was added in a later commit
+REVISION_BY_BAND = {"very_hard": "9bec69ca0c432e6286cafdf8b26b4c6aa737084e"}
 INSTRUCTION = "Please reason step by step, and put your final answer within \\boxed{}."
 VALIDATION_REPEATS = 16
-BANDS = ("easy", "medium", "hard")
+BANDS = ("easy", "medium", "hard", "very_hard")
 EXPECTED_COLUMNS = {"uid", "data_source", "prompt", "reward_model", "extra_info"}
 EXPECTED_FILES = {
     "easy": {
@@ -37,6 +39,10 @@ EXPECTED_FILES = {
     "hard": {
         "train": (3000, "a04790ce5c142fdbe50308ccd33bb122ed89b1acb179387592edb50854ff77de"),
         "validation": (300, "21755b21aeb1826482d719f58edb2cdfdc3954473b09c1058a9fd5016cc0b6d7"),
+    },
+    "very_hard": {
+        "train": (3000, "706e4c5d022300ebfffec7832f02bd6ae2395f26e915ad4638e74e1ae7e82d5e"),
+        "validation": (300, "cbe198447d6d95f575510eec39c08968d96379645d15f9bfd3d16069447bed59"),
     },
 }
 
@@ -90,7 +96,7 @@ def prepare_band(data_dir: Path, band: str, *, repeats: int = VALIDATION_REPEATS
     train_path, val_path = output_paths(data_dir, band)
     frames = {}
     for split in ("train", "validation"):
-        source = Path(hf_hub_download(REPO_ID, f"{band}/{split}.parquet", repo_type="dataset", revision=REVISION))
+        source = Path(hf_hub_download(REPO_ID, f"{band}/{split}.parquet", repo_type="dataset", revision=REVISION_BY_BAND.get(band, REVISION)))
         rows, sha = EXPECTED_FILES[band][split]
         if sha256_file(source) != sha:
             raise ValueError(f"published {band}/{split} SHA-256 mismatch")
@@ -119,7 +125,7 @@ def main() -> None:
     args.data_dir.mkdir(parents=True, exist_ok=True)
     with (args.data_dir / ".deepscaler_qwen3_30b_difficulty.lock").open("w") as lock_handle:
         fcntl.flock(lock_handle, fcntl.LOCK_EX)
-        for band in args.bands or BANDS:
+        for band in args.bands or BANDS[:3]:
             prepare_band(args.data_dir, band, repeats=args.validation_repeats)
 
 

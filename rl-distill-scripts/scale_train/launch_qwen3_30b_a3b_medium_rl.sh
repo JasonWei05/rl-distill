@@ -26,7 +26,8 @@ BAND="${BAND:-medium}"
 case "${BAND}" in
   medium) BAND_SHORT=med ;;
   hard) BAND_SHORT=hard ;;
-  *) echo "FATAL: BAND must be medium or hard, got ${BAND}" >&2; exit 2 ;;
+  very_hard) BAND_SHORT=vhard ;;
+  *) echo "FATAL: BAND must be medium, hard or very_hard, got ${BAND}" >&2; exit 2 ;;
 esac
 RUN_TAG="${RUN_TAG:-es5}"   # -> run name DAPO-qwen3-<size>-base-pt-DeepScaleR-qwen30b-medium-seed42-${RUN_TAG}
 TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-400}"

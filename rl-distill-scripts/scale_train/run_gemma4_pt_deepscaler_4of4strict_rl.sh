@@ -68,13 +68,13 @@ DIFFICULTY_DATASET_SOURCE="${DIFFICULTY_DATASET_SOURCE:-legacy}"
 DIFFICULTY_DATASET="${DIFFICULTY_DATASET:-strict4of4}"
 if [ "${DIFFICULTY_DATASET_SOURCE}" = qwen3_30b_bands ]; then
   case "${DIFFICULTY_DATASET}" in
-    easy|medium|hard)
+    easy|medium|hard|very_hard)
       DATASET_TAG="qwen30b-${DIFFICULTY_DATASET}"
       TRAIN_BASENAME="deepscaler_qwen3_30b_${DIFFICULTY_DATASET}_train.parquet"
       IN_DIST_VAL_BASENAME="deepscaler_qwen3_30b_${DIFFICULTY_DATASET}_val300_x16.parquet"
       ;;
     *)
-      echo "FATAL: qwen3_30b_bands requires DIFFICULTY_DATASET=easy, medium, or hard; got ${DIFFICULTY_DATASET}" >&2
+      echo "FATAL: qwen3_30b_bands requires DIFFICULTY_DATASET=easy, medium, hard, or very_hard; got ${DIFFICULTY_DATASET}" >&2
       exit 2
       ;;
   esac

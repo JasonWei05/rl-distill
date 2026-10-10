@@ -13,7 +13,8 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 IMG="${ST_IMAGE:-692474966980.dkr.ecr.us-west-2.amazonaws.com/scale_train/shared/training/tmp:20260829-002920.cd13c11a-e0f3-4f65-a74b-0e0c5d72d58a}"
 RUN_TAG="${RUN_TAG:-es5}"; TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-400}"; QWEN_SIZE="${QWEN_SIZE:-30b-a3b}"; BAND="${BAND:-medium}"
-case "${BAND}" in medium) BAND_SHORT=med ;; hard) BAND_SHORT=hard ;; *) echo "FATAL: BAND must be medium or hard" >&2; exit 2 ;; esac
+case "${BAND}" in medium) BAND_SHORT=med ;; hard) BAND_SHORT=hard ;;
+  very_hard) BAND_SHORT=vhard ;; *) echo "FATAL: BAND must be medium, hard or very_hard" >&2; exit 2 ;; esac
 case "${QWEN_SIZE}" in
   30b-a3b) SLUG=qwen3-30b-a3b; name=q3-30b-rl-${BAND_SHORT}; GPUS=8 ;;
   4b) SLUG=qwen3-4b; name=q3-4b-rl-${BAND_SHORT}; GPUS=4 ;;
