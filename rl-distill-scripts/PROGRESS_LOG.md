@@ -34,6 +34,10 @@ W&B DAPO runs q3-{30b-a3b,4b,1.7b}-very_hard-es5-s42-v1.
 **1.7B DONE 2026-10-11 12:19Z** (max steps 600, never early-stopped; job_db55td0c78j0089ltei0): very_hard-val mean@16 3.1 (step 0) ->
 6.0 (90) -> 9.1 (250) -> 10.6 (490) -> **10.8 @550** (best), 10.0 @600. best_hf (step 550) at
 s3://scale-ml/genai/rl-distill/qwen3-1.7b-base-rl/qwen3-1.7b-very_hard-es5/best_hf, run completion receipt verified.
+**4B DONE 2026-10-11 18:51Z** (max steps 600, never early-stopped; job_db55td3mjdjg088cenjg): very_hard-val mean@16 6.7 (step 0) ->
+15.2 (150) -> 19.7 (250) -> 23.75 (430) -> **24.3 @540** (best), 23.0 @600. best_hf (step 540) at
+s3://scale-ml/genai/rl-distill/qwen3-4b-base-rl/qwen3-4b-very_hard-es5/best_hf, run completion receipt verified (the end-of-run
+traceback is the usual harmless wandb teardown ConnectionResetError; RUN_DONE rc=0).
 Progress vs hard at matched steps (own val sets): 30B +9.2 vs +16.2 by step 80, 4B +10.7 vs +22.4 by step 200, 1.7B +3.7 vs +5.1 by 200;
 per-step wall clock equal or faster. 30B MoE router metrics (all bands): dead_expert_frac (per micro-batch, per layer) ~8% at step 1 ->
 ~11% by step 50-150 then flat; router entropy flat 4.21-4.24; no collapse (no balancing loss in RL).
