@@ -46,6 +46,19 @@ reached 62.5 / 41.2 / 12.6 from 13.6 / 8.6 / 3.8. All three still creeping up at
 Progress vs hard at matched steps (own val sets): 30B +9.2 vs +16.2 by step 80, 4B +10.7 vs +22.4 by step 200, 1.7B +3.7 vs +5.1 by 200;
 per-step wall clock equal or faster. 30B MoE router metrics (all bands): dead_expert_frac (per micro-batch, per layer) ~8% at step 1 ->
 ~11% by step 50-150 then flat; router entropy flat 4.21-4.24; no collapse (no balancing loss in RL).
+Plateau check: val flat for the last 100-200 steps (30B 37.1-39.5 since 380, 4B 22.3-24.3 since 380, 1.7B 10.0-10.8 since 480) while
+train acc kept rising (30B 57 -> 61, 4B 31 -> 42, 1.7B 10 -> 14 over the last ~250 steps) -- ~11-13 epochs over the 3,000 train q.
+The 1-point tolerance resets the miss streak, so a flat plateau never trips early stopping.
+
+**+100-step continuations LAUNCHED 2026-10-12 17:38Z** (user request: 100 more steps or until early stopping, borrowing true).
+Same S3 prefixes / W&B ids, exact resume from the final full checkpoint (Adam, LR = constant 1e-6, dataloader cursor, early-stopping
+history incl. the all-time best). The first-run `run_complete.json` (which makes the run-file exit RUN_ALREADY_COMPLETE) was moved,
+with run_outcome.json and the best_hf marker, to `<ckpt prefix>/archive_first_run/`; best_hf is republished at the end (all-time best).
+`QWEN_SIZE=<size> BAND=very_hard TOTAL_TRAINING_STEPS=<600|700|700> SUP_TAG=-ext100 ALLOW_BORROWING=true MAX_RELAUNCHES=200
+FAILURE_BACKOFF_SECONDS=3600 MAX_FAILURE_BACKOFF_SECONDS=3600 [30B: ROLLING_CHECKPOINT_ENABLED=False ASYNC_CHECKPOINT_UPLOAD=True]
+bash start_qwen3_30b_a3b_medium_rl_supervisor.sh`; state `.scale_train_supervisors/q3-*-rl-vhard-20261012-ext100`.
+Jobs: 30B job_db6hm7oc78j0089lto80 (500 -> 600), 4B job_db6hm7rmjdjg088cf01g (600 -> 700, 2 misses carried), 1.7B
+job_db6hm7oc78j007hgltsg (600 -> 700).
 
 ---
 
