@@ -38,6 +38,11 @@ s3://scale-ml/genai/rl-distill/qwen3-1.7b-base-rl/qwen3-1.7b-very_hard-es5/best_
 15.2 (150) -> 19.7 (250) -> 23.75 (430) -> **24.3 @540** (best), 23.0 @600. best_hf (step 540) at
 s3://scale-ml/genai/rl-distill/qwen3-4b-base-rl/qwen3-4b-very_hard-es5/best_hf, run completion receipt verified (the end-of-run
 traceback is the usual harmless wandb teardown ConnectionResetError; RUN_DONE rc=0).
+**30B-A3B DONE 2026-10-12 10:50Z** (max steps 500, never early-stopped; job_db55td3mjdjg088cenj0): very_hard-val mean@16 11.2 (step 0)
+-> 20.4 (80) -> 27.8 (150) -> 33.5 (250) -> 38.5 (350) -> **39.5 @460** (best), 39.1 @500. best_hf (step 460) at
+s3://scale-ml/genai/rl-distill/qwen3-30b-a3b-base-rl/qwen3-30b-a3b-very_hard-es5/best_hf, run completion receipt verified.
+**very_hard summary (best val mean@16, step 0 -> best):** 30B 11.2 -> 39.5, 4B 6.7 -> 24.3, 1.7B 3.1 -> 10.8; on hard the same models
+reached 62.5 / 41.2 / 12.6 from 13.6 / 8.6 / 3.8. All three still creeping up at the step cap (none early-stopped).
 Progress vs hard at matched steps (own val sets): 30B +9.2 vs +16.2 by step 80, 4B +10.7 vs +22.4 by step 200, 1.7B +3.7 vs +5.1 by 200;
 per-step wall clock equal or faster. 30B MoE router metrics (all bands): dead_expert_frac (per micro-batch, per layer) ~8% at step 1 ->
 ~11% by step 50-150 then flat; router entropy flat 4.21-4.24; no collapse (no balancing loss in RL).
