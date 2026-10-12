@@ -59,6 +59,13 @@ FAILURE_BACKOFF_SECONDS=3600 MAX_FAILURE_BACKOFF_SECONDS=3600 [30B: ROLLING_CHEC
 bash start_qwen3_30b_a3b_medium_rl_supervisor.sh`; state `.scale_train_supervisors/q3-*-rl-vhard-20261012-ext100`.
 Jobs: 30B job_db6hm7oc78j0089lto80 (500 -> 600), 4B job_db6hm7rmjdjg088cf01g (600 -> 700, 2 misses carried), 1.7B
 job_db6hm7oc78j007hgltsg (600 -> 700).
+**Continuations DONE 2026-10-12/13** (all receipts verified; best_hf republished = all-time best):
+- 30B: 38.2 / 37.4 / 37.7 / 37.9 / 38.3 @510-550 -> EARLY-STOPPED @550 (5 misses vs 39.5). Best unchanged **39.5 @460**.
+- 4B: 23.8, **24.4 @620** (new best, +0.1), then 23.3 / 23.4 / 23.5 / 23.0 / 23.0 / 22.3 / 23.2 / 22.7 -> EARLY-STOPPED @700 (5 misses).
+- 1.7B: 10.3 / 10.3 / 10.7 / 10.6 / 11.3 / 10.9 / 10.7 / **11.5 @680** (new best, +0.7) / 10.9 / 10.8 @700 (max steps, 0 misses).
+Takeaway: confirmed plateau -- +0.0 / +0.1 / +0.7 for 30B / 4B / 1.7B; more gains need more (fresh) train questions, not steps.
+(1.7B supervisor briefly logged RELAUNCHING_MISSING_COMPLETION -- it polled seconds before the receipt upload; it re-verified
+COMPLETED_RECEIPTS 11 s later with no relaunch.)
 
 ---
 
