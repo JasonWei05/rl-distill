@@ -14,7 +14,9 @@ case "${TEACHER_SPEC}" in
   q30bh-hard)   name=q3-30bh-dist-${stag}; FAMILY=qwen3-30b-rl ;;
   q4bm-medium)  name=q3-4bm-dist-${stag};  FAMILY=qwen3-4b-rl ;;   # 4B medium RL teacher (step 510), use STUDENT=q1p7b
   q4bh-hard)    name=q3-4bh-dist-${stag};  FAMILY=qwen3-4b-rl ;;   # 4B hard RL teacher (step 560), use STUDENT=q1p7b
-  *) echo "FATAL: TEACHER_SPEC must be q30bm-medium|q30bh-hard|q4bm-medium|q4bh-hard" >&2; exit 2 ;;
+  q30bvh-very_hard) name=q3-30bvh-dist-${stag}; FAMILY=qwen3-30b-rl ;;   # 30B very_hard RL teacher (step 460)
+  q4bvh-very_hard)  name=q3-4bvh-dist-${stag};  FAMILY=qwen3-4b-rl ;;    # 4B very_hard RL teacher (step 620), use STUDENT=q1p7b
+  *) echo "FATAL: TEACHER_SPEC must be q30bm-medium|q30bh-hard|q4bm-medium|q4bh-hard|q30bvh-very_hard|q4bvh-very_hard" >&2; exit 2 ;;
 esac
 EVAL_S3=s3://scale-ml/genai/rl-distill/${FAMILY}-distill-evals-v1/${TEACHER_SPEC}-to-${STUDENT}-bs128-s1000-lr2e-6
 # ScaleTrain can report a preempted borrowing pod as COMPLETED: done = all four eval summaries on S3, otherwise relaunch.

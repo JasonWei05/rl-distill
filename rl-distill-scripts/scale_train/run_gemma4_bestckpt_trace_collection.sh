@@ -77,6 +77,10 @@ case "${TRACE_SPEC}" in
   # S3 full checkpoints only (RUN_KEY is the S3 run prefix under the 4B full-checkpoint base). 16 train samples.
   q4bm-medium) RUN_KEY=qwen30b-medium-es5; BAND=medium; BEST_STEP=510; DIRECTION=q4bm_medium_r510_to_1p7b; TEACHER_HF_REPO=""; TEACHER_HF_REVISION=""; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-base-rl-full-checkpoints}" ;;
   q4bh-hard)   RUN_KEY=qwen30b-hard-es5;   BAND=hard;   BEST_STEP=560; DIRECTION=q4bh_hard_r560_to_1p7b;   TEACHER_HF_REPO=""; TEACHER_HF_REVISION=""; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-base-rl-full-checkpoints}" ;;
+  # very_hard band RL (es5 runs incl. the +100-step continuations): 30B best val mean@16 0.3946 @ 460 (early stop @550), 4B best 0.2444
+  # @ 620 (early stop @700); S3 full checkpoints only. 16 train samples.
+  q30bvh-very_hard) RUN_KEY=qwen30b-very_hard-es5; BAND=very_hard; BEST_STEP=460; DIRECTION=q30bvh_very_hard_r460_to_4b; TEACHER_HF_REPO=""; TEACHER_HF_REVISION=""; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-30b-a3b-base-rl-full-checkpoints}" ;;
+  q4bvh-very_hard)  RUN_KEY=qwen30b-very_hard-es5; BAND=very_hard; BEST_STEP=620; DIRECTION=q4bvh_very_hard_r620_to_1p7b; TEACHER_HF_REPO=""; TEACHER_HF_REVISION=""; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-base-rl-full-checkpoints}" ;;
   *)
     echo "FATAL: unsupported TRACE_SPEC=${TRACE_SPEC}" >&2
     exit 2
@@ -92,6 +96,8 @@ if [[ ${RUN_KEY} == qwen3-* || ${RUN_KEY} == qwen30b-* ]]; then
   VOCAB_ARGS=(--restrict-to-tokenizer-vocab)   # LM head is padded past the tokenizer; never sample/record padding ids
   DATA_PREP_SCRIPT=rl-distill-scripts/data/prepare_deepscaler_qwen3_30b_difficulty_rl_data.py; DATA_PREFIX=deepscaler_qwen3_30b
   DEFAULT_DATASET_REPO=JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k; DEFAULT_DATASET_REVISION=be4dcd8b1fad7d5eb7bf721f0210baf78277aaa9
+  # very_hard was added in a later dataset commit (the data prep reads it from there too)
+  [[ ${BAND} == very_hard ]] && DEFAULT_DATASET_REVISION=9bec69ca0c432e6286cafdf8b26b4c6aa737084e
 else
   CHAT_TEMPLATE="${PROJECT_ROOT}/rl-distill-scripts/data/gemma3_it_fewshot_math.jinja"
   STOP_STRINGS='<end_of_turn>,<start_of_turn>'

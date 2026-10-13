@@ -29,7 +29,9 @@ case "${TEACHER_SPEC}" in
   q30bh-hard)   BAND=hard;   FAMILY=qwen3-30b-rl; TRACE_TP_DEFAULT=2 ;;
   q4bm-medium)  BAND=medium; FAMILY=qwen3-4b-rl;  TRACE_TP_DEFAULT=1 ;;
   q4bh-hard)    BAND=hard;   FAMILY=qwen3-4b-rl;  TRACE_TP_DEFAULT=1 ;;
-  *) echo "FATAL: TEACHER_SPEC must be q30bm-medium|q30bh-hard|q4bm-medium|q4bh-hard" >&2; exit 2 ;;
+  q30bvh-very_hard) BAND=very_hard; FAMILY=qwen3-30b-rl; TRACE_TP_DEFAULT=2 ;;
+  q4bvh-very_hard)  BAND=very_hard; FAMILY=qwen3-4b-rl;  TRACE_TP_DEFAULT=1 ;;
+  *) echo "FATAL: TEACHER_SPEC must be q30bm-medium|q30bh-hard|q4bm-medium|q4bh-hard|q30bvh-very_hard|q4bvh-very_hard" >&2; exit 2 ;;
 esac
 if [ -f .env ]; then set -a; source .env; set +a; fi
 : "${HF_TOKEN:?HF_TOKEN missing (forward it with --dotenv-keys)}"
@@ -94,8 +96,10 @@ VAL_PARQUET="${WORK}/${BAND}_validation.parquet"
 import shutil, sys
 from huggingface_hub import hf_hub_download
 # the Qwen3-30B medium validation split = the RL validation set (raw problems; the generator appends the boxed instruction)
+# very_hard was added in a later dataset commit (easy/medium/hard files are unchanged there too)
+revision = {"very_hard": "9bec69ca0c432e6286cafdf8b26b4c6aa737084e"}.get(sys.argv[2], "be4dcd8b1fad7d5eb7bf721f0210baf78277aaa9")
 p = hf_hub_download("JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k", f"{sys.argv[2]}/validation.parquet", repo_type="dataset",
-                    revision="be4dcd8b1fad7d5eb7bf721f0210baf78277aaa9")
+                    revision=revision)
 shutil.copy(p, sys.argv[1])
 PY
 DEFAULT_INSTRUCTION='Please reason step by step, and put your final answer within \boxed{}.'
