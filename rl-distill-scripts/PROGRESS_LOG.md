@@ -18,6 +18,23 @@ The trailing wandb teardown ConnectionResetError is harmless (run synced; RUN_DO
 
 ---
 
+## 2026-10-13 — very_hard RL teachers -> students: 30B -> 4B, 30B -> 1.7B, 4B -> 1.7B (traces + distill + evals) LAUNCHED
+
+User request: make trace data from the best 30B and best 4B very_hard RL checkpoints and distill 30B -> 4B / 1.7B and 4B -> 1.7B,
+same grid as medium/hard. New specs (c4e5d4b6): q30bvh-very_hard (teacher .../qwen3-30b-a3b-base-rl-full-checkpoints/qwen30b-very_hard-es5/
+global_step_460, val 0.3946) and q4bvh-very_hard (.../qwen3-4b-base-rl-full-checkpoints/qwen30b-very_hard-es5/global_step_620, val 0.2444);
+very_hard data at dataset revision 9bec69ca (traces + stage-3 val download). Same trace contract (3000 train q x 16 + 300 val q x 1,
+top-128, temp 1, 8192 tokens), same §9 distill recipe (bs 128, 2e-6 -> 2e-7, 100 warmup, 1000 steps, ckpt every 250), n=16 evals of
+steps 250/500/750/1000 on the very_hard validation split. Borrowing off + 60-min fallback watcher (tmux borrowing-fallback).
+- q3-30bvh-dist-4b: 8 GPUs, traces on 8 x TP-1 engines (MAX_NUM_SEQS=48, util 0.92, pinned engine identity, as q30bh-hard), then 4B distill.
+- q3-4bvh-dist-1p7b: 8 GPUs, traces on 8 x TP-1 engines, then 1.7B distill.
+- q3-30bvh-dist-1p7b: 2 GPUs, reuses the q30bvh bundle; started by tmux `wait-q30bvh-1p7b` once its COMPLETE.json is on S3.
+Outputs: traces s3://scale-ml/genai/rl-distill/<qwen3-30b-rl|qwen3-4b-rl>-traces-topk128-v1/<spec>/, ckpts .../<family>-distill-ckpts-v1/
+<spec>-to-<q4b|q1p7b>-bs128-s1000-lr2e-6/, evals .../<family>-distill-evals-v1/<same>/step_*/summary.json. References on very_hard val
+(mean@16): 30B teacher 39.5, 4B teacher / 4B RL best 24.4, 1.7B RL best 12.4, bases 11.2 / 6.7 / 3.1 (30B / 4B / 1.7B).
+
+---
+
 ## 2026-10-10 — Qwen3 30B-A3B / 4B / 1.7B DAPO RL on the new `very_hard` band LAUNCHED (borrowing on)
 
 User request: run all three sizes on the `very_hard` config exactly as before, borrowing true. Same recipe as the medium/hard runs (GRPO
