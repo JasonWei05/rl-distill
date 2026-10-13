@@ -66,6 +66,10 @@ job_db6hm7oc78j007hgltsg (600 -> 700).
 Takeaway: confirmed plateau -- +0.0 / +0.1 / +0.7 for 30B / 4B / 1.7B; more gains need more (fresh) train questions, not steps.
 (1.7B supervisor briefly logged RELAUNCHING_MISSING_COMPLETION -- it polled seconds before the receipt upload; it re-verified
 COMPLETED_RECEIPTS 11 s later with no relaunch.)
+**1.7B 700 -> 1000 DONE 2026-10-13** (user request; same procedure, step-700 receipt moved to `<ckpt>/archive_ext100/`; SUP_TAG=-to1000,
+job via `rl-q3-1p7b-rl-vhard`, max steps 1000, never early-stopped -- longest streak 4 misses @870-900): best **12.4 @810** (best_hf),
+11.3 @1000. Mean val per 100 steps: 10.8 (610-700) -> 11.0 (710-800) -> 11.3 (810-900) -> 11.5 (910-1000), i.e. ~+0.25/100 steps,
+while train acc went 13.7 (551-600) -> 17.5 (701-750) -> 27.2 (951-1000) -- mostly memorizing the 3,000 train q (~21 epochs).
 
 ---
 
