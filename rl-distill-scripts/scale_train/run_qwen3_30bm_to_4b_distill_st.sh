@@ -29,7 +29,7 @@ case "${TEACHER_SPEC}" in
   q30bh-hard)   BAND=hard;   FAMILY=qwen3-30b-rl; TRACE_TP_DEFAULT=2 ;;
   q4bm-medium)  BAND=medium; FAMILY=qwen3-4b-rl;  TRACE_TP_DEFAULT=1 ;;
   q4bh-hard)    BAND=hard;   FAMILY=qwen3-4b-rl;  TRACE_TP_DEFAULT=1 ;;
-  q30bvh-very_hard) BAND=very_hard; FAMILY=qwen3-30b-rl; TRACE_TP_DEFAULT=2 ;;
+  q30bvh-very_hard) BAND=very_hard; FAMILY=qwen3-30b-rl; TRACE_TP_DEFAULT=1 ;;   # TP-1 engines (8 per node), as the q30bh-hard cutover
   q4bvh-very_hard)  BAND=very_hard; FAMILY=qwen3-4b-rl;  TRACE_TP_DEFAULT=1 ;;
   *) echo "FATAL: TEACHER_SPEC must be q30bm-medium|q30bh-hard|q4bm-medium|q4bh-hard|q30bvh-very_hard|q4bvh-very_hard" >&2; exit 2 ;;
 esac
