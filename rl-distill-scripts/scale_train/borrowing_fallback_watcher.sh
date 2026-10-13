@@ -14,6 +14,7 @@ S=rl-distill-scripts/scale_train
 # name | supervisor state dir (borrowing false) | restart command (borrowing true)
 JOBS=(
   "q3-30bvh-dist-4b|${SUP_ROOT}/q3-30bvh-dist-4b-20261013-r2|TEACHER_SPEC=q30bvh-very_hard GPUS=8 EXTRA_ENV_VARS=TRACE_TP=1,MAX_NUM_SEQS=48,GPU_MEMORY_UTILIZATION=0.92,TRACE_PIN_ENGINE_IDENTITY=1,TRACE_VALIDATION_WORKERS=16 ${RETRY} bash ${S}/start_qwen3_30bm_to_4b_distill_supervisor.sh"
+  "q3-30bvh-dist-1p7b|${SUP_ROOT}/q3-30bvh-dist-1p7b-20261013|TEACHER_SPEC=q30bvh-very_hard STUDENT=q1p7b GPUS=2 ${RETRY} bash ${S}/start_qwen3_30bm_to_4b_distill_supervisor.sh"
   "q3-4bvh-dist-1p7b|${SUP_ROOT}/q3-4bvh-dist-1p7b-20261013-r2|TEACHER_SPEC=q4bvh-very_hard STUDENT=q1p7b GPUS=8 EXTRA_ENV_VARS=TRACE_VALIDATION_WORKERS=16 ${RETRY} bash ${S}/start_qwen3_30bm_to_4b_distill_supervisor.sh"
   "q3-4bm-dist-1p7b|${SUP_ROOT}/q3-4bm-dist-1p7b-20261009|TEACHER_SPEC=q4bm-medium STUDENT=q1p7b GPUS=8 EXTRA_ENV_VARS=TRACE_VALIDATION_WORKERS=16 ${RETRY} bash ${S}/start_qwen3_30bm_to_4b_distill_supervisor.sh"
   "q3-4bh-dist-1p7b|${SUP_ROOT}/q3-4bh-dist-1p7b-20261009|TEACHER_SPEC=q4bh-hard STUDENT=q1p7b GPUS=8 EXTRA_ENV_VARS=TRACE_VALIDATION_WORKERS=16 ${RETRY} bash ${S}/start_qwen3_30bm_to_4b_distill_supervisor.sh"
