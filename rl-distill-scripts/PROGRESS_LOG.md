@@ -18,7 +18,7 @@ The trailing wandb teardown ConnectionResetError is harmless (run synced; RUN_DO
 
 ---
 
-## 2026-10-13 — very_hard RL teachers -> students: 30B -> 4B, 30B -> 1.7B, 4B -> 1.7B (traces + distill + evals) 2/3 DONE
+## 2026-10-13 — very_hard RL teachers -> students: 30B -> 4B, 30B -> 1.7B, 4B -> 1.7B (traces + distill + evals) DONE
 
 User request: make trace data from the best 30B and best 4B very_hard RL checkpoints and distill 30B -> 4B / 1.7B and 4B -> 1.7B,
 same grid as medium/hard. New specs (c4e5d4b6): q30bvh-very_hard (teacher .../qwen3-30b-a3b-base-rl-full-checkpoints/qwen30b-very_hard-es5/
@@ -40,10 +40,12 @@ Results (very_hard val, 300 q x 16; mean@16 / pass@16):
 |---|---|---|---|---|---|---|
 | 30B -> 4B | 14.9 / 62.7 | 18.1 / 65.3 | 18.9 / 66.3 | **19.6** / 61.7 | 24.4 | 39.5 |
 | 4B -> 1.7B | 8.8 / 47.0 | 9.5 / 46.3 | 9.2 / 43.0 | **10.0** / 46.0 | 12.4 | 24.4 |
-| 30B -> 1.7B | (running) | | | | 12.4 | 39.5 |
+| 30B -> 1.7B | 6.5 / 40.7 | 6.7 / 40.0 | **7.5** / 42.3 | 7.3 / 40.0 | 12.4 | 39.5 |
 
 Both finished distills land below direct RL on the same student (4B: 19.6 vs 24.4; 1.7B: 10.0 vs 12.4), as on medium/hard; still
 rising slowly at step 1000 (mean@16), pass@16 flat-to-down after step 750.
+30B -> 1.7B (done 02:49Z) is the weakest: 7.5 best vs 10.0 from the 4B teacher -- the bigger teacher is the worse 1.7B
+teacher, same ordering as medium/hard (25.9 vs 28.6, 11.3 vs 11.9) but a wider gap on very_hard. All 3 runs COMPLETED_RECEIPTS.
 
 ---
 
