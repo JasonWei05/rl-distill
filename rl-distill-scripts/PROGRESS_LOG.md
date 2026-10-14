@@ -46,6 +46,19 @@ Both finished distills land below direct RL on the same student (4B: 19.6 vs 24.
 rising slowly at step 1000 (mean@16), pass@16 flat-to-down after step 750.
 30B -> 1.7B (done 02:49Z) is the weakest: 7.5 best vs 10.0 from the 4B teacher -- the bigger teacher is the worse 1.7B
 teacher, same ordering as medium/hard (25.9 vs 28.6, 11.3 vs 11.9) but a wider gap on very_hard. All 3 runs COMPLETED_RECEIPTS.
+pass@16 comparison (10-14): same stage-3 protocol run locally on GPU 5 for the RL best checkpoints + bases
+(`run_qwen3_very_hard_val_evals_local.sh`, s3://scale-ml/genai/rl-distill/qwen3-very_hard-val-evals-v1/<tag>/summary.json;
+RL logs only have mean@16 + bootstrap best@16). mean@16 / pass@16:
+
+| Model | 30B | 4B | 1.7B |
+|---|---|---|---|
+| base | 9.2 / 68.7 | 6.8 / 50.7 | 3.3 / 30.3 |
+| RL best (460 / 620 / 810) | 38.4 / 76.3 | 23.7 / 63.3 | 12.1 / 42.7 |
+| best distill (by pass@16) | - | 30B->4B s750 18.9 / 66.3 | 4B->1.7B s250 8.8 / 47.0; 30B->1.7B s750 7.5 / 42.3 |
+
+pass@16: distill ~= RL for 4B (+3.0) and for 1.7B (+4.3 from the 4B teacher, -0.4 from 30B); 1 SE on 300 q is ~2.8 pt, so
+"comparable, not lower" rather than a clear win. RL raises pass@16 over base here (+8 / +13 / +12), unlike the usual pass@k
+collapse -- very_hard has many base-0/16 questions RL can unlock. mean@16 RL lead unchanged (RL eval 38.4/23.7/12.1 vs logged 39.5/24.4/12.4).
 
 ---
 
