@@ -59,6 +59,12 @@ RL logs only have mean@16 + bootstrap best@16). mean@16 / pass@16:
 pass@16: distill ~= RL for 4B (+3.0) and for 1.7B (+4.3 from the 4B teacher, -0.4 from 30B); 1 SE on 300 q is ~2.8 pt, so
 "comparable, not lower" rather than a clear win. RL raises pass@16 over base here (+8 / +13 / +12), unlike the usual pass@k
 collapse -- very_hard has many base-0/16 questions RL can unlock. mean@16 RL lead unchanged (RL eval 38.4/23.7/12.1 vs logged 39.5/24.4/12.4).
+Medium + hard re-evals (10-14, same script generalized to `BAND=`, GPUs 1 / 5 locally; s3://.../qwen3-<band>-val-evals-v1/):
+base 30B / 4B / 1.7B medium 29.3/95.7, 21.4/83.3, 9.6/55.7; hard 13.8/84.7, 9.0/54.0, 3.8/32.3. RL best medium 74.3/96.3 (@320),
+65.5/93.7 (@510), 33.1/80.0 (@520); hard 61.4/89.0 (@410), 40.6/85.7 (@560), 12.1/51.0 (@550). Every RL re-eval is 0.3-1.5 pt below the
+logged best (max-of-~50-evals selection bias; one eval's sampling SE ~0.4-0.5). pass@16: RL >= distill on medium (4B 93.7 vs 93.3,
+1.7B 80.0 vs 78.3), distill >= RL on hard (4B 86.7 vs 85.7, 1.7B 54.0 vs 51.0), all within noise. Within-1-SE checkpoint re-evals for
+4B / 1.7B (`run_qwen3_rl_ckpt_candidates_local.sh`) were started then stopped at the user's request (none completed).
 
 ---
 
