@@ -9,7 +9,7 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
-## 2026-10-19 — Qwen math suite on all remaining RL-best / distilled / base models (+ very_hard val) LAUNCHED
+## 2026-10-19 — Qwen math suite on all remaining RL-best / distilled / base models (+ very_hard val) DONE
 
 User request: the full math suite (the Qwen analogue of the Gemma §8 math evals) for every new best-RL and distilled Qwen model. Same
 protocol as the 2026-10-09 4B suite below (0-shot ChatML + boxed instruction, temp 1, 8192 tokens, strict last-box grading; n=16, AIME 32)
@@ -24,6 +24,64 @@ Model registry `scale_train/qwen3_math_suite_models.sh` (b7336bb1): RL best = ru
   4B -> 1.7B s1000 x3 bands. 73 tasks (q30bm-to-q1p7b-s1000 already had 7 sets).
 - Both priority high, borrowing false (not on the fallback watcher, per user), supervisors tmux `rl-q3-ms-{q4b,q1p7b}`, state
   `.scale_train_supervisors/q3-ms-*-20261019/`. Results: s3://scale-ml/genai/rl-distill/qwen3-math-suite-v1/<model>/<set>/summary.json.
+
+**DONE 2026-10-19 17:46Z** (q4b 15:22-16:28Z, q1p7b 15:07-17:46Z, 4 GPUs each). Rows include the 2026-10-09 models; avg = plain mean over
+the 8 sets; n = 16, AIME 32.
+
+**4B mean@n**
+| model | easy | medium | hard | very_hard | gsm8k | math500 | aime2025 | aime2026 | avg |
+|---|---|---|---|---|---|---|---|---|---|
+| q4b-base | 44.8 | 21.0 | 8.3 | 6.9 | 42.2 | 39.9 | 2.8 | 2.7 | 21.1 |
+| q4b-rl-medium-best | 89.1 | 64.5 | 37.4 | 25.5 | 93.3 | 83.7 | 17.3 | 14.0 | 53.1 |
+| q4b-rl-hard-best | 87.6 | 65.2 | 39.4 | 29.2 | 92.8 | 84.0 | 19.1 | 15.8 | 54.1 |
+| q4b-rl-very_hard-best | 84.3 | 55.5 | 30.6 | 23.8 | 92.5 | 77.7 | 8.9 | 10.0 | 47.9 |
+| q30bm-to-q4b-s1000 | 85.2 | 52.1 | 27.1 | 20.6 | 91.8 | 77.4 | 10.7 | 9.1 | 46.7 |
+| q30bh-to-q4b-s1000 | 85.2 | 57.3 | 34.4 | 23.2 | 91.6 | 81.4 | 16.1 | 11.2 | 50.1 |
+| q30bvh-to-q4b-s1000 | 79.9 | 46.8 | 22.3 | 19.6 | 90.5 | 73.5 | 7.7 | 6.6 | 43.4 |
+
+**1.7B mean@n**
+| model | easy | medium | hard | very_hard | gsm8k | math500 | aime2025 | aime2026 | avg |
+|---|---|---|---|---|---|---|---|---|---|
+| q1p7b-base | 31.4 | 9.6 | 3.8 | 3.3 | 40.3 | 30.1 | 1.0 | 0.5 | 15.0 |
+| q1p7b-rl-medium-best | 70.7 | 33.1 | 14.6 | 12.1 | 83.1 | 66.2 | 5.4 | 2.5 | 36.0 |
+| q1p7b-rl-hard-best | 66.4 | 28.4 | 12.1 | 11.2 | 80.9 | 62.6 | 2.7 | 3.3 | 33.5 |
+| q1p7b-rl-very_hard-best | 62.5 | 27.8 | 10.4 | 12.1 | 80.4 | 60.1 | 2.0 | 2.0 | 32.2 |
+| q30bm-to-q1p7b-s1000 | 64.2 | 25.9 | 11.5 | 8.8 | 80.2 | 61.4 | 2.9 | 2.1 | 32.1 |
+| q30bh-to-q1p7b-s1000 | 61.8 | 24.9 | 11.3 | 9.0 | 79.1 | 62.3 | 3.8 | 2.4 | 31.8 |
+| q30bvh-to-q1p7b-s1000 | 56.8 | 20.9 | 9.2 | 7.4 | 76.9 | 54.7 | 2.2 | 1.5 | 28.7 |
+| q4bm-to-q1p7b-s1000 | 67.2 | 27.8 | 12.1 | 9.4 | 82.6 | 64.9 | 3.5 | 2.5 | 33.7 |
+| q4bh-to-q1p7b-s1000 | 64.2 | 26.4 | 11.9 | 9.7 | 81.0 | 63.4 | 4.2 | 2.0 | 32.8 |
+| q4bvh-to-q1p7b-s1000 | 61.1 | 25.3 | 10.9 | 10.0 | 78.6 | 59.7 | 2.5 | 2.2 | 31.3 |
+
+**4B pass@n**
+| model | easy | medium | hard | very_hard | gsm8k | math500 | aime2025 | aime2026 | avg |
+|---|---|---|---|---|---|---|---|---|---|
+| q4b-base | 97.3 | 83.3 | 52.3 | 50.7 | 97.3 | 90.4 | 30.0 | 16.7 | 64.8 |
+| q4b-rl-medium-best | 98.7 | 95.3 | 78.0 | 68.7 | 98.3 | 93.4 | 36.7 | 30.0 | 74.9 |
+| q4b-rl-hard-best | 98.3 | 94.7 | 83.7 | 74.7 | 98.4 | 95.4 | 53.3 | 36.7 | 79.4 |
+| q4b-rl-very_hard-best | 98.0 | 89.7 | 71.7 | 63.7 | 98.0 | 92.6 | 30.0 | 33.3 | 72.1 |
+| q30bm-to-q4b-s1000 | 99.7 | 93.3 | 73.7 | 67.7 | 98.2 | 94.2 | 40.0 | 23.3 | 73.8 |
+| q30bh-to-q4b-s1000 | 99.0 | 96.7 | 86.7 | 73.0 | 98.6 | 95.8 | 43.3 | 30.0 | 77.9 |
+| q30bvh-to-q4b-s1000 | 99.7 | 90.0 | 72.3 | 62.0 | 97.9 | 92.2 | 23.3 | 33.3 | 71.3 |
+
+**1.7B pass@n**
+| model | easy | medium | hard | very_hard | gsm8k | math500 | aime2025 | aime2026 | avg |
+|---|---|---|---|---|---|---|---|---|---|
+| q1p7b-base | 85.7 | 55.7 | 32.3 | 30.3 | 94.6 | 81.0 | 13.3 | 16.7 | 51.2 |
+| q1p7b-rl-medium-best | 93.7 | 79.7 | 54.0 | 50.0 | 97.0 | 89.4 | 33.3 | 13.3 | 63.8 |
+| q1p7b-rl-hard-best | 94.7 | 75.0 | 51.0 | 48.7 | 97.0 | 88.4 | 23.3 | 26.7 | 63.1 |
+| q1p7b-rl-very_hard-best | 89.7 | 67.3 | 40.0 | 42.7 | 96.6 | 84.2 | 20.0 | 16.7 | 57.1 |
+| q30bm-to-q1p7b-s1000 | 95.0 | 75.7 | 49.3 | 46.7 | 96.9 | 89.4 | 20.0 | 23.3 | 62.0 |
+| q30bh-to-q1p7b-s1000 | 95.3 | 77.7 | 52.7 | 49.3 | 97.1 | 89.4 | 26.7 | 20.0 | 63.5 |
+| q30bvh-to-q1p7b-s1000 | 92.0 | 69.0 | 48.3 | 40.0 | 97.0 | 86.6 | 23.3 | 23.3 | 59.9 |
+| q4bm-to-q1p7b-s1000 | 95.3 | 74.7 | 49.7 | 44.0 | 96.7 | 89.2 | 30.0 | 23.3 | 62.9 |
+| q4bh-to-q1p7b-s1000 | 93.7 | 74.7 | 54.0 | 47.7 | 97.0 | 89.2 | 20.0 | 13.3 | 61.2 |
+| q4bvh-to-q1p7b-s1000 | 92.0 | 72.3 | 49.0 | 45.7 | 96.9 | 88.4 | 23.3 | 30.0 | 62.2 |
+
+Direct RL wins mean@n at both sizes (4B: RL hard 54.1 vs best distill 30B-hard->4B 50.1; 1.7B: RL medium 36.0 vs 4B-medium->1.7B 33.7);
+distillation ~matches RL on pass@n (4B 77.9 vs 79.4; 1.7B 63.5 vs 63.8). very_hard training (RL or teacher) is worst at both sizes,
+even on very_hard val. For 1.7B the 4B teacher beats the 30B teacher. Vs Gemma (shared sets only; Gemma 12-shot, Qwen 0-shot):
+MATH500 mean@16 base Gemma E4B 10.9 vs Qwen 4B 39.9 / 1.7B 30.1 (Gemma 26B base 27.2); best trained E4B 38.2 vs Qwen 4B 84.0 / 1.7B 66.2.
 
 ## 2026-10-19 — Gemma-4-26B-PT vs Qwen3-30B-A3B-Base difficulty bands: overlap analysis
 
