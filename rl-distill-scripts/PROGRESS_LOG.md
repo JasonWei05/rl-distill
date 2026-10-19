@@ -9,6 +9,23 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-19 — Gemma-4-26B-PT vs Qwen3-30B-A3B-Base difficulty bands: overlap analysis
+
+Both band datasets come from the same 38,796-question DeepScaleR `dedup_v2` pool graded at n=8 with the same strict-boxed grader
+(Gemma bands: `JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k`; Qwen: `...-Qwen3-30B-A3B-Base-10k` incl. `very_hard`).
+Script: `data/compare_gemma_qwen_band_overlap.py`.
+
+- Qwen solves far more: mean pass rate 0.339 vs Gemma 0.104; Qwen > Gemma on 68% of questions, Gemma > Qwen on 6%; Spearman 0.48.
+- Released 3,300-q sets, shared questions (Jaccard %), rows Gemma / cols Qwen easy, medium, hard, very_hard:
+  easy 723 (12.3) / 87 / 16 / 14; medium 514 (8.4) / 250 (3.9) / 120 / 112; hard 357 (5.7) / 311 (4.9) / 375 (6.0) / 242 (3.8).
+  Largest overlaps: G-easy∩Q-easy, then G-medium∩Q-easy, G-hard∩Q-hard, G-hard∩Q-easy. Released sets are random subsamples of each
+  pool band, so the full-pool crosstab is the cleaner comparison.
+- Full pool, where the other model places each band (row %): Gemma easy (3,314) -> Qwen easy 91%; Gemma medium (3,498) -> Qwen easy
+  68%, medium 19%; Gemma hard (5,342) -> Qwen easy 46%, medium 27%, hard 14%, 0/8 13%. Reverse: Qwen hard (6,440) is 84% Gemma 0/8;
+  Qwen medium 75% Gemma 0/8; Qwen easy 43% Gemma 0/8.
+- Pass rate of the other model on each released band: Gemma hard -> Qwen 0.41; Gemma medium -> Qwen 0.55; Qwen hard / very_hard -> Gemma 0.03.
+- Cross-val contamination is small (≤43 of 300 val questions in any other-model train band; e.g. G-medium val ∩ Q-easy train = 43).
+
 ## 2026-10-08 — Qwen3-4B-Base medium RL FINISHED (400 -> 600 extension early-stopped @590)
 
 `q3-4b-rl-med` (resumed from step 400 with Adam + data cursor) early-stopped at step 590 (5 consecutive misses after the best):
