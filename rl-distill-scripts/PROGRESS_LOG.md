@@ -15,11 +15,14 @@ User request: the full math suite (the Qwen analogue of the Gemma §8 math evals
 protocol as the 2026-10-09 4B suite below (0-shot ChatML + boxed instruction, temp 1, 8192 tokens, strict last-box grading; n=16, AIME 32)
 plus the `very_hard` validation split (300 q, dataset rev 9bec69ca). Sets: easy / medium / hard / very_hard val, GSM8K, MATH500, AIME25/26.
 Model registry `scale_train/qwen3_math_suite_models.sh` (b7336bb1): RL best = run_outcome best_step best_hf, distilled = step 1000.
-- `SUITE=q30b-4b`, 8 GPUs, job_dbb339817jf007n6q20g: 30B RL best medium/hard/very_hard (@320/410/460), 30B base, 4B RL very_hard best
-  (@620), 30B very_hard -> 4B s1000; + very_hard for the five 2026-10-09 models. 53 tasks; 30B at TP 1 with max 48 seqs.
+- `SUITE=q30b-4b` (8 GPUs, job_dbb339817jf007n6q20g) CANCELED 15:2xZ at the user's request (only 1.7B / 4B matter; no 30B evals
+  finished). Replaced by `SUITE=q4b`, 4 GPUs, job_dbb3a4g17jf007n6q21g: 4B RL very_hard best (@620), 30B very_hard -> 4B s1000, + very_hard
+  for the five 2026-10-09 models. 21 tasks.
+- Prompt check: rendered prompts are the Qwen 0-shot ChatML (`qwen3_base_native_chat.jinja`) + "Please reason step by step, and put
+  your final answer within \boxed{}." (e.g. 135 prompt tokens), not the Gemma 12-shot template.
 - `SUITE=q1p7b`, 4 GPUs, job_dbb32vo17jf007n6q200: 1.7B RL best medium/hard/very_hard (@520/550/810), 1.7B base, 30B -> 1.7B and
   4B -> 1.7B s1000 x3 bands. 73 tasks (q30bm-to-q1p7b-s1000 already had 7 sets).
-- Both priority high, borrowing false (not on the fallback watcher, per user), supervisors tmux `rl-q3-ms-{q30b-4b,q1p7b}`, state
+- Both priority high, borrowing false (not on the fallback watcher, per user), supervisors tmux `rl-q3-ms-{q4b,q1p7b}`, state
   `.scale_train_supervisors/q3-ms-*-20261019/`. Results: s3://scale-ml/genai/rl-distill/qwen3-math-suite-v1/<model>/<set>/summary.json.
 
 ## 2026-10-19 — Gemma-4-26B-PT vs Qwen3-30B-A3B-Base difficulty bands: overlap analysis
