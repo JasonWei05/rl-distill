@@ -36,20 +36,23 @@ n_gpus="$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)"
 unset CUDA_VISIBLE_DEVICES
 
 EVAL_S3="${EVAL_S3:-s3://scale-ml/genai/rl-distill/qwen3-math-suite-v1}"
-RL=s3://scale-ml/genai/rl-distill/qwen3-4b-base-rl
-DIST=s3://scale-ml/genai/rl-distill/qwen3-30b-rl-distill-ckpts-v1
-# name=source (hf:<repo>@<rev> | s3:<HF export prefix>); MODEL_NAME + MODEL_SRC select a single model instead (1-GPU jobs)
+source rl-distill-scripts/scale_train/qwen3_math_suite_models.sh
+# name=source (hf:<repo>@<rev> | s3:<HF export prefix>) from the registry (SUITE, default v1); MODEL_NAME + MODEL_SRC select a single
+# model instead (1-GPU jobs)
 [ -n "${MODEL_NAME:-}" ] && MODELS="${MODEL_NAME}=${MODEL_SRC:?MODEL_SRC required with MODEL_NAME}"
-MODELS="${MODELS:-q4b-rl-medium-best=s3:${RL}/qwen3-4b-medium-es5/best_hf q4b-rl-hard-best=s3:${RL}/qwen3-4b-hard-es5/best_hf q30bm-to-q4b-s1000=s3:${DIST}/q30bm-medium-to-q4b-bs128-s1000-lr2e-6/global_step_1000/huggingface q30bh-to-q4b-s1000=s3:${DIST}/q30bh-hard-to-q4b-bs128-s1000-lr2e-6/global_step_1000/huggingface q4b-base=hf:Qwen/Qwen3-4B-Base@906bfd4b4dc7f14ee4320094d8b41684abff8539}"
-# queue order: longest sets first so the tail is short
-SETS="${SETS:-hard aime2025 aime2026 medium math500 easy gsm8k}"
+MODELS="${MODELS:-$(suite_models "${SUITE:-v1}")}"
+# queue order: 30B-A3B tasks first (slowest per task), then longest sets first, so the tail is short
+SETS="${SETS:-hard very_hard aime2025 aime2026 medium math500 easy gsm8k}"
 n_for() { case "$1" in aime*) echo "${AIME_N:-32}" ;; *) echo "${SET_N:-16}" ;; esac; }
+# 30B-A3B at TP 1 leaves ~12 GiB of KV: cap concurrent sequences (as the TP-1 trace engines) instead of thrashing on preemption
+max_seqs_for() { case "$1" in q30b-*) echo "${BIG_MAX_SEQS:-48}" ;; *) echo 512 ;; esac; }
 WORK=/tmp/qwen3_math_suite; mkdir -p "${WORK}/data" "${WORK}/models"
 tasks=()
-for s in ${SETS}; do for m in ${MODELS}; do
+for pass in big small; do for s in ${SETS}; do for m in ${MODELS}; do
   name="${m%%=*}"
+  case "${pass}:${name}" in big:q30b-*) ;; small:q30b-*|big:*) continue ;; esac
   if aws s3 ls "${EVAL_S3}/${name}/${s}/summary.json" >/dev/null 2>&1; then echo "EVAL_ON_S3 ${name}/${s}"; else tasks+=("${name} ${s} ${m#*=}"); fi
-done; done
+done; done; done
 echo "MATH_SUITE todo ${#tasks[@]} slots=${n_gpus}xTP1 ($(date -u +%FT%TZ)) out=${EVAL_S3}"
 (( ${#tasks[@]} > 0 )) || { echo "MATH_SUITE_DONE $(date -u +%FT%TZ) (all on S3)"; exit 0; }
 
@@ -60,9 +63,9 @@ import pandas as pd
 from datasets import load_dataset
 from huggingface_hub import hf_hub_download
 out = Path(sys.argv[1])
-for band in ("easy", "medium", "hard"):   # the RL validation sets (raw problems; the generator appends the boxed instruction)
-    p = hf_hub_download("JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k", f"{band}/validation.parquet", repo_type="dataset",
-                        revision="be4dcd8b1fad7d5eb7bf721f0210baf78277aaa9")
+for band in ("easy", "medium", "hard", "very_hard"):   # the RL validation sets (raw problems; the generator appends the boxed instruction)
+    p = hf_hub_download("JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k", f"{band}/validation.parquet", repo_type="dataset",   # very_hard only exists from 9bec69ca
+                        revision="9bec69ca0c432e6286cafdf8b26b4c6aa737084e" if band == "very_hard" else "be4dcd8b1fad7d5eb7bf721f0210baf78277aaa9")
     shutil.copy(p, out / f"{band}.parquet")
 # OOD sets: same sources / revisions / answer extraction as data/prepare_gemma4_three_model_eval_data.py
 SOURCES = {
@@ -120,7 +123,7 @@ generate() {
       --max-tokens 8192 --max-model-len 12288 --max-prompt-tokens 4096 \
       --temperature 1.0 --top-p 1.0 --top-k -1 --stop-strings "${STOP_STRINGS}" --stop-token-ids "${STOP_TOKEN_IDS}" \
       --append-boxed-instruction --boxed-instruction "${DEFAULT_INSTRUCTION}" --attention-backend TRITON_ATTN \
-      --chunk-size "${chunk}" --max-num-seqs "${seqs}" --gpu-memory-utilization 0.9 > "${out}/log.txt" 2>&1 && return 0
+      --chunk-size "${chunk}" --max-num-seqs "${seqs}" --gpu-memory-utilization 0.92 > "${out}/log.txt" 2>&1 && return 0
     echo "EVAL_ATTEMPT_FAILED ${label} attempt=${attempt}: $(grep -aE 'Error|error' "${out}/log.txt" | tail -1 | cut -c1-200)" >&2
     if (( attempt == 2 )); then
       tail -n 30 "${out}/log.txt" >&2; aws s3 cp --only-show-errors "${out}/log.txt" "${EVAL_S3}/${label}/log.failed.txt"; return 1
@@ -173,7 +176,7 @@ run_task() {   # gpu name set src
   out="${WORK}/out/${name}/${set}"; mkdir -p "${out}"; n="$(n_for "${set}")"
   model="$(fetch_model "${src}")"
   echo "EVAL_START $(date -u +%FT%TZ) ${name}/${set} gpu=${gpu} n=${n}"
-  generate "${gpu}" "${model}" "${WORK}/data/${set}.parquet" "${out}" "${n}" 300 512 "${name}/${set}"
+  generate "${gpu}" "${model}" "${WORK}/data/${set}.parquet" "${out}" "${n}" 300 "$(max_seqs_for "${name}")" "${name}/${set}"
   finish_set "${name}" "${set}" "${src}" "${out}"
 }
 
