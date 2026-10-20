@@ -10,7 +10,7 @@
 # Everything else is the Qwen RL contract (launch_qwen3_30b_a3b_medium_rl.sh): 0-shot ChatML prompt, 8k responses,
 # validation every 10 steps (band val300 x16, mean@16, before training too), permanent S3 checkpoint + HF export every 10,
 # rolling resumable checkpoint every 5, best_hf at the end; early stopping off (fixed 150 steps).
-# vLLM TP 1 for the student and the teacher (one engine of each per GPU, both slept between phases).
+# vLLM TP 1 for the student and the 4B teacher (one engine per GPU); the 30B-A3B teacher runs at TP 2. All engines sleep between phases.
 #   SPEC=q4bm-to-q1p7b bash launch_qwen3_onpolicy_distill.sh --image <uri>
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -24,10 +24,10 @@ esac
 B=s3://scale-ml/genai/rl-distill
 if [ "${T_SIZE}" = 4b ]; then
   TEACHER_S3="${B}/qwen3-4b-base-rl/qwen3-4b-${BAND}-es5/best_hf"; DIST="${B}/qwen3-4b-rl-distill-ckpts-v1"
-  TEACHER_UTIL=0.20   # 8 GiB bf16 weights + KV
+  TEACHER_UTIL=0.20; TEACHER_TP=1   # 8 GiB bf16 weights + KV
 else
   TEACHER_S3="${B}/qwen3-30b-a3b-base-rl/qwen3-30b-a3b-${BAND}-es5/best_hf"; DIST="${B}/qwen3-30b-rl-distill-ckpts-v1"
-  TEACHER_UTIL=0.85   # 61 GiB bf16 weights at TP 1 + KV; needs the actor states offloaded while the teacher is awake
+  TEACHER_UTIL=0.45; TEACHER_TP=2   # 61 GiB bf16 weights -> ~30.5 GiB per GPU at TP 2 + ~5 GiB KV
 fi
 case "${STUDENT}" in
   q1p7b) MODEL=Qwen/Qwen3-1.7B-Base; REVISION=ea980cb0a6c2ae4b936e82123acc929f1cec04c1; GPUS=2 ;;
@@ -39,8 +39,8 @@ STUDENT_S3="${DIST}/${TEACHER_TAG}-${BAND}-to-${STUDENT}-bs128-s1000-lr2e-6/glob
 TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-150}"
 RUN_TAG="${RUN_TAG:-pgk1-v1}"
 S3_BASE="${S3_BASE:-${B}/qwen3-opd}"
-# RL memory layout of the student size (FSDP2, one TP-1 vLLM engine per GPU, sleep mode); the 30B teacher's 61 GiB
-# weights only fit next to the student when the actor's params + optimizer are offloaded outside the update (OFFLOAD).
+# RL memory layout of the student size (FSDP2, one TP-1 vLLM engine per GPU, sleep mode); with the 30B teacher the actor's
+# params + optimizer are also offloaded outside the update (OFFLOAD; cheap for a 1.7B / 4B student) for headroom.
 ACTOR_OFFLOAD=False; [ "${T_SIZE}" = 30b ] && ACTOR_OFFLOAD=True
 LAYOUT="GEN_TP=1,FSDP_CPU_OFFLOAD_POLICY=False,OFFLOAD=${OFFLOAD:-${ACTOR_OFFLOAD}},VLLM_SLEEP_MODE=True,MAX_PADDED_TOKENS_PER_MICROBATCH=8192,MICRO_BATCH_SIZE_PER_GPU=4"
 LAYOUT+=",ROLLOUT_GPU_MEMORY_UTILIZATION=0.10,VLLM_KV_CACHE_MEMORY_BYTES=${VLLM_KV_CACHE_MEMORY_BYTES:-8589934592}"   # n=1: 8 GiB KV is plenty
@@ -53,7 +53,7 @@ ENV_VARS+=",EXP_NAME=OPD-qwen3-${SPEC}-${RUN_TAG}"
 ENV_VARS+=",ONPOLICY_DISTILL_ENABLE=True,ONPOLICY_DISTILL_TEACHER_S3_URI=${TEACHER_S3},ONPOLICY_DISTILL_LOSS_MODE=k1"
 ENV_VARS+=",ONPOLICY_DISTILL_USE_POLICY_GRADIENT=True,ONPOLICY_DISTILL_USE_TASK_REWARDS=False,ONPOLICY_DISTILL_LOSS_COEF=1.0"
 ENV_VARS+=",ONPOLICY_DISTILL_LOSS_MAX_CLAMP=5.0,ONPOLICY_DISTILL_LOG_PROB_MIN_CLAMP=null,ONPOLICY_DISTILL_TOPK=1"
-ENV_VARS+=",ONPOLICY_DISTILL_TEACHER_TP=1,ONPOLICY_DISTILL_TEACHER_GPU_MEM_UTIL=${TEACHER_GPU_MEM_UTIL:-${TEACHER_UTIL}},ONPOLICY_DISTILL_TEACHER_SLEEP=True"
+ENV_VARS+=",ONPOLICY_DISTILL_TEACHER_TP=${TEACHER_TP},ONPOLICY_DISTILL_TEACHER_GPU_MEM_UTIL=${TEACHER_GPU_MEM_UTIL:-${TEACHER_UTIL}},ONPOLICY_DISTILL_TEACHER_SLEEP=True"
 ENV_VARS+=",ROLLOUT_IS_THRESHOLD=0.5_2.0"
 # batch / optimiser: 128 prompts x 1 sample, one update per step
 ENV_VARS+=",N_RESP_PER_PROMPT=1,TRAIN_PROMPT_BSZ=128,TRAIN_PROMPT_MINI_BSZ=128,GEN_PROMPT_BSZ=128,ENABLE_FILTER_GROUPS=False,ENABLE_OVERLONG_BUFFER=False"
