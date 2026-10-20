@@ -66,7 +66,10 @@ ENV_VARS+=",PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segmen
 ENV_VARS+=",HF_PUSH_ENABLE=False,HF_PUSH_REQUIRED=False,MAX_ACTOR_CKPT_TO_KEEP=2"
 ENV_VARS+=",ROLLING_CHECKPOINT_ENABLED=True,ROLLING_CHECKPOINT_FREQ=5,ASYNC_CHECKPOINT_UPLOAD=False,FULL_CHECKPOINT_S3_URI=${S3_BASE}-full-checkpoints/${SPEC}-${RUN_TAG},RUN_ARTIFACT_S3_URI=${S3_BASE}/${SPEC}-${RUN_TAG}"
 ENV_VARS+=",WANDB_RUN_ID=q3-opd-${SPEC}-${RUN_TAG}-s42,WANDB_RESUME=allow"
-echo "LAUNCH_ENV ${ENV_VARS}"
+# The pgk1-v1 batch runs (and relaunches with) the code it started on: 5c6d47d5, before the distillation global_batch_info
+# ordering fix in verl/trainer/distillation/losses.py. New batches: CODE_REF=HEAD (or a later pin) + a new RUN_TAG.
+[ "${RUN_TAG}" = pgk1-v1 ] && export CODE_REF="${CODE_REF:-5c6d47d5}"
+echo "LAUNCH_ENV ${ENV_VARS} CODE_REF=${CODE_REF:-HEAD}"
 BORROW_FLAG=""; [ "${ALLOW_BORROWING:-false}" = true ] && BORROW_FLAG="--allow-borrowing"
 exec bash launch_st_with_code.sh --gpus-per-instance "${GPUS}" --priority high ${BORROW_FLAG} --active-deadline-hours 120 \
   --run-file run_gemma4_pt_deepscaler_4of4strict_rl.sh --job-name "${JOB_NAME:-q3-opd-${SPEC}}" --env-vars "${ENV_VARS}" "$@"

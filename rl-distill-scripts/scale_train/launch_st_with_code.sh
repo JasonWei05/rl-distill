@@ -13,8 +13,10 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 IMAGE="${ST_IMAGE:-692474966980.dkr.ecr.us-west-2.amazonaws.com/scale_train/shared/training/tmp:20260829-002920.cd13c11a-e0f3-4f65-a74b-0e0c5d72d58a}"
 CODE_S3_PREFIX="${CODE_S3_PREFIX:-s3://scale-ml/genai/rl-distill/code}"
 export AWS_PROFILE="${AWS_PROFILE:-ml-worker}"   # the instance role cannot write the bucket
-sha="$(git -C "${REPO_ROOT}" rev-parse --short=8 HEAD)"
-if [ -n "$(git -C "${REPO_ROOT}" status --porcelain -- rl-distill-scripts/scale_train | head -1)" ]; then
+# CODE_REF: ship this commit instead of HEAD (e.g. to keep an experiment batch on the code it started with)
+CODE_REF="${CODE_REF:-HEAD}"
+sha="$(git -C "${REPO_ROOT}" rev-parse --short=8 "${CODE_REF}")"
+if [ "${CODE_REF}" = HEAD ] && [ -n "$(git -C "${REPO_ROOT}" status --porcelain -- rl-distill-scripts/scale_train | head -1)" ]; then
   echo "WARNING: uncommitted changes under rl-distill-scripts/scale_train are not in the tarball (git archive HEAD)" >&2
 fi
 tarball="/tmp/rl-distill-code-${sha}.tar.gz"
@@ -22,7 +24,7 @@ uri="${CODE_S3_PREFIX}/rl-distill-code-${sha}.tar.gz"
 if aws s3 ls "${uri}" >/dev/null 2>&1; then
   echo "CODE_TARBALL ${uri} commit=${sha} (already uploaded)"
 else
-  git -C "${REPO_ROOT}" archive --format=tar.gz -o "${tarball}" HEAD
+  git -C "${REPO_ROOT}" archive --format=tar.gz -o "${tarball}" "${sha}"
   aws s3 cp --only-show-errors "${tarball}" "${uri}"
   echo "CODE_TARBALL ${uri} commit=${sha} size=$(du -h "${tarball}" | cut -f1)"
 fi
