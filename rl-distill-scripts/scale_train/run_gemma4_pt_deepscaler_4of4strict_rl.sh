@@ -337,9 +337,10 @@ export GEMMA4_INIT_MODEL_REPO="${GEMMA4_INIT_MODEL_REPO:-${GEMMA4_MODEL}}"
 export GEMMA4_INIT_MODEL_REVISION="${GEMMA4_INIT_MODEL_REVISION:-${GEMMA4_MODEL_REVISION:-}}"
 export GEMMA4_INIT_MODEL_SUBFOLDER="${GEMMA4_INIT_MODEL_SUBFOLDER:-}"
 if [ -n "${GEMMA4_INIT_MODEL_S3_URI:-}" ] && [ -z "${GEMMA4_INIT_MODEL_PATH:-}" ]; then
-  # Initialize from an HF export on S3 (e.g. another run's global_step_N/actor/huggingface/). Downloaded once per pod; the
-  # base model's processor_config.json is added when the export lacks it (unified Gemma 4 load).
+  # Initialize from an HF export on S3 (e.g. another run's global_step_N/actor/huggingface/). Downloaded once per pod; for
+  # Gemma 4 the base model's processor_config.json is added when the export lacks it (unified Gemma 4 load; Qwen3 has none).
   GEMMA4_INIT_MODEL_PATH="/tmp/gemma4_init_model/s3_$(echo "${GEMMA4_INIT_MODEL_S3_URI}" | md5sum | cut -c1-12)"
+  NEEDS_PROCESSOR_CONFIG="$([[ "${MODEL_TAG}" == qwen3-* ]] && echo 0 || echo 1)" \
   "${VENV}/bin/python" - "${GEMMA4_INIT_MODEL_S3_URI}" "${GEMMA4_INIT_MODEL_PATH}" "${GEMMA4_MODEL}" "${GEMMA4_MODEL_REVISION:-}" <<'PY'
 import os, sys
 from pathlib import Path
@@ -355,7 +356,7 @@ for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=p
         dst = out / rel; dst.parent.mkdir(parents=True, exist_ok=True)
         if dst.exists() and dst.stat().st_size == obj["Size"]: continue
         s3.download_file(bucket, obj["Key"], str(dst)); n += 1
-if not (out / "processor_config.json").exists():
+if os.environ["NEEDS_PROCESSOR_CONFIG"] == "1" and not (out / "processor_config.json").exists():
     src = hf_hub_download(base, "processor_config.json", revision=rev); (out / "processor_config.json").write_bytes(Path(src).read_bytes())
 assert (out / "config.json").is_file() and any(out.glob("*.safetensors")), f"incomplete init export at {out}"
 print(f"INIT_MODEL_S3 downloaded={n} files -> {out}")
@@ -364,8 +365,8 @@ PY
 fi
 if [ -n "${GEMMA4_INIT_MODEL_PATH:-}" ]; then
   # Initialize from a LOCAL HF export directory (e.g. an S3-restored actor/huggingface/ of another run). It must already
-  # carry the base model's processor_config.json (unified Gemma 4 load; see the Hub branch below).
-  test -s "${GEMMA4_INIT_MODEL_PATH}/config.json" && test -s "${GEMMA4_INIT_MODEL_PATH}/processor_config.json" \
+  # carry the base model's processor_config.json for Gemma 4 (unified Gemma 4 load; see the Hub branch below).
+  test -s "${GEMMA4_INIT_MODEL_PATH}/config.json" && { [[ "${MODEL_TAG}" == qwen3-* ]] || test -s "${GEMMA4_INIT_MODEL_PATH}/processor_config.json"; } \
     && ls "${GEMMA4_INIT_MODEL_PATH}"/*.safetensors >/dev/null || { echo "FATAL: GEMMA4_INIT_MODEL_PATH=${GEMMA4_INIT_MODEL_PATH} lacks config.json / processor_config.json / *.safetensors" >&2; exit 2; }
   echo "INIT_MODEL local_path=${GEMMA4_INIT_MODEL_PATH} files=$(ls "${GEMMA4_INIT_MODEL_PATH}" | tr '\n' ' ')"
   MODEL_LOCAL_PATH="${GEMMA4_INIT_MODEL_PATH}"
@@ -421,8 +422,9 @@ ONPOLICY_DISTILL_ENABLE="${ONPOLICY_DISTILL_ENABLE:-False}"
 DISTILL_OVERRIDES=()
 case "${ONPOLICY_DISTILL_ENABLE,,}" in
   1|true|yes|on)
-    : "${ONPOLICY_DISTILL_TEACHER_REPO:?ONPOLICY_DISTILL_TEACHER_REPO is required when ONPOLICY_DISTILL_ENABLE=True}"
-    export ONPOLICY_DISTILL_TEACHER_REPO
+    # Teacher source: ONPOLICY_DISTILL_TEACHER_S3_URI (an HF export on S3, e.g. an RL run's best_hf/) or a pinned Hub repo.
+    [ -n "${ONPOLICY_DISTILL_TEACHER_S3_URI:-}" ] || : "${ONPOLICY_DISTILL_TEACHER_REPO:?ONPOLICY_DISTILL_TEACHER_REPO or ONPOLICY_DISTILL_TEACHER_S3_URI is required when ONPOLICY_DISTILL_ENABLE=True}"
+    export ONPOLICY_DISTILL_TEACHER_REPO="${ONPOLICY_DISTILL_TEACHER_REPO:-}" ONPOLICY_DISTILL_TEACHER_S3_URI="${ONPOLICY_DISTILL_TEACHER_S3_URI:-}"
     export ONPOLICY_DISTILL_TEACHER_REVISION="${ONPOLICY_DISTILL_TEACHER_REVISION:-}"
     ONPOLICY_DISTILL_LOSS_MODE="${ONPOLICY_DISTILL_LOSS_MODE:-reverse_kl_topk}"
     ONPOLICY_DISTILL_TOPK="${ONPOLICY_DISTILL_TOPK:-128}"
@@ -442,16 +444,34 @@ case "${ONPOLICY_DISTILL_ENABLE,,}" in
       exit 2
     fi
     # Pin and materialise the teacher. The Gemma 4 teacher must load through the unified (VLM-class) vLLM
-    # path, which needs the repo's processor config next to the weights (never a bare causal-LM override).
-    TEACHER_LOCAL_PATH="$(${VENV}/bin/python - <<'PY'
+    # path, which needs the repo's processor config next to the weights (never a bare causal-LM override);
+    # Qwen3 teachers have no processor config.
+    TEACHER_LOCAL_PATH="$(NEEDS_PROCESSOR_CONFIG="$([[ "${MODEL_TAG}" == qwen3-* ]] && echo 0 || echo 1)" ${VENV}/bin/python - <<'PY'
 import os
 from pathlib import Path
 from huggingface_hub import snapshot_download
-kwargs = {"repo_id": os.environ["ONPOLICY_DISTILL_TEACHER_REPO"]}
-if os.environ.get("ONPOLICY_DISTILL_TEACHER_REVISION"):
-    kwargs["revision"] = os.environ["ONPOLICY_DISTILL_TEACHER_REVISION"]
-path = Path(snapshot_download(**kwargs))
-for required in ("config.json", "processor_config.json", "tokenizer_config.json"):
+if os.environ["ONPOLICY_DISTILL_TEACHER_S3_URI"]:
+    import hashlib
+    import boto3
+    uri = os.environ["ONPOLICY_DISTILL_TEACHER_S3_URI"]
+    bucket, prefix = uri[5:].split("/", 1); prefix = prefix.rstrip("/") + "/"
+    path = Path("/tmp/onpolicy_teacher") / ("s3_" + hashlib.md5(uri.encode()).hexdigest()[:12])
+    s3 = boto3.client("s3"); path.mkdir(parents=True, exist_ok=True)
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            rel = obj["Key"][len(prefix):]
+            if not rel or rel.endswith("/"): continue
+            dst = path / rel; dst.parent.mkdir(parents=True, exist_ok=True)
+            if not (dst.exists() and dst.stat().st_size == obj["Size"]):
+                s3.download_file(bucket, obj["Key"], str(dst))
+else:
+    kwargs = {"repo_id": os.environ["ONPOLICY_DISTILL_TEACHER_REPO"]}
+    if os.environ.get("ONPOLICY_DISTILL_TEACHER_REVISION"):
+        kwargs["revision"] = os.environ["ONPOLICY_DISTILL_TEACHER_REVISION"]
+    path = Path(snapshot_download(**kwargs))
+required_files = ("config.json", "processor_config.json", "tokenizer_config.json") if os.environ["NEEDS_PROCESSOR_CONFIG"] == "1" \
+    else ("config.json", "tokenizer_config.json")
+for required in required_files:
     if not (path / required).is_file():
         raise FileNotFoundError(f"teacher snapshot {path} lacks {required}")
 if not any(path.glob("*.safetensors")):
@@ -484,7 +504,7 @@ PY
       ++distillation.teacher_model.inference.enable_sleep_mode="${ONPOLICY_DISTILL_TEACHER_SLEEP}"
       ++distillation.teacher_model.inference.engine_kwargs.vllm.max_logprobs="${ONPOLICY_DISTILL_TOPK}"
     )
-    echo "ONPOLICY_DISTILL teacher=${ONPOLICY_DISTILL_TEACHER_REPO}@${ONPOLICY_DISTILL_TEACHER_REVISION:-main} path=${TEACHER_LOCAL_PATH} loss=${ONPOLICY_DISTILL_LOSS_MODE} topk=${ONPOLICY_DISTILL_TOPK} teacher_tp=${ONPOLICY_DISTILL_TEACHER_TP} teacher_util=${ONPOLICY_DISTILL_TEACHER_GPU_MEM_UTIL} sleep=${ONPOLICY_DISTILL_TEACHER_SLEEP} task_rewards=${ONPOLICY_DISTILL_USE_TASK_REWARDS} policy_gradient=${ONPOLICY_DISTILL_USE_POLICY_GRADIENT}"
+    echo "ONPOLICY_DISTILL teacher=${ONPOLICY_DISTILL_TEACHER_S3_URI:-${ONPOLICY_DISTILL_TEACHER_REPO}@${ONPOLICY_DISTILL_TEACHER_REVISION:-main}} path=${TEACHER_LOCAL_PATH} loss=${ONPOLICY_DISTILL_LOSS_MODE} topk=${ONPOLICY_DISTILL_TOPK} teacher_tp=${ONPOLICY_DISTILL_TEACHER_TP} teacher_util=${ONPOLICY_DISTILL_TEACHER_GPU_MEM_UTIL} sleep=${ONPOLICY_DISTILL_TEACHER_SLEEP} task_rewards=${ONPOLICY_DISTILL_USE_TASK_REWARDS} policy_gradient=${ONPOLICY_DISTILL_USE_POLICY_GRADIENT}"
     ;;
 esac
 if [ "${DIFFICULTY_DATASET_SOURCE}" = qwen3_30b_bands ]; then
@@ -612,7 +632,8 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       "$@" \
       actor_rollout_ref.rollout.calculate_log_probs=True \
       algorithm.rollout_correction.rollout_is=token \
-      algorithm.rollout_correction.rollout_is_threshold=2.0 \
+      `# ROLLOUT_IS_THRESHOLD: 2.0 = token TIS (clamp max 2); "0.5_2.0" = IcePop token mask (weights zeroed outside [0.5, 2])` \
+      algorithm.rollout_correction.rollout_is_threshold="${ROLLOUT_IS_THRESHOLD:-2.0}" \
       algorithm.rollout_correction.rollout_is_batch_normalize=False \
       algorithm.rollout_correction.rollout_rs=null \
       algorithm.rollout_correction.rollout_rs_threshold=null \
