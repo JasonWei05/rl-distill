@@ -9,6 +9,26 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-20 — On-policy distillation (policy-gradient k1) of the 9 off-policy-distilled Qwen students LAUNCHED
+
+Goal: continue each off-policy-distilled student (step 1000) with on-policy distillation from its own RL teacher (RL best_hf) on its
+band. Recipe chosen from a literature survey (sampled-token reverse KL as a per-token advantage is what most frontier reports use —
+Thinking Machines, MiMo/MOPD, GLM-5, Nemotron-Cascade 2 / Nemotron 3 Ultra, Kimi K3; MOPD 2606.30406 finds it ≈ top-k logit
+distillation and more robust): Nemotron-Cascade 2 + MOPD's advantage clip.
+- Advantage A_t = sg[log π_teacher(y_t) − log π_train(y_t)] (verl `k1` + `use_policy_gradient=True`, `use_task_rewards=False`), no
+  normalisation, clipped to [−5, 5] (`loss_max_clamp=5`); `distillation/k1` and `distillation/k3` both logged.
+- IcePop token IS mask [0.5, 2] between trainer and vLLM (`ROLLOUT_IS_THRESHOLD=0.5_2.0`); trainer-recomputed old log-probs.
+- 128 prompts × 1 sample per step, one update per step (PPO ratio clip inactive), lr 2e-6, 20-step warmup, constant, token-mean,
+  temp 1 / top-p 1 / top-k off, 8k responses, 150 steps, early stopping off.
+- Validation / checkpoints = the Qwen RL contract: band val300 ×16 mean@16 before training and every 10 steps; permanent S3 checkpoint
+  + HF export every 10, rolling every 5; best_hf at the end.
+- vLLM TP 1 for students and 4B teachers; 30B-A3B teacher at TP 2 (util 0.45) with actor offload. 1.7B students 2 GPUs, 4B students 4.
+- Scripts: `scale_train/launch_qwen3_onpolicy_distill.sh` (SPEC=<teacher><band>-to-<student>), `start_qwen3_onpolicy_distill_supervisor.sh`,
+  `run_qwen3_onpolicy_distill_queue.sh` (≤ 8 GPUs in flight, in order 4B→1.7B ×3, 30B→1.7B ×3, 30B→4B ×3; tmux `q3-opd-queue`);
+  run-file gained an S3 teacher source, Qwen-compatible S3 init and `ROLLOUT_IS_THRESHOLD` (e851ecc6, 520adcaa).
+- Borrowing false, priority high. Outputs: s3://scale-ml/genai/rl-distill/qwen3-opd{,-full-checkpoints}/<SPEC>-pgk1-v1; W&B q3-opd-<SPEC>-pgk1-v1-s42.
+- 2026-10-20 17:29Z q4bm-to-q1p7b (job_dbbq9utegg5g08bj6qug); 17:43–17:44Z q4bh-, q4bvh-, q30bm-to-q1p7b via the queue.
+
 ## 2026-10-19 — Qwen math suite on all remaining RL-best / distilled / base models (+ very_hard val) DONE
 
 User request: the full math suite (the Qwen analogue of the Gemma §8 math evals) for every new best-RL and distilled Qwen model. Same
