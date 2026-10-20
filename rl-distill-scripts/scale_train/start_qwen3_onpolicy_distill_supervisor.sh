@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 IMG="${ST_IMAGE:-692474966980.dkr.ecr.us-west-2.amazonaws.com/scale_train/shared/training/tmp:20260829-002920.cd13c11a-e0f3-4f65-a74b-0e0c5d72d58a}"
-SPEC="${SPEC:?SPEC required}"; RUN_TAG="${RUN_TAG:-pgk1-v1}"; TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-150}"
+SPEC="${SPEC:?SPEC required}"; RUN_TAG="${RUN_TAG:-pgk1-v1}"; TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-120}"
 case "${SPEC##*-to-}" in q1p7b) GPUS=2 ;; q4b) GPUS=4 ;; *) echo "FATAL: unknown student in SPEC=${SPEC}" >&2; exit 2 ;; esac
 S3_BASE="${S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-opd}"
 CKPT_URI="${S3_BASE}-full-checkpoints/${SPEC}-${RUN_TAG}"

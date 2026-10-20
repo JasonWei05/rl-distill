@@ -6,10 +6,10 @@
 #   per-token advantage A_t = sg[log pi_teacher(y_t) - log pi_train(y_t)] (k1 + policy gradient, no task reward, no
 #   normalisation), clipped to [-5, 5]; IcePop token IS mask [0.5, 2] between the trainer and vLLM; one update per batch
 #   (128 prompts x 1 sample, mini = train batch, so the PPO ratio clip is inactive); lr 2e-6, 20-step warmup, constant;
-#   token-mean loss; temp 1 / top-p 1 / top-k off; 150 steps.
+#   token-mean loss; temp 1 / top-p 1 / top-k off; 120 steps (the first 4 runs were launched with 150 and stopped at 120).
 # Everything else is the Qwen RL contract (launch_qwen3_30b_a3b_medium_rl.sh): 0-shot ChatML prompt, 8k responses,
 # validation every 10 steps (band val300 x16, mean@16, before training too), permanent S3 checkpoint + HF export every 10,
-# rolling resumable checkpoint every 5, best_hf at the end; early stopping off (fixed 150 steps).
+# rolling resumable checkpoint every 5, best_hf at the end; early stopping off (fixed 120 steps).
 # vLLM TP 1 for the student and the 4B teacher (one engine per GPU); the 30B-A3B teacher runs at TP 2. All engines sleep between phases.
 #   SPEC=q4bm-to-q1p7b bash launch_qwen3_onpolicy_distill.sh --image <uri>
 set -euo pipefail
@@ -36,7 +36,7 @@ case "${STUDENT}" in
   *) echo "FATAL: unknown student in SPEC=${SPEC}" >&2; exit 2 ;;
 esac
 STUDENT_S3="${DIST}/${TEACHER_TAG}-${BAND}-to-${STUDENT}-bs128-s1000-lr2e-6/global_step_1000/huggingface"
-TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-150}"
+TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-120}"
 RUN_TAG="${RUN_TAG:-pgk1-v1}"
 S3_BASE="${S3_BASE:-${B}/qwen3-opd}"
 # RL memory layout of the student size (FSDP2, one TP-1 vLLM engine per GPU, sleep mode); with the 30B teacher the actor's

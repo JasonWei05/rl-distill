@@ -28,6 +28,10 @@ distillation and more robust): Nemotron-Cascade 2 + MOPD's advantage clip.
   run-file gained an S3 teacher source, Qwen-compatible S3 init and `ROLLOUT_IS_THRESHOLD` (e851ecc6, 520adcaa).
 - Borrowing false, priority high. Outputs: s3://scale-ml/genai/rl-distill/qwen3-opd{,-full-checkpoints}/<SPEC>-pgk1-v1; W&B q3-opd-<SPEC>-pgk1-v1-s42.
 - 2026-10-20 17:29Z q4bm-to-q1p7b (job_dbbq9utegg5g08bj6qug); 17:43–17:44Z q4bh-, q4bvh-, q30bm-to-q1p7b via the queue.
+- 2026-10-20 20:47Z user: stop every run at **120 steps**. The four runs launched with 150 are stopped at 120 by
+  `scale_train/stop_qwen3_opd_at_step.sh` (waits for the step-120 validation + complete permanent checkpoint, stops the supervisor,
+  cancels the job, publishes best_hf = best val step <= 120 + run_outcome.json); new runs default to 120. q4bvh-to-q1p7b stopped at
+  step 124 (best val 12.96 @110). q30bh-to-q1p7b had just been submitted with 150 (no steps) -> cancelled and resubmitted with 120.
 
 ## 2026-10-19 — Qwen math suite on all remaining RL-best / distilled / base models (+ very_hard val) DONE
 
