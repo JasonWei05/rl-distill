@@ -39,6 +39,11 @@ distillation and more robust): Nemotron-Cascade 2 + MOPD's advantage clip.
 - Math suite on every OPD best_hf: watcher `scale_train/run_qwen3_opd_math_suite_watcher.sh` (tmux `q3-opd-math-watch`) starts a
   1-GPU SINGLE_PASS suite job (8 sets, borrowing false, priority high) per finished run; registry `suite_models opd`
   (`<spec>-opd120`). 2026-10-21 04:22Z started for q4bm/q4bh/q4bvh/q30bm-to-q1p7b.
+- **Math suite, first 4 OPD students (done ~05:0xZ), mean@n avg over the 8 sets** (pass@n avg): 4B medium->1.7B OPD **39.7** (66.2) vs its
+  off-policy start 33.7 (62.9); 4B hard->1.7B OPD **39.8** (68.0) vs 32.8 (61.2); 4B very_hard->1.7B OPD 35.9 (63.7) vs 31.3 (62.2);
+  30B medium->1.7B OPD 36.9 (64.9) vs 32.1 (62.0). Best direct 1.7B RL: medium 36.0 (63.8). OPD (<=120 steps) beats direct RL on
+  both mean@n and pass@n; per set e.g. 4B hard->1.7B OPD: easy 74.7 / medium 37.9 / hard 19.4 / very_hard 14.1 / GSM8K 85.5 /
+  MATH500 73.1 vs RL medium 70.7 / 33.1 / 14.6 / 12.1 / 83.1 / 66.2. Caveat: best_hf was picked on the band's own val set.
 
 ## 2026-10-19 — Qwen math suite on all remaining RL-best / distilled / base models (+ very_hard val) DONE
 
