@@ -44,6 +44,12 @@ distillation and more robust): Nemotron-Cascade 2 + MOPD's advantage clip.
   30B medium->1.7B OPD 36.9 (64.9) vs 32.1 (62.0). Best direct 1.7B RL: medium 36.0 (63.8). OPD (<=120 steps) beats direct RL on
   both mean@n and pass@n; per set e.g. 4B hard->1.7B OPD: easy 74.7 / medium 37.9 / hard 19.4 / very_hard 14.1 / GSM8K 85.5 /
   MATH500 73.1 vs RL medium 70.7 / 33.1 / 14.6 / 12.1 / 83.1 / 66.2. Caveat: best_hf was picked on the band's own val set.
+- 2026-10-21 14:1xZ fixes: (1) the math-suite watcher had died at 04:22Z (`set -e` on `aws s3 ls` of a not-yet-published
+  prefix) -> fixed (a6d31615). (2) Runs that finish on their own (q30bh/q30bvh-to-q1p7b, q30bm-to-q4b so far) got best_hf = the
+  final step (run-file behaviour with early stopping off, best_score null), unlike the 4 manually stopped runs (best val <= 120).
+  `scale_train/publish_qwen3_opd_best_hf.sh` re-publishes the best-val step (cp, not sync — sync kept the newer same-size final
+  weights; verified byte-identical to the chosen step); the 3 suites started on step-120 weights were cancelled before writing
+  anything and restarted. Best val steps: q30bh-to-q1p7b 19.0 @100, q30bvh-to-q1p7b 11.04 @100, q30bm-to-q4b 61.19 @110.
 
 ## 2026-10-19 — Qwen math suite on all remaining RL-best / distilled / base models (+ very_hard val) DONE
 
