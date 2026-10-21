@@ -17,7 +17,7 @@ while [ ! -e "${STATE}/STOP" ]; do
     name="${e%%=*}"; src="${e#*=}"; uri="${src#s3:}"; spec="${name%-opd120}"
     [ -e "${STATE}/started.${spec}" ] && continue
     pending=$((pending + 1))
-    files="$(aws s3 ls "${uri}/" 2>/dev/null | awk '{print $4}' | tr '\n' ' ')"
+    files="$(aws s3 ls "${uri}/" 2>/dev/null | awk '{print $4}' | tr '\n' ' ' || true)"   # not-yet-published prefix: aws exits 1
     [[ " ${files} " == *" config.json "* ]] || continue
     [[ " ${files} " == *" _RUN_OUTCOME.json "* || " ${files} " == *" _REMOTE_COMPLETE.json "* ]] || continue
     aws s3 ls "${uri%/best_hf}/run_outcome.json" >/dev/null 2>&1 || continue
