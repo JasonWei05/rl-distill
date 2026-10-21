@@ -50,6 +50,10 @@ distillation and more robust): Nemotron-Cascade 2 + MOPD's advantage clip.
   `scale_train/publish_qwen3_opd_best_hf.sh` re-publishes the best-val step (cp, not sync — sync kept the newer same-size final
   weights; verified byte-identical to the chosen step); the 3 suites started on step-120 weights were cancelled before writing
   anything and restarted. Best val steps: q30bh-to-q1p7b 19.0 @100, q30bvh-to-q1p7b 11.04 @100, q30bm-to-q4b 61.19 @110.
+- All 9 trained (q30bh-to-q4b best val 42.19 @120, q30bvh-to-q4b 24.63 @100). Math suite mean@n avg (pass@n avg), off-policy start -> OPD:
+  30B hard->1.7B 31.8 -> **39.2** (63.5 -> 68.1); 30B very_hard->1.7B 28.7 -> 34.3 (59.9 -> 62.5); 30B medium->4B 46.7 -> 50.0
+  (73.8 -> 74.8); 30B very_hard->4B 43.4 -> 47.8 (71.3 -> 73.1); 30B hard->4B suite still running. 4B direct RL: medium 53.1 (74.9),
+  hard 54.1 (79.4), very_hard 47.9 (72.1) -> at 4B, OPD from the 30B teacher stays BELOW direct 4B RL (gap ~3 on mean@n), unlike 1.7B.
 
 ## 2026-10-19 — Qwen math suite on all remaining RL-best / distilled / base models (+ very_hard val) DONE
 
