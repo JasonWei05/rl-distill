@@ -53,7 +53,10 @@ distillation and more robust): Nemotron-Cascade 2 + MOPD's advantage clip.
 - All 9 trained (q30bh-to-q4b best val 42.19 @120, q30bvh-to-q4b 24.63 @100). Math suite mean@n avg (pass@n avg), off-policy start -> OPD:
   30B hard->1.7B 31.8 -> **39.2** (63.5 -> 68.1); 30B very_hard->1.7B 28.7 -> 34.3 (59.9 -> 62.5); 30B medium->4B 46.7 -> 50.0
   (73.8 -> 74.8); 30B very_hard->4B 43.4 -> 47.8 (71.3 -> 73.1); 30B hard->4B suite still running. 4B direct RL: medium 53.1 (74.9),
-  hard 54.1 (79.4), very_hard 47.9 (72.1) -> at 4B, OPD from the 30B teacher stays BELOW direct 4B RL (gap ~3 on mean@n), unlike 1.7B.
+  hard 54.1 (79.4), very_hard 47.9 (72.1). Last suite (19:32Z): **30B hard->4B OPD 54.9 (77.7)** vs its start 50.1 (77.9) and
+  4B RL hard 54.1 (79.4): easy 88.8 / medium 65.6 / hard 41.8 / very_hard 30.6 / GSM8K 93.0 / MATH500 85.1 / AIME 18.6, 16.0.
+  -> at 4B, OPD from the 30B teacher ~ties the best direct 4B RL on the hard band (+0.8 mean@n, -1.7 pass@n) and trails it by
+  ~3 on medium; at 1.7B every OPD student beats same-band RL.
 
 ## 2026-10-19 — Qwen math suite on all remaining RL-best / distilled / base models (+ very_hard val) DONE
 
