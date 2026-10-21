@@ -4,6 +4,7 @@
 #   q4b     4B very_hard RL best, 30B very_hard -> 4B distilled, + the v1 models (very_hard set)
 #   q30b-4b 30B-A3B RL best x3 bands + 30B base + q4b
 #   q1p7b   1.7B RL best x3 bands + 1.7B base, 30B -> 1.7B and 4B -> 1.7B distilled x3 bands
+#   opd     the 9 on-policy-distilled students (best_hf of qwen3-opd/<spec>-pgk1-v1, best val step <= 120)
 # RL best = run_outcome.json best_step (best_hf export); distilled = final distill step 1000.
 suite_models() {
   local B=s3://scale-ml/genai/rl-distill b out=""
@@ -27,6 +28,10 @@ suite_models() {
       out+=" q30bvh-to-q1p7b-s1000=s3:${D30}/q30bvh-very_hard-to-q1p7b-${S}"
       out+=" q4bm-to-q1p7b-s1000=s3:${D4}/q4bm-medium-to-q1p7b-${S} q4bh-to-q1p7b-s1000=s3:${D4}/q4bh-hard-to-q1p7b-${S}"
       out+=" q4bvh-to-q1p7b-s1000=s3:${D4}/q4bvh-very_hard-to-q1p7b-${S}" ;;
+    opd)
+      for b in q4bm-to-q1p7b q4bh-to-q1p7b q4bvh-to-q1p7b q30bm-to-q1p7b q30bh-to-q1p7b q30bvh-to-q1p7b q30bm-to-q4b q30bh-to-q4b q30bvh-to-q4b; do
+        out+=" ${b}-opd120=s3:${B}/qwen3-opd/${b}-pgk1-v1/best_hf"
+      done ;;
     *) echo "unknown math suite: $1" >&2; return 2 ;;
   esac
   echo ${out}
