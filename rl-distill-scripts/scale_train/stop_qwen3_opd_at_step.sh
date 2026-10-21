@@ -15,6 +15,16 @@ log() { echo "$(date -u +%FT%TZ) ${SPEC} $*" | tee -a "${sup}/stop-at-step.log";
 log "waiting for step ${STOP_STEP} validation + checkpoint"
 until cat "${sup}"/pod-logs/*.log 2>/dev/null | grep -a " step:${STOP_STEP} - " | grep -q "val-core/math/acc/mean@16" \
   && aws s3 ls "${CKPT}/global_step_${STOP_STEP}/_REMOTE_COMPLETE.json" >/dev/null 2>&1; do sleep 30; done
+# W&B uploads asynchronously: give the run up to 15 min to put step STOP_STEP on the server before the job is cancelled
+# (cancelling right after the log line lost step 120 for two runs); whatever is still missing is backfilled below.
+WANDB_RUN_ID="q3-opd-${SPEC}-${RUN_TAG}-s42"
+wandb_has_step() {
+  (set -a; source .env; set +a; .venv/bin/python -c "
+import sys, wandb
+rows = wandb.Api(timeout=60).run('rl-distill/DAPO/${WANDB_RUN_ID}').history(keys=['actor/distillation/k1'], samples=100000, pandas=False)
+sys.exit(0 if any(r['_step'] == ${STOP_STEP} for r in rows) else 1)" >/dev/null 2>&1)
+}
+for _ in $(seq 1 30); do wandb_has_step && break; sleep 30; done
 job="$(grep -oE 'job_d[a-z0-9]+' "${sup}/state.json" | head -1)"
 touch "${sup}/STOP"
 tmux kill-session -t "rl-${name}" 2>/dev/null || true
@@ -40,3 +50,5 @@ PY
 aws s3 cp --only-show-errors "/tmp/opd_outcome_${SPEC}.json" "${ART}/run_outcome.json"
 aws s3 cp --only-show-errors "/tmp/opd_outcome_${SPEC}.json" "${ART}/best_hf/_RUN_OUTCOME.json"
 log "BEST_HF_PUBLISHED best_step=${best_step} val=${best_score} -> ${ART}/best_hf"
+(set -a; source .env; set +a; .venv/bin/python rl-distill-scripts/scale_train/wandb_backfill_step_from_pod_log.py \
+  --run-id "${WANDB_RUN_ID}" --step "${STOP_STEP}" --pod-log "${sup}"/pod-logs/*.log) 2>&1 | grep -E "WANDB_STEP_" | while read -r l; do log "${l}"; done
