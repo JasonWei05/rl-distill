@@ -32,6 +32,13 @@ distillation and more robust): Nemotron-Cascade 2 + MOPD's advantage clip.
   `scale_train/stop_qwen3_opd_at_step.sh` (waits for the step-120 validation + complete permanent checkpoint, stops the supervisor,
   cancels the job, publishes best_hf = best val step <= 120 + run_outcome.json); new runs default to 120. q4bvh-to-q1p7b stopped at
   step 124 (best val 12.96 @110). q30bh-to-q1p7b had just been submitted with 150 (no steps) -> cancelled and resubmitted with 120.
+- Stopped at 120: q4bm-to-q1p7b best val 38.25 @120, q30bm-to-q1p7b 34.98 @110, q4bvh-to-q1p7b 12.96 @110, q4bh-to-q1p7b 19.69 @110
+  (1.7B direct RL re-evals: medium 33.1, hard 12.1, very_hard 12.1). W&B lost step 120 for q4bm / q30bm (job cancelled before the
+  async uploader flushed) -> backfilled from the pod log (`scale_train/wandb_backfill_step_from_pod_log.py`); the stop script now
+  waits for W&B to have the step before cancelling (3a6a36e0).
+- Math suite on every OPD best_hf: watcher `scale_train/run_qwen3_opd_math_suite_watcher.sh` (tmux `q3-opd-math-watch`) starts a
+  1-GPU SINGLE_PASS suite job (8 sets, borrowing false, priority high) per finished run; registry `suite_models opd`
+  (`<spec>-opd120`). 2026-10-21 04:22Z started for q4bm/q4bh/q4bvh/q30bm-to-q1p7b.
 
 ## 2026-10-19 — Qwen math suite on all remaining RL-best / distilled / base models (+ very_hard val) DONE
 
