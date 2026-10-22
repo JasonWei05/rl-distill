@@ -12,6 +12,22 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-22 — Mode-covering (forward KL, off-policy) vs mode-seeking (reverse KL, on-policy): entropy + diversity analysis
+
+Scripts: `analysis/qwen3_opd_entropy_from_logs.py` (student per-token entropy = NLL of its own T=1 samples, from the OPD pod logs'
+`rollout_corr/training_log_ppl`; steps 1-10 = the off-policy student), `analysis/qwen3_answer_diversity.py` (distinct last-box answers
+per question over 16 samples + answer entropy, math-suite samples). Teacher entropy = mean NLL of the teacher's own sampled tokens in
+one train shard of its trace bundle (same band's train prompts).
+
+Per-token entropy (nats): teacher | off-policy (FKL) student | after OPD (RKL, steps 111-120)
+- 4B m/h/vh -> 1.7B: 0.52/0.58/0.60 | 0.76/0.96/1.05 | 0.47/0.64/0.85
+- 30B m/h/vh -> 1.7B: 0.29/0.42/0.59 | 0.54/0.86/0.99 | 0.39/0.63/0.85
+- 30B m/h/vh -> 4B: 0.29/0.42/0.59 | 0.36/0.58/0.76 | 0.28/0.41/0.64
+FKL students are 1.2-2.3x the teacher's entropy (mode covering); RKL pulls them back toward (twice slightly below) the teacher.
+Answer diversity (distinct answers / 16, hard val): off-policy 9.6-11.3 (1.7B), 6.9-8.0 (4B) -> OPD 7.7-9.4, 5.6-6.3 (~ the RL level:
+1.7B RL 7.4-9.1, 4B RL 5.2-5.7); pass@16 - pass@1 shrinks on medium / MATH500 (e.g. 30B medium->4B medium 41.2 -> 34.6). Yet pass@16
+still rises at 1.7B because pass@1 rises much more; at 4B pass@16 is ~flat (the classic trade-off shows there).
+
 ## 2026-10-20 — On-policy distillation (policy-gradient k1) of the 9 off-policy-distilled Qwen students LAUNCHED
 
 Goal: continue each off-policy-distilled student (step 1000) with on-policy distillation from its own RL teacher (RL best_hf) on its
