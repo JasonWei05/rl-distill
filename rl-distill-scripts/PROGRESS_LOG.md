@@ -4,6 +4,9 @@
 > now live in [`GEMMA4_DISTILL_VS_RL_EXPERIMENTS.md`](GEMMA4_DISTILL_VS_RL_EXPERIMENTS.md). That
 > canonical document supersedes older Gemma 4 status statements in this chronological log.
 
+> All Qwen3 math-suite scores (base / RL / off-policy / on-policy distillation, 1.7B and 4B students) in one place:
+> [`QWEN3_MATH_SUITE_RESULTS.md`](QWEN3_MATH_SUITE_RESULTS.md), regenerated from S3 by `summarize_qwen3_math_suite.py`.
+
 A running log of experiments/work in this repo. Newest entries on top. Each entry records the goal,
 what was run (config + exact scripts/data), results, and status, so work is resumable and auditable.
 
