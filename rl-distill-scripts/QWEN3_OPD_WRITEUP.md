@@ -17,54 +17,46 @@ Each off-policy-distilled student (step 1000, forward KL top-128 on teacher trac
 
 ### W&B runs (all Qwen3 runs)
 
-Direct RL (DAPO, project `DAPO`). Final step = last training step (early stopping; very hard includes the +100-step continuation); best = best validation checkpoint, the one used in all tables below.
+Direct RL (best = the validation checkpoint used in all tables below; very hard includes the +100-step continuation)
 
-| Model | Band | W&B | Final step | Best step |
-|---|---|---|---|---|
-| 30B A3B | medium | <https://wandb.ai/rl-distill/DAPO/runs/q3-30b-a3b-medium-es5-s42-v1> | 420 | 320 |
-| 30B A3B | hard | <https://wandb.ai/rl-distill/DAPO/runs/q3-30b-a3b-hard-es5-s42-v1> | 500 | 410 |
-| 30B A3B | very hard | <https://wandb.ai/rl-distill/DAPO/runs/q3-30b-a3b-very_hard-es5-s42-v1> | 550 | 460 |
-| 4B | medium | <https://wandb.ai/rl-distill/DAPO/runs/q3-4b-medium-es5-s42-v1> | 590 | 510 |
-| 4B | hard | <https://wandb.ai/rl-distill/DAPO/runs/q3-4b-hard-es5-s42-v1> | 600 | 560 |
-| 4B | very hard | <https://wandb.ai/rl-distill/DAPO/runs/q3-4b-very_hard-es5-s42-v1> | 700 | 620 |
-| 1.7B | medium | <https://wandb.ai/rl-distill/DAPO/runs/q3-1.7b-medium-es5-s42-v1> | 600 | 520 |
-| 1.7B | hard | <https://wandb.ai/rl-distill/DAPO/runs/q3-1.7b-hard-es5-s42-v1> | 600 | 550 |
-| 1.7B | very hard | <https://wandb.ai/rl-distill/DAPO/runs/q3-1.7b-very_hard-es5-s42-v1> | 1000 | 810 |
+- 30B A3B RL Medium https://wandb.ai/rl-distill/DAPO/runs/q3-30b-a3b-medium-es5-s42-v1 (final step 420, best step 320)
+- 30B A3B RL Hard https://wandb.ai/rl-distill/DAPO/runs/q3-30b-a3b-hard-es5-s42-v1 (final step 500, best step 410)
+- 30B A3B RL Very Hard https://wandb.ai/rl-distill/DAPO/runs/q3-30b-a3b-very_hard-es5-s42-v1 (final step 550, best step 460)
+- 4B RL Medium https://wandb.ai/rl-distill/DAPO/runs/q3-4b-medium-es5-s42-v1 (final step 590, best step 510)
+- 4B RL Hard https://wandb.ai/rl-distill/DAPO/runs/q3-4b-hard-es5-s42-v1 (final step 600, best step 560)
+- 4B RL Very Hard https://wandb.ai/rl-distill/DAPO/runs/q3-4b-very_hard-es5-s42-v1 (final step 700, best step 620)
+- 1.7B RL Medium https://wandb.ai/rl-distill/DAPO/runs/q3-1.7b-medium-es5-s42-v1 (final step 600, best step 520)
+- 1.7B RL Hard https://wandb.ai/rl-distill/DAPO/runs/q3-1.7b-hard-es5-s42-v1 (final step 600, best step 550)
+- 1.7B RL Very Hard https://wandb.ai/rl-distill/DAPO/runs/q3-1.7b-very_hard-es5-s42-v1 (final step 1000, best step 810)
 
-Off-policy distillation (forward KL top-128 on teacher traces, 1,000 steps; every run is evaluated at step 1000 in the Extensive Math Eval).
+Off-policy distillation (forward KL top-128, 1,000 steps; evaluated at step 1000)
 
-| Teacher ⇒ Student | W&B | GPUs |
-|---|---|---|
-| 30B RL Medium ⇒ 4B | <https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/7d4h349i> | 4 |
-| 30B RL Hard ⇒ 4B | <https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/su6s8dee> | 8 |
-| 30B RL Very Hard ⇒ 4B | <https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/djbjgba4> | 8 |
-| 30B RL Medium ⇒ 1.7B | <https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/gt36keuc> | 2 |
-| 30B RL Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/ppt88udx> | 2 |
-| 30B RL Very Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/dr48mkts> | 2 |
-| 4B RL Medium ⇒ 1.7B | <https://wandb.ai/rl-distill/qwen3-4b-rl-distill-v1/runs/kowg1frk> | 8 |
-| 4B RL Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/qwen3-4b-rl-distill-v1/runs/r9gsjy95> | 8 |
-| 4B RL Very Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/qwen3-4b-rl-distill-v1/runs/cn9a1nh2> | 8 |
+- 30B RL Medium ⇒ 4B https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/7d4h349i
+- 30B RL Hard ⇒ 4B https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/su6s8dee
+- 30B RL Very Hard ⇒ 4B https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/djbjgba4
+- 30B RL Medium ⇒ 1.7B https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/gt36keuc
+- 30B RL Hard ⇒ 1.7B https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/ppt88udx
+- 30B RL Very Hard ⇒ 1.7B https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/dr48mkts
+- 4B RL Medium ⇒ 1.7B https://wandb.ai/rl-distill/qwen3-4b-rl-distill-v1/runs/kowg1frk
+- 4B RL Hard ⇒ 1.7B https://wandb.ai/rl-distill/qwen3-4b-rl-distill-v1/runs/r9gsjy95
+- 4B RL Very Hard ⇒ 1.7B https://wandb.ai/rl-distill/qwen3-4b-rl-distill-v1/runs/cn9a1nh2
 
-Off-policy distillation from the untrained 4B Base into 30B A3B (small ⇒ big control; preempted segments were logged as separate runs, the last one finished at step 1000).
+Off-policy distillation from the untrained 4B Base into 30B A3B (small ⇒ big control; earlier runs are preempted segments, the last one finished at step 1000)
 
-| Teacher ⇒ Student | Finished run | Earlier preempted segments |
-|---|---|---|
-| 4B Base Medium ⇒ 30B A3B | <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/dojowpu7> | <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/8ya3dzj8>, <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/5iwqpskq> (to step 249), <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/8kau7cff>, <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/jdvzd4m4> (to step 676) |
-| 4B Base Hard ⇒ 30B A3B | <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/px7u3gbe> | <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/ksrks5ae>, <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/d26ja3r3> (to step 423) |
+- 4B Base Medium ⇒ 30B A3B https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/dojowpu7 (earlier segments: https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/8ya3dzj8, https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/5iwqpskq, https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/8kau7cff, https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/jdvzd4m4)
+- 4B Base Hard ⇒ 30B A3B https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/px7u3gbe (earlier segments: https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/ksrks5ae, https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/d26ja3r3)
 
-On-policy distillation (policy-gradient reverse KL, project `DAPO`, 120 steps; two runs show "crashed" because they were stopped at step 120 from a 150-step launch).
+On-policy distillation (120 steps; the 4B RL Hard and Very Hard ⇒ 1.7B runs show "crashed" only because they were stopped at step 120 from a 150-step launch)
 
-| Teacher ⇒ Student | W&B | Best step |
-|---|---|---|
-| 4B RL Medium ⇒ 1.7B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q4bm-to-q1p7b-pgk1-v1-s42> | 120 |
-| 4B RL Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q4bh-to-q1p7b-pgk1-v1-s42> | 110 |
-| 4B RL Very Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q4bvh-to-q1p7b-pgk1-v1-s42> | 110 |
-| 30B RL Medium ⇒ 1.7B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bm-to-q1p7b-pgk1-v1-s42> | 110 |
-| 30B RL Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bh-to-q1p7b-pgk1-v1-s42> | 100 |
-| 30B RL Very Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bvh-to-q1p7b-pgk1-v1-s42> | 100 |
-| 30B RL Medium ⇒ 4B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bm-to-q4b-pgk1-v1-s42> | 110 |
-| 30B RL Hard ⇒ 4B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bh-to-q4b-pgk1-v1-s42> | 120 |
-| 30B RL Very Hard ⇒ 4B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bvh-to-q4b-pgk1-v1-s42> | 100 |
+- 4B RL Medium ⇒ 1.7B https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q4bm-to-q1p7b-pgk1-v1-s42 (best step 120)
+- 4B RL Hard ⇒ 1.7B https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q4bh-to-q1p7b-pgk1-v1-s42 (best step 110)
+- 4B RL Very Hard ⇒ 1.7B https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q4bvh-to-q1p7b-pgk1-v1-s42 (best step 110)
+- 30B RL Medium ⇒ 1.7B https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bm-to-q1p7b-pgk1-v1-s42 (best step 110)
+- 30B RL Hard ⇒ 1.7B https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bh-to-q1p7b-pgk1-v1-s42 (best step 100)
+- 30B RL Very Hard ⇒ 1.7B https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bvh-to-q1p7b-pgk1-v1-s42 (best step 100)
+- 30B RL Medium ⇒ 4B https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bm-to-q4b-pgk1-v1-s42 (best step 110)
+- 30B RL Hard ⇒ 4B https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bh-to-q4b-pgk1-v1-s42 (best step 120)
+- 30B RL Very Hard ⇒ 4B https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bvh-to-q4b-pgk1-v1-s42 (best step 100)
 
 ### Matrix update (diagonal is RL)
 
@@ -94,45 +86,69 @@ Very hard
 | 4B Student | | 23.7 / 63.3 (RL step 620) | Off: 19.6 / 61.7 (step 1000); **On: 24.0 / 66.0 (step 100)** |
 | 30B Student | | | 38.4 / 76.3 (RL step 460) |
 
-### Extensive Math Eval (1.7B and 4B)
+### Extensive Math Eval by student and training difficulty
 
-mean@k / pass@k, where k is 32 for AIME and 16 everywhere else; Average is over the 8 sets. RL = best validation checkpoint; Off = off-policy distillation step 1000; On = on-policy distillation best step ≤ 120.
+mean@k / pass@k, where k is 32 for AIME and 16 everywhere else; Average is over the 8 sets. Each table is one student size and one training band. RL = best validation checkpoint; Off = off-policy distillation step 1000; On = on-policy distillation best step ≤ 120. Bold = best in the column within the table.
 
-1.7B students
+1.7B Medium
 
 | Model | Easy | Medium | Hard | Very Hard | GSM8K | MATH500 | AIME 2025 | AIME 2026 | Average |
 |---|---|---|---|---|---|---|---|---|---|
 | 1.7B Base | 31.4 / 85.7 | 9.6 / 55.7 | 3.8 / 32.3 | 3.3 / 30.3 | 40.3 / 94.6 | 30.1 / 81.0 | 1.0 / 13.3 | 0.5 / 16.7 | 15.0 / 51.2 |
-| 1.7B RL Medium | 70.7 / 93.7 | 33.1 / 79.7 | 14.6 / 54.0 | 12.1 / 50.0 | 83.1 / 97.0 | 66.2 / 89.4 | 5.4 / **33.3** | 2.5 / 13.3 | 36.0 / 63.8 |
-| 1.7B RL Hard | 66.4 / 94.7 | 28.4 / 75.0 | 12.1 / 51.0 | 11.2 / 48.7 | 80.9 / 97.0 | 62.6 / 88.4 | 2.7 / 23.3 | 3.3 / 26.7 | 33.5 / 63.1 |
-| 1.7B RL Very Hard | 62.5 / 89.7 | 27.8 / 67.3 | 10.4 / 40.0 | 12.1 / 42.7 | 80.4 / 96.6 | 60.1 / 84.2 | 2.0 / 20.0 | 2.0 / 16.7 | 32.2 / 57.1 |
-| 4B RL Medium ⇒ 1.7B Off | 67.2 / 95.3 | 27.8 / 74.7 | 12.1 / 49.7 | 9.4 / 44.0 | 82.6 / 96.7 | 64.9 / 89.2 | 3.5 / 30.0 | 2.5 / 23.3 | 33.7 / 62.9 |
-| 4B RL Medium ⇒ 1.7B On | **75.6** / **97.0** | **39.1** / **84.0** | 19.2 / 59.7 | 13.2 / 49.7 | **85.9** / 97.0 | 72.2 / **92.2** | 6.7 / 30.0 | 5.4 / 20.0 | 39.7 / 66.2 |
-| 4B RL Hard ⇒ 1.7B Off | 64.2 / 93.7 | 26.4 / 74.7 | 11.9 / 54.0 | 9.7 / 47.7 | 81.0 / 97.0 | 63.4 / 89.2 | 4.2 / 20.0 | 2.0 / 13.3 | 32.8 / 61.2 |
-| 4B RL Hard ⇒ 1.7B On | 74.7 / 95.3 | 37.9 / **84.0** | **19.4** / **62.3** | **14.1** / **56.0** | 85.5 / **97.5** | **73.1** / 91.8 | 7.8 / **33.3** | 5.6 / 23.3 | **39.8** / 68.0 |
-| 4B RL Very Hard ⇒ 1.7B Off | 61.1 / 92.0 | 25.3 / 72.3 | 10.9 / 49.0 | 10.0 / 45.7 | 78.6 / 96.9 | 59.7 / 88.4 | 2.5 / 23.3 | 2.2 / 30.0 | 31.3 / 62.2 |
-| 4B RL Very Hard ⇒ 1.7B On | 69.5 / 93.3 | 32.4 / 78.3 | 14.8 / 53.0 | 12.7 / 50.3 | 83.1 / 96.4 | 66.3 / 88.6 | 4.3 / 26.7 | 3.8 / 23.3 | 35.9 / 63.7 |
-| 30B RL Medium ⇒ 1.7B Off | 64.2 / 95.0 | 25.9 / 75.7 | 11.5 / 49.3 | 8.8 / 46.7 | 80.2 / 96.9 | 61.4 / 89.4 | 2.9 / 20.0 | 2.1 / 23.3 | 32.1 / 62.0 |
-| 30B RL Medium ⇒ 1.7B On | 72.5 / 96.0 | 33.9 / 80.7 | 15.5 / 55.3 | 11.7 / 51.0 | 84.1 / 96.7 | 67.9 / 89.8 | 4.9 / 26.7 | 4.4 / 23.3 | 36.9 / 64.9 |
-| 30B RL Hard ⇒ 1.7B Off | 61.8 / 95.3 | 24.9 / 77.7 | 11.3 / 52.7 | 9.0 / 49.3 | 79.1 / 97.1 | 62.3 / 89.4 | 3.8 / 26.7 | 2.4 / 20.0 | 31.8 / 63.5 |
-| 30B RL Hard ⇒ 1.7B On | 73.3 / 96.3 | 36.0 / **84.0** | 18.1 / 61.7 | 13.2 / 53.0 | 84.7 / 97.4 | 72.1 / 92.0 | **9.2** / 26.7 | **7.3** / **33.3** | 39.2 / **68.1** |
-| 30B RL Very Hard ⇒ 1.7B Off | 56.8 / 92.0 | 20.9 / 69.0 | 9.2 / 48.3 | 7.4 / 40.0 | 76.9 / 97.0 | 54.7 / 86.6 | 2.2 / 23.3 | 1.5 / 23.3 | 28.7 / 59.9 |
-| 30B RL Very Hard ⇒ 1.7B On | 67.8 / 94.0 | 28.9 / 74.7 | 12.9 / 50.0 | 10.2 / 49.0 | 83.2 / 96.6 | 64.0 / 89.0 | 3.1 / 16.7 | 4.3 / 30.0 | 34.3 / 62.5 |
+| 1.7B RL Medium | 70.7 / 93.7 | 33.1 / 79.7 | 14.6 / 54.0 | 12.1 / 50.0 | 83.1 / **97.0** | 66.2 / 89.4 | 5.4 / **33.3** | 2.5 / 13.3 | 36.0 / 63.8 |
+| 4B RL Medium ⇒ 1.7B Off | 67.2 / 95.3 | 27.8 / 74.7 | 12.1 / 49.7 | 9.4 / 44.0 | 82.6 / 96.7 | 64.9 / 89.2 | 3.5 / 30.0 | 2.5 / **23.3** | 33.7 / 62.9 |
+| 4B RL Medium ⇒ 1.7B On | **75.6** / **97.0** | **39.1** / **84.0** | **19.2** / **59.7** | **13.2** / 49.7 | **85.9** / **97.0** | **72.2** / **92.2** | **6.7** / 30.0 | **5.4** / 20.0 | **39.7** / **66.2** |
+| 30B RL Medium ⇒ 1.7B Off | 64.2 / 95.0 | 25.9 / 75.7 | 11.5 / 49.3 | 8.8 / 46.7 | 80.2 / 96.9 | 61.4 / 89.4 | 2.9 / 20.0 | 2.1 / **23.3** | 32.1 / 62.0 |
+| 30B RL Medium ⇒ 1.7B On | 72.5 / 96.0 | 33.9 / 80.7 | 15.5 / 55.3 | 11.7 / **51.0** | 84.1 / 96.7 | 67.9 / 89.8 | 4.9 / 26.7 | 4.4 / **23.3** | 36.9 / 64.9 |
 
-4B students
+1.7B Hard
+
+| Model | Easy | Medium | Hard | Very Hard | GSM8K | MATH500 | AIME 2025 | AIME 2026 | Average |
+|---|---|---|---|---|---|---|---|---|---|
+| 1.7B Base | 31.4 / 85.7 | 9.6 / 55.7 | 3.8 / 32.3 | 3.3 / 30.3 | 40.3 / 94.6 | 30.1 / 81.0 | 1.0 / 13.3 | 0.5 / 16.7 | 15.0 / 51.2 |
+| 1.7B RL Hard | 66.4 / 94.7 | 28.4 / 75.0 | 12.1 / 51.0 | 11.2 / 48.7 | 80.9 / 97.0 | 62.6 / 88.4 | 2.7 / 23.3 | 3.3 / 26.7 | 33.5 / 63.1 |
+| 4B RL Hard ⇒ 1.7B Off | 64.2 / 93.7 | 26.4 / 74.7 | 11.9 / 54.0 | 9.7 / 47.7 | 81.0 / 97.0 | 63.4 / 89.2 | 4.2 / 20.0 | 2.0 / 13.3 | 32.8 / 61.2 |
+| 4B RL Hard ⇒ 1.7B On | **74.7** / 95.3 | **37.9** / **84.0** | **19.4** / **62.3** | **14.1** / **56.0** | **85.5** / **97.5** | **73.1** / 91.8 | 7.8 / **33.3** | 5.6 / 23.3 | **39.8** / 68.0 |
+| 30B RL Hard ⇒ 1.7B Off | 61.8 / 95.3 | 24.9 / 77.7 | 11.3 / 52.7 | 9.0 / 49.3 | 79.1 / 97.1 | 62.3 / 89.4 | 3.8 / 26.7 | 2.4 / 20.0 | 31.8 / 63.5 |
+| 30B RL Hard ⇒ 1.7B On | 73.3 / **96.3** | 36.0 / **84.0** | 18.1 / 61.7 | 13.2 / 53.0 | 84.7 / 97.4 | 72.1 / **92.0** | **9.2** / 26.7 | **7.3** / **33.3** | 39.2 / **68.1** |
+
+1.7B Very Hard
+
+| Model | Easy | Medium | Hard | Very Hard | GSM8K | MATH500 | AIME 2025 | AIME 2026 | Average |
+|---|---|---|---|---|---|---|---|---|---|
+| 1.7B Base | 31.4 / 85.7 | 9.6 / 55.7 | 3.8 / 32.3 | 3.3 / 30.3 | 40.3 / 94.6 | 30.1 / 81.0 | 1.0 / 13.3 | 0.5 / 16.7 | 15.0 / 51.2 |
+| 1.7B RL Very Hard | 62.5 / 89.7 | 27.8 / 67.3 | 10.4 / 40.0 | 12.1 / 42.7 | 80.4 / 96.6 | 60.1 / 84.2 | 2.0 / 20.0 | 2.0 / 16.7 | 32.2 / 57.1 |
+| 4B RL Very Hard ⇒ 1.7B Off | 61.1 / 92.0 | 25.3 / 72.3 | 10.9 / 49.0 | 10.0 / 45.7 | 78.6 / 96.9 | 59.7 / 88.4 | 2.5 / 23.3 | 2.2 / **30.0** | 31.3 / 62.2 |
+| 4B RL Very Hard ⇒ 1.7B On | **69.5** / 93.3 | **32.4** / **78.3** | **14.8** / **53.0** | **12.7** / **50.3** | 83.1 / 96.4 | **66.3** / 88.6 | **4.3** / **26.7** | 3.8 / 23.3 | **35.9** / **63.7** |
+| 30B RL Very Hard ⇒ 1.7B Off | 56.8 / 92.0 | 20.9 / 69.0 | 9.2 / 48.3 | 7.4 / 40.0 | 76.9 / **97.0** | 54.7 / 86.6 | 2.2 / 23.3 | 1.5 / 23.3 | 28.7 / 59.9 |
+| 30B RL Very Hard ⇒ 1.7B On | 67.8 / **94.0** | 28.9 / 74.7 | 12.9 / 50.0 | 10.2 / 49.0 | **83.2** / 96.6 | 64.0 / **89.0** | 3.1 / 16.7 | **4.3** / **30.0** | 34.3 / 62.5 |
+
+4B Medium
 
 | Model | Easy | Medium | Hard | Very Hard | GSM8K | MATH500 | AIME 2025 | AIME 2026 | Average |
 |---|---|---|---|---|---|---|---|---|---|
 | 4B Base | 44.8 / 97.3 | 21.0 / 83.3 | 8.3 / 52.3 | 6.9 / 50.7 | 42.2 / 97.3 | 39.9 / 90.4 | 2.8 / 30.0 | 2.7 / 16.7 | 21.1 / 64.8 |
-| 4B RL Medium | **89.1** / 98.7 | 64.5 / 95.3 | 37.4 / 78.0 | 25.5 / 68.7 | **93.3** / 98.3 | 83.7 / 93.4 | 17.3 / 36.7 | 14.0 / 30.0 | 53.1 / 74.9 |
+| 4B RL Medium | **89.1** / 98.7 | **64.5** / **95.3** | **37.4** / **78.0** | **25.5** / **68.7** | **93.3** / **98.3** | **83.7** / 93.4 | **17.3** / 36.7 | **14.0** / 30.0 | **53.1** / **74.9** |
+| 30B RL Medium ⇒ 4B Off | 85.2 / **99.7** | 52.1 / 93.3 | 27.1 / 73.7 | 20.6 / 67.7 | 91.8 / 98.2 | 77.4 / **94.2** | 10.7 / **40.0** | 9.1 / 23.3 | 46.7 / 73.8 |
+| 30B RL Medium ⇒ 4B On | 88.9 / **99.7** | 59.7 / 94.3 | 32.6 / 74.7 | 23.4 / **68.7** | 92.6 / 97.6 | 80.0 / 93.8 | 11.8 / 36.7 | 10.9 / **33.3** | 50.0 / 74.8 |
+
+4B Hard
+
+| Model | Easy | Medium | Hard | Very Hard | GSM8K | MATH500 | AIME 2025 | AIME 2026 | Average |
+|---|---|---|---|---|---|---|---|---|---|
+| 4B Base | 44.8 / 97.3 | 21.0 / 83.3 | 8.3 / 52.3 | 6.9 / 50.7 | 42.2 / 97.3 | 39.9 / 90.4 | 2.8 / 30.0 | 2.7 / 16.7 | 21.1 / 64.8 |
 | 4B RL Hard | 87.6 / 98.3 | 65.2 / 94.7 | 39.4 / 83.7 | 29.2 / **74.7** | 92.8 / 98.4 | 84.0 / 95.4 | **19.1** / **53.3** | 15.8 / **36.7** | 54.1 / **79.4** |
-| 4B RL Very Hard | 84.3 / 98.0 | 55.5 / 89.7 | 30.6 / 71.7 | 23.8 / 63.7 | 92.5 / 98.0 | 77.7 / 92.6 | 8.9 / 30.0 | 10.0 / 33.3 | 47.9 / 72.1 |
-| 30B RL Medium ⇒ 4B Off | 85.2 / **99.7** | 52.1 / 93.3 | 27.1 / 73.7 | 20.6 / 67.7 | 91.8 / 98.2 | 77.4 / 94.2 | 10.7 / 40.0 | 9.1 / 23.3 | 46.7 / 73.8 |
-| 30B RL Medium ⇒ 4B On | 88.9 / **99.7** | 59.7 / 94.3 | 32.6 / 74.7 | 23.4 / 68.7 | 92.6 / 97.6 | 80.0 / 93.8 | 11.8 / 36.7 | 10.9 / 33.3 | 50.0 / 74.8 |
-| 30B RL Hard ⇒ 4B Off | 85.2 / 99.0 | 57.3 / **96.7** | 34.4 / 86.7 | 23.2 / 73.0 | 91.6 / **98.6** | 81.4 / 95.8 | 16.1 / 43.3 | 11.2 / 30.0 | 50.1 / 77.9 |
-| 30B RL Hard ⇒ 4B On | 88.8 / 99.0 | **65.6** / 94.7 | **41.8** / **87.0** | **30.6** / 73.7 | 93.0 / 98.1 | **85.1** / **96.0** | 18.6 / 40.0 | **16.0** / 33.3 | **54.9** / 77.7 |
-| 30B RL Very Hard ⇒ 4B Off | 79.9 / **99.7** | 46.8 / 90.0 | 22.3 / 72.3 | 19.6 / 62.0 | 90.5 / 97.9 | 73.5 / 92.2 | 7.7 / 23.3 | 6.6 / 33.3 | 43.4 / 71.3 |
-| 30B RL Very Hard ⇒ 4B On | 85.0 / 98.7 | 54.5 / 91.0 | 28.5 / 72.0 | 24.0 / 66.0 | 92.2 / 97.8 | 77.8 / 92.4 | 11.1 / 36.7 | 9.0 / 30.0 | 47.8 / 73.1 |
+| 30B RL Hard ⇒ 4B Off | 85.2 / **99.0** | 57.3 / **96.7** | 34.4 / 86.7 | 23.2 / 73.0 | 91.6 / **98.6** | 81.4 / 95.8 | 16.1 / 43.3 | 11.2 / 30.0 | 50.1 / 77.9 |
+| 30B RL Hard ⇒ 4B On | **88.8** / **99.0** | **65.6** / 94.7 | **41.8** / **87.0** | **30.6** / 73.7 | **93.0** / 98.1 | **85.1** / **96.0** | 18.6 / 40.0 | **16.0** / 33.3 | **54.9** / 77.7 |
+
+4B Very Hard
+
+| Model | Easy | Medium | Hard | Very Hard | GSM8K | MATH500 | AIME 2025 | AIME 2026 | Average |
+|---|---|---|---|---|---|---|---|---|---|
+| 4B Base | 44.8 / 97.3 | 21.0 / 83.3 | 8.3 / 52.3 | 6.9 / 50.7 | 42.2 / 97.3 | 39.9 / 90.4 | 2.8 / 30.0 | 2.7 / 16.7 | 21.1 / 64.8 |
+| 4B RL Very Hard | 84.3 / 98.0 | **55.5** / 89.7 | **30.6** / 71.7 | 23.8 / 63.7 | **92.5** / **98.0** | 77.7 / **92.6** | 8.9 / 30.0 | **10.0** / **33.3** | **47.9** / 72.1 |
+| 30B RL Very Hard ⇒ 4B Off | 79.9 / **99.7** | 46.8 / 90.0 | 22.3 / **72.3** | 19.6 / 62.0 | 90.5 / 97.9 | 73.5 / 92.2 | 7.7 / 23.3 | 6.6 / **33.3** | 43.4 / 71.3 |
+| 30B RL Very Hard ⇒ 4B On | **85.0** / 98.7 | 54.5 / **91.0** | 28.5 / 72.0 | **24.0** / **66.0** | 92.2 / 97.8 | **77.8** / 92.4 | **11.1** / **36.7** | 9.0 / 30.0 | 47.8 / **73.1** |
 
 ### Mode covering (forward KL, off-policy) vs mode seeking (reverse KL, on-policy)
 
