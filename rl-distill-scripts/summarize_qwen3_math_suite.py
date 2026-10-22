@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write QWEN3_MATH_SUITE_RESULTS.md: every Qwen3 math-suite score (s3://.../qwen3-math-suite-v1/<model>/<set>/summary.json).
 
-One table per student size and metric (mean@n, pass@n, n = 16 / AIME 32), rows grouped base / direct RL best / off-policy
+One table per student size, cells "mean@n / pass@n" (n = 16 / AIME 32), rows grouped base / direct RL best / off-policy
 distilled (step 1000) / on-policy distilled (best val step <= 120), plus the checkpoint each row was evaluated from.
 
     AWS_PROFILE=ml-worker python rl-distill-scripts/summarize_qwen3_math_suite.py
@@ -52,17 +52,18 @@ def main() -> int:
         "",
     ]
     for size in ("1.7B", "4B"):
-        for metric, title in (("mean", "mean@n"), ("pass", "pass@n")):
-            lines += [f"## {size} students — {title}", "", "| group | model | " + " | ".join(SETS) + " | avg |", "|---" * (len(SETS) + 3) + "|"]
-            for group, label, name in rows_for(size):
-                vals = []
-                for s in SETS:
-                    r = results.get((name, s))
-                    vals.append(None if r is None else r["mean_at_n"] if metric == "mean" else r["pass_at_k"][str(r["n"])])
-                avg = sum(vals) / len(vals) if all(v is not None for v in vals) else None
-                cells = " | ".join("—" if v is None else f"{v:.1f}" for v in vals)
-                lines.append(f"| {group} | {label} | {cells} | {'—' if avg is None else f'{avg:.1f}'} |")
-            lines.append("")
+        lines += [f"## {size} students — mean@n / pass@n", "", "| group | model | " + " | ".join(SETS) + " | avg |", "|---" * (len(SETS) + 3) + "|"]
+        for group, label, name in rows_for(size):
+            cells, means, passes = [], [], []
+            for s in SETS:
+                r = results.get((name, s))
+                if r is None:
+                    cells.append("—"); continue
+                m, p = r["mean_at_n"], r["pass_at_k"][str(r["n"])]
+                means.append(m); passes.append(p); cells.append(f"{m:.1f} / {p:.1f}")
+            avg = f"{sum(means) / len(SETS):.1f} / {sum(passes) / len(SETS):.1f}" if len(means) == len(SETS) else "—"
+            lines.append(f"| {group} | {label} | {' | '.join(cells)} | {avg} |")
+        lines.append("")
     lines += ["## Checkpoints evaluated", "", "| model | source |", "|---|---|"]
     for size in ("1.7B", "4B"):
         for _, _, name in rows_for(size):
