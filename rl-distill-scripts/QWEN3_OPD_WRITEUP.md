@@ -15,17 +15,56 @@ Each off-policy-distilled student (step 1000, forward KL top-128 on teacher trac
 - 120 steps; validation every 10 steps (mean@16 on the 300 in-distribution validation questions); best checkpoint = best validation step ≤ 120
 - vLLM TP 1 for the student and the 4B teacher, TP 2 for the 30B A3B teacher; GPUs: 1.7B student 2, 4B student 4
 
-Wandbs
+### W&B runs (all Qwen3 runs)
 
-- 4B RL Medium ⇒ 1.7B: <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q4bm-to-q1p7b-pgk1-v1-s42>
-- 4B RL Hard ⇒ 1.7B: <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q4bh-to-q1p7b-pgk1-v1-s42>
-- 4B RL Very Hard ⇒ 1.7B: <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q4bvh-to-q1p7b-pgk1-v1-s42>
-- 30B RL Medium ⇒ 1.7B: <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bm-to-q1p7b-pgk1-v1-s42>
-- 30B RL Hard ⇒ 1.7B: <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bh-to-q1p7b-pgk1-v1-s42>
-- 30B RL Very Hard ⇒ 1.7B: <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bvh-to-q1p7b-pgk1-v1-s42>
-- 30B RL Medium ⇒ 4B: <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bm-to-q4b-pgk1-v1-s42>
-- 30B RL Hard ⇒ 4B: <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bh-to-q4b-pgk1-v1-s42>
-- 30B RL Very Hard ⇒ 4B: <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bvh-to-q4b-pgk1-v1-s42>
+Direct RL (DAPO, project `DAPO`). Final step = last training step (early stopping; very hard includes the +100-step continuation); best = best validation checkpoint, the one used in all tables below.
+
+| Model | Band | W&B | Final step | Best step |
+|---|---|---|---|---|
+| 30B A3B | medium | <https://wandb.ai/rl-distill/DAPO/runs/q3-30b-a3b-medium-es5-s42-v1> | 420 | 320 |
+| 30B A3B | hard | <https://wandb.ai/rl-distill/DAPO/runs/q3-30b-a3b-hard-es5-s42-v1> | 500 | 410 |
+| 30B A3B | very hard | <https://wandb.ai/rl-distill/DAPO/runs/q3-30b-a3b-very_hard-es5-s42-v1> | 550 | 460 |
+| 4B | medium | <https://wandb.ai/rl-distill/DAPO/runs/q3-4b-medium-es5-s42-v1> | 590 | 510 |
+| 4B | hard | <https://wandb.ai/rl-distill/DAPO/runs/q3-4b-hard-es5-s42-v1> | 600 | 560 |
+| 4B | very hard | <https://wandb.ai/rl-distill/DAPO/runs/q3-4b-very_hard-es5-s42-v1> | 700 | 620 |
+| 1.7B | medium | <https://wandb.ai/rl-distill/DAPO/runs/q3-1.7b-medium-es5-s42-v1> | 600 | 520 |
+| 1.7B | hard | <https://wandb.ai/rl-distill/DAPO/runs/q3-1.7b-hard-es5-s42-v1> | 600 | 550 |
+| 1.7B | very hard | <https://wandb.ai/rl-distill/DAPO/runs/q3-1.7b-very_hard-es5-s42-v1> | 1000 | 810 |
+
+Off-policy distillation (forward KL top-128 on teacher traces, 1,000 steps; every run is evaluated at step 1000 in the Extensive Math Eval).
+
+| Teacher ⇒ Student | W&B | GPUs |
+|---|---|---|
+| 30B RL Medium ⇒ 4B | <https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/7d4h349i> | 4 |
+| 30B RL Hard ⇒ 4B | <https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/su6s8dee> | 8 |
+| 30B RL Very Hard ⇒ 4B | <https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/djbjgba4> | 8 |
+| 30B RL Medium ⇒ 1.7B | <https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/gt36keuc> | 2 |
+| 30B RL Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/ppt88udx> | 2 |
+| 30B RL Very Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/qwen3-30b-rl-distill-v1/runs/dr48mkts> | 2 |
+| 4B RL Medium ⇒ 1.7B | <https://wandb.ai/rl-distill/qwen3-4b-rl-distill-v1/runs/kowg1frk> | 8 |
+| 4B RL Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/qwen3-4b-rl-distill-v1/runs/r9gsjy95> | 8 |
+| 4B RL Very Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/qwen3-4b-rl-distill-v1/runs/cn9a1nh2> | 8 |
+
+Off-policy distillation from the untrained 4B Base into 30B A3B (small ⇒ big control; preempted segments were logged as separate runs, the last one finished at step 1000).
+
+| Teacher ⇒ Student | Finished run | Earlier preempted segments |
+|---|---|---|
+| 4B Base Medium ⇒ 30B A3B | <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/dojowpu7> | <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/8ya3dzj8>, <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/5iwqpskq> (to step 249), <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/8kau7cff>, <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/jdvzd4m4> (to step 676) |
+| 4B Base Hard ⇒ 30B A3B | <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/px7u3gbe> | <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/ksrks5ae>, <https://wandb.ai/rl-distill/qwen3-4b-base-distill-v1/runs/d26ja3r3> (to step 423) |
+
+On-policy distillation (policy-gradient reverse KL, project `DAPO`, 120 steps; two runs show "crashed" because they were stopped at step 120 from a 150-step launch).
+
+| Teacher ⇒ Student | W&B | Best step |
+|---|---|---|
+| 4B RL Medium ⇒ 1.7B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q4bm-to-q1p7b-pgk1-v1-s42> | 120 |
+| 4B RL Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q4bh-to-q1p7b-pgk1-v1-s42> | 110 |
+| 4B RL Very Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q4bvh-to-q1p7b-pgk1-v1-s42> | 110 |
+| 30B RL Medium ⇒ 1.7B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bm-to-q1p7b-pgk1-v1-s42> | 110 |
+| 30B RL Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bh-to-q1p7b-pgk1-v1-s42> | 100 |
+| 30B RL Very Hard ⇒ 1.7B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bvh-to-q1p7b-pgk1-v1-s42> | 100 |
+| 30B RL Medium ⇒ 4B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bm-to-q4b-pgk1-v1-s42> | 110 |
+| 30B RL Hard ⇒ 4B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bh-to-q4b-pgk1-v1-s42> | 120 |
+| 30B RL Very Hard ⇒ 4B | <https://wandb.ai/rl-distill/DAPO/runs/q3-opd-q30bvh-to-q4b-pgk1-v1-s42> | 100 |
 
 ### Matrix update (diagonal is RL)
 
