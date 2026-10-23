@@ -13,13 +13,14 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 IMG="${ST_IMAGE:-692474966980.dkr.ecr.us-west-2.amazonaws.com/scale_train/shared/training/tmp:20260829-002920.cd13c11a-e0f3-4f65-a74b-0e0c5d72d58a}"
 RUN_TAG="${RUN_TAG:-es5}"; TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-400}"; QWEN_SIZE="${QWEN_SIZE:-30b-a3b}"; BAND="${BAND:-medium}"
-case "${BAND}" in medium) BAND_SHORT=med ;; hard) BAND_SHORT=hard ;;
-  very_hard) BAND_SHORT=vhard ;; *) echo "FATAL: BAND must be medium, hard or very_hard" >&2; exit 2 ;; esac
+case "${BAND}" in easy) BAND_SHORT=easy ;; medium) BAND_SHORT=med ;; hard) BAND_SHORT=hard ;;
+  very_hard) BAND_SHORT=vhard ;; *) echo "FATAL: BAND must be easy, medium, hard or very_hard" >&2; exit 2 ;; esac
 case "${QWEN_SIZE}" in
   30b-a3b) SLUG=qwen3-30b-a3b; name=q3-30b-rl-${BAND_SHORT}; GPUS=8 ;;
+  8b) SLUG=qwen3-8b; name=q3-8b-rl-${BAND_SHORT}; GPUS=4 ;;
   4b) SLUG=qwen3-4b; name=q3-4b-rl-${BAND_SHORT}; GPUS=4 ;;
   1.7b) SLUG=qwen3-1.7b; name=q3-1p7b-rl-${BAND_SHORT}; GPUS=2 ;;
-  *) echo "FATAL: QWEN_SIZE must be 30b-a3b, 4b or 1.7b" >&2; exit 2 ;;
+  *) echo "FATAL: QWEN_SIZE must be 30b-a3b, 8b, 4b or 1.7b" >&2; exit 2 ;;
 esac
 S3_BASE="${S3_BASE:-s3://scale-ml/genai/rl-distill/${SLUG}-base-rl}"
 CKPT_URI="${S3_BASE}-full-checkpoints/qwen30b-${BAND}-${RUN_TAG}"
@@ -30,7 +31,7 @@ tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scrip
   --launch-log ${sup}/launch.log --monitor-log ${sup}/monitor.log --state-file ${sup}/state.json --stop-file ${sup}/STOP --pod-log-dir ${sup}/pod-logs \
   --completion-s3-uri ${CKPT_URI} --max-completion-step ${TOTAL_TRAINING_STEPS} --expected-completion-world-size ${GPUS} \
   --completion-best-hf-s3-uri ${S3_BASE}/${SLUG}-${BAND}-${RUN_TAG} \
-  -- env QWEN_SIZE=${QWEN_SIZE} BAND=${BAND} RUN_TAG=${RUN_TAG} S3_BASE=${S3_BASE} TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS} ROLLING_CHECKPOINT_ENABLED=${ROLLING_CHECKPOINT_ENABLED:-True} ASYNC_CHECKPOINT_UPLOAD=${ASYNC_CHECKPOINT_UPLOAD:-False} ALLOW_BORROWING=${ALLOW_BORROWING:-true} bash rl-distill-scripts/scale_train/launch_qwen3_30b_a3b_medium_rl.sh --image ${IMG}${ST_CLUSTER:+ --cluster ${ST_CLUSTER}} 2>&1 | tee -a ${sup}/supervisor.out"
+  -- env QWEN_SIZE=${QWEN_SIZE} BAND=${BAND} RUN_TAG=${RUN_TAG} S3_BASE=${S3_BASE} TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS} ROLLING_CHECKPOINT_ENABLED=${ROLLING_CHECKPOINT_ENABLED:-True} ASYNC_CHECKPOINT_UPLOAD=${ASYNC_CHECKPOINT_UPLOAD:-False} ALLOW_BORROWING=${ALLOW_BORROWING:-true} MBS=${MBS:-4} PADDED_TOKENS=${PADDED_TOKENS:-8192} bash rl-distill-scripts/scale_train/launch_qwen3_30b_a3b_medium_rl.sh --image ${IMG}${ST_CLUSTER:+ --cluster ${ST_CLUSTER}} 2>&1 | tee -a ${sup}/supervisor.out"
 # cleanup-rolling never deletes the committed rolling step (or anything newer); it only removes superseded ones.
 tmux kill-session -t "ckpt-janitor-${name}" 2>/dev/null || true
 tmux new-session -d -s "ckpt-janitor-${name}" "while [ ! -e ${sup}/STOP ]; do \

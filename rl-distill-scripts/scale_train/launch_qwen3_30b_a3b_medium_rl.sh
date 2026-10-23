@@ -17,6 +17,8 @@
 # QWEN_SIZE=4b: the same recipe on Qwen3-4B-Base (dense, tied embeddings) on 4 GPUs -- FSDP2 DP4 training, vLLM DP4
 # (one TP-1 engine per GPU), no router replay (no experts); everything else identical.
 # QWEN_SIZE=1.7b: Qwen3-1.7B-Base (dense, tied) on 2 GPUs -- FSDP2 DP2, vLLM DP2 (TP 1); same recipe.
+# QWEN_SIZE=8b: Qwen3-8B-Base (dense, untied) on 4 GPUs -- FSDP2 DP4, vLLM DP4 (TP 1, 16 GiB KV), no offload; same recipe.
+# MBS / PADDED_TOKENS override the per-GPU micro-batch (sequences / padded-token cap); defaults 4 / 8192.
 # ALLOW_BORROWING=false: dedicated capacity instead of borrowing (default true).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -24,10 +26,11 @@ QWEN_SIZE="${QWEN_SIZE:-30b-a3b}"
 # BAND=hard: the Qwen3-30B-defined hard band (30B k/8 = 1) of the same HF dataset for train + validation; same recipe.
 BAND="${BAND:-medium}"
 case "${BAND}" in
+  easy) BAND_SHORT=easy ;;
   medium) BAND_SHORT=med ;;
   hard) BAND_SHORT=hard ;;
   very_hard) BAND_SHORT=vhard ;;
-  *) echo "FATAL: BAND must be medium, hard or very_hard, got ${BAND}" >&2; exit 2 ;;
+  *) echo "FATAL: BAND must be easy, medium, hard or very_hard, got ${BAND}" >&2; exit 2 ;;
 esac
 RUN_TAG="${RUN_TAG:-es5}"   # -> run name DAPO-qwen3-<size>-base-pt-DeepScaleR-qwen30b-medium-seed42-${RUN_TAG}
 TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-400}"
@@ -38,19 +41,27 @@ case "${QWEN_SIZE}" in
     # one-node MoE layout of the 26B-A4B runs (FSDP2 DP8, phase-level offload, vLLM sleep mode, mbs 4 / 8192-token cap), with
     # vLLM at TP 2 (4 engines; ~28.5 GiB weights per GPU) and a 12 GiB KV cache per GPU (Qwen3-30B-A3B: 96 KiB/token, 48 KiB at TP 2)
     LAYOUT="GEN_TP=2,FSDP_CPU_OFFLOAD_POLICY=False,OFFLOAD=True,VLLM_SLEEP_MODE=True,MAX_PADDED_TOKENS_PER_MICROBATCH=8192,MICRO_BATCH_SIZE_PER_GPU=4,ROLLOUT_GPU_MEMORY_UTILIZATION=0.10,VLLM_KV_CACHE_MEMORY_BYTES=12884901888" ;;
+  8b)
+    MODEL=Qwen/Qwen3-8B-Base; REVISION=49e3418fbbbca6ecbdf9608b4d22e5a407081db4; GPUS=4; SLUG=qwen3-8b; WANDB_SLUG=q3-8b
+    DEFAULT_JOB_NAME=q3-8b-rl-${BAND_SHORT}; ROUTER_REPLAY=disabled
+    # 4 GPUs, no offload: FSDP2 DP4 (fp32 master + Adam of 8.2B params ~25-33 GiB/GPU stays resident), vLLM DP4 = one TP-1
+    # engine per GPU (16.4 GiB bf16 weights) with a 16 GiB KV cache (144 KiB/token -> ~115k tokens per engine; the 4B layout's
+    # 24 GiB would leave too little headroom next to the resident training state), 4 GiB weight-sync buckets, sleep mode
+    # during the update; micro-batches of 4 sequences / 8192 padded tokens (the 4B / 1.7B easy runs use double: 8 / 16384)
+    LAYOUT="GEN_TP=1,FSDP_CPU_OFFLOAD_POLICY=False,OFFLOAD=False,VLLM_SLEEP_MODE=True,MAX_PADDED_TOKENS_PER_MICROBATCH=${PADDED_TOKENS:-8192},MICRO_BATCH_SIZE_PER_GPU=${MBS:-4},ROLLOUT_GPU_MEMORY_UTILIZATION=0.10,VLLM_KV_CACHE_MEMORY_BYTES=17179869184,UPDATE_WEIGHTS_BUCKET_MB=4096" ;;
   4b)
     MODEL=Qwen/Qwen3-4B-Base; REVISION=906bfd4b4dc7f14ee4320094d8b41684abff8539; GPUS=4; SLUG=qwen3-4b; WANDB_SLUG=q3-4b
     DEFAULT_JOB_NAME=q3-4b-rl-${BAND_SHORT}; ROUTER_REPLAY=disabled
     # 4 GPUs: FSDP2 DP4 (fp32 master + Adam ~16 GiB/GPU stays resident, no offload), vLLM DP4 = one TP-1 engine per GPU (8 GiB
     # bf16 weights) with a 24 GiB KV cache (144 KiB/token -> ~175k tokens per engine), sleep mode during the update
-    LAYOUT="GEN_TP=1,FSDP_CPU_OFFLOAD_POLICY=False,OFFLOAD=False,VLLM_SLEEP_MODE=True,MAX_PADDED_TOKENS_PER_MICROBATCH=8192,MICRO_BATCH_SIZE_PER_GPU=4,ROLLOUT_GPU_MEMORY_UTILIZATION=0.10,VLLM_KV_CACHE_MEMORY_BYTES=25769803776" ;;
+    LAYOUT="GEN_TP=1,FSDP_CPU_OFFLOAD_POLICY=False,OFFLOAD=False,VLLM_SLEEP_MODE=True,MAX_PADDED_TOKENS_PER_MICROBATCH=${PADDED_TOKENS:-8192},MICRO_BATCH_SIZE_PER_GPU=${MBS:-4},ROLLOUT_GPU_MEMORY_UTILIZATION=0.10,VLLM_KV_CACHE_MEMORY_BYTES=25769803776" ;;
   1.7b)
     MODEL=Qwen/Qwen3-1.7B-Base; REVISION=ea980cb0a6c2ae4b936e82123acc929f1cec04c1; GPUS=2; SLUG=qwen3-1.7b; WANDB_SLUG=q3-1.7b
     DEFAULT_JOB_NAME=q3-1p7b-rl-${BAND_SHORT}; ROUTER_REPLAY=disabled
     # 2 GPUs: FSDP2 DP2 (fp32 master + grad + Adam of 2.0B params ~16 GiB/GPU, no offload), vLLM DP2 = one TP-1 engine per GPU
     # (3.4 GiB bf16 weights) with a 24 GiB KV cache (112 KiB/token -> ~225k tokens per engine), sleep mode during the update
-    LAYOUT="GEN_TP=1,FSDP_CPU_OFFLOAD_POLICY=False,OFFLOAD=False,VLLM_SLEEP_MODE=True,MAX_PADDED_TOKENS_PER_MICROBATCH=8192,MICRO_BATCH_SIZE_PER_GPU=4,ROLLOUT_GPU_MEMORY_UTILIZATION=0.10,VLLM_KV_CACHE_MEMORY_BYTES=25769803776" ;;
-  *) echo "FATAL: QWEN_SIZE must be 30b-a3b, 4b or 1.7b, got ${QWEN_SIZE}" >&2; exit 2 ;;
+    LAYOUT="GEN_TP=1,FSDP_CPU_OFFLOAD_POLICY=False,OFFLOAD=False,VLLM_SLEEP_MODE=True,MAX_PADDED_TOKENS_PER_MICROBATCH=${PADDED_TOKENS:-8192},MICRO_BATCH_SIZE_PER_GPU=${MBS:-4},ROLLOUT_GPU_MEMORY_UTILIZATION=0.10,VLLM_KV_CACHE_MEMORY_BYTES=25769803776" ;;
+  *) echo "FATAL: QWEN_SIZE must be 30b-a3b, 8b, 4b or 1.7b, got ${QWEN_SIZE}" >&2; exit 2 ;;
 esac
 S3_BASE="${S3_BASE:-s3://scale-ml/genai/rl-distill/${SLUG}-base-rl}"
 ENV_VARS="GEMMA4_MODEL=${MODEL},GEMMA4_MODEL_REVISION=${REVISION}"
