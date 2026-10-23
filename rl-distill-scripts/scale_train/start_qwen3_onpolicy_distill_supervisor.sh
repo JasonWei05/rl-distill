@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 IMG="${ST_IMAGE:-692474966980.dkr.ecr.us-west-2.amazonaws.com/scale_train/shared/training/tmp:20260829-002920.cd13c11a-e0f3-4f65-a74b-0e0c5d72d58a}"
 SPEC="${SPEC:?SPEC required}"; RUN_TAG="${RUN_TAG:-pgk1-v1}"; TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-120}"
-case "${SPEC##*-to-}" in q1p7b) GPUS=2 ;; q4b) GPUS=4 ;; *) echo "FATAL: unknown student in SPEC=${SPEC}" >&2; exit 2 ;; esac
+case "${SPEC##*-to-}" in q1p7b|q1p7b-base) GPUS=2 ;; q4b|q4b-base) GPUS=4 ;; *) echo "FATAL: unknown student in SPEC=${SPEC}" >&2; exit 2 ;; esac
 S3_BASE="${S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-opd}"
 CKPT_URI="${S3_BASE}-full-checkpoints/${SPEC}-${RUN_TAG}"
 name=q3-opd-${SPEC}
@@ -19,6 +19,7 @@ tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scrip
   --completion-s3-uri ${CKPT_URI} --max-completion-step ${TOTAL_TRAINING_STEPS} --expected-completion-world-size ${GPUS} \
   --completion-best-hf-s3-uri ${S3_BASE}/${SPEC}-${RUN_TAG} \
   -- env SPEC=${SPEC} RUN_TAG=${RUN_TAG} S3_BASE=${S3_BASE} TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS} ALLOW_BORROWING=${ALLOW_BORROWING:-false} \
+  TEST_FREQ=${TEST_FREQ:-10} SAVE_FREQ=${SAVE_FREQ:-10} \
   bash rl-distill-scripts/scale_train/launch_qwen3_onpolicy_distill.sh --image ${IMG} 2>&1 | tee -a ${sup}/supervisor.out"
 tmux kill-session -t "ckpt-janitor-${name}" 2>/dev/null || true
 tmux new-session -d -s "ckpt-janitor-${name}" "while [ ! -e ${sup}/STOP ] && tmux has-session -t rl-${name} 2>/dev/null; do \

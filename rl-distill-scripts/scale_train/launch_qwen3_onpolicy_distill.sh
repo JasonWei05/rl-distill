@@ -12,10 +12,15 @@
 # rolling resumable checkpoint every 5, best_hf at the end; early stopping off (fixed 120 steps).
 # vLLM TP 1 for the student and the 4B teacher (one engine per GPU); the 30B-A3B teacher runs at TP 2. All engines sleep between phases.
 #   SPEC=q4bm-to-q1p7b bash launch_qwen3_onpolicy_distill.sh --image <uri>
+# Teacher = an intermediate RL checkpoint, student = the untrained base (FLOP-matched sweep):
+#   SPEC=q4bm-s<STEP>-to-q1p7b-base -> teacher qwen3-4b-base-rl-full-checkpoints/qwen30b-medium-es5/global_step_<STEP>, student
+#   Qwen3-1.7B-Base itself (no off-policy init). TEST_FREQ / SAVE_FREQ override the validation / permanent-checkpoint cadence.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 SPEC="${SPEC:?SPEC=<teacher><band>-to-<student>, e.g. q4bm-to-q1p7b}"
 TEACHER_TAG="${SPEC%%-to-*}"; STUDENT="${SPEC##*-to-}"
+TEACHER_STEP=""
+if [[ "${TEACHER_TAG}" == *-s[0-9]* ]]; then TEACHER_STEP="${TEACHER_TAG##*-s}"; TEACHER_TAG="${TEACHER_TAG%-s*}"; fi
 case "${TEACHER_TAG}" in
   q4bm) T_SIZE=4b; BAND=medium ;; q4bh) T_SIZE=4b; BAND=hard ;; q4bvh) T_SIZE=4b; BAND=very_hard ;;
   q30bm) T_SIZE=30b; BAND=medium ;; q30bh) T_SIZE=30b; BAND=hard ;; q30bvh) T_SIZE=30b; BAND=very_hard ;;
@@ -24,15 +29,18 @@ esac
 B=s3://scale-ml/genai/rl-distill
 if [ "${T_SIZE}" = 4b ]; then
   TEACHER_S3="${B}/qwen3-4b-base-rl/qwen3-4b-${BAND}-es5/best_hf"; DIST="${B}/qwen3-4b-rl-distill-ckpts-v1"
+  [ -z "${TEACHER_STEP}" ] || TEACHER_S3="${B}/qwen3-4b-base-rl-full-checkpoints/qwen30b-${BAND}-es5/global_step_${TEACHER_STEP}/actor/huggingface"
   TEACHER_UTIL=0.20; TEACHER_TP=1   # 8 GiB bf16 weights + KV
 else
   TEACHER_S3="${B}/qwen3-30b-a3b-base-rl/qwen3-30b-a3b-${BAND}-es5/best_hf"; DIST="${B}/qwen3-30b-rl-distill-ckpts-v1"
+  [ -z "${TEACHER_STEP}" ] || TEACHER_S3="${B}/qwen3-30b-a3b-base-rl-full-checkpoints/qwen30b-${BAND}-es5/global_step_${TEACHER_STEP}/actor/huggingface"
   TEACHER_UTIL=0.45; TEACHER_TP=2   # 61 GiB bf16 weights -> ~30.5 GiB per GPU at TP 2 + ~5 GiB KV
 fi
+STUDENT_INIT=distilled; [[ "${STUDENT}" == *-base ]] && { STUDENT_INIT=base; STUDENT="${STUDENT%-base}"; }
 case "${STUDENT}" in
   q1p7b) MODEL=Qwen/Qwen3-1.7B-Base; REVISION=ea980cb0a6c2ae4b936e82123acc929f1cec04c1; GPUS=2 ;;
   q4b) MODEL=Qwen/Qwen3-4B-Base; REVISION=906bfd4b4dc7f14ee4320094d8b41684abff8539; GPUS=4
-       [ "${T_SIZE}" = 30b ] || { echo "FATAL: q4b students exist only for 30B teachers" >&2; exit 2; } ;;
+       [ "${T_SIZE}" = 30b ] || [ "${STUDENT_INIT}" = base ] || { echo "FATAL: distilled q4b students exist only for 30B teachers" >&2; exit 2; } ;;
   *) echo "FATAL: unknown student in SPEC=${SPEC}" >&2; exit 2 ;;
 esac
 STUDENT_S3="${DIST}/${TEACHER_TAG}-${BAND}-to-${STUDENT}-bs128-s1000-lr2e-6/global_step_1000/huggingface"
@@ -45,7 +53,8 @@ ACTOR_OFFLOAD=False; [ "${T_SIZE}" = 30b ] && ACTOR_OFFLOAD=True
 LAYOUT="GEN_TP=1,FSDP_CPU_OFFLOAD_POLICY=False,OFFLOAD=${OFFLOAD:-${ACTOR_OFFLOAD}},VLLM_SLEEP_MODE=True,MAX_PADDED_TOKENS_PER_MICROBATCH=8192,MICRO_BATCH_SIZE_PER_GPU=4"
 LAYOUT+=",ROLLOUT_GPU_MEMORY_UTILIZATION=0.10,VLLM_KV_CACHE_MEMORY_BYTES=${VLLM_KV_CACHE_MEMORY_BYTES:-8589934592}"   # n=1: 8 GiB KV is plenty
 
-ENV_VARS="GEMMA4_MODEL=${MODEL},GEMMA4_MODEL_REVISION=${REVISION},GEMMA4_INIT_MODEL_S3_URI=${STUDENT_S3}"
+ENV_VARS="GEMMA4_MODEL=${MODEL},GEMMA4_MODEL_REVISION=${REVISION}"
+[ "${STUDENT_INIT}" = base ] || ENV_VARS+=",GEMMA4_INIT_MODEL_S3_URI=${STUDENT_S3}"
 ENV_VARS+=",DIFFICULTY_DATASET_SOURCE=qwen3_30b_bands,DIFFICULTY_DATASET=${BAND}"
 ENV_VARS+=",DATA_SEED=42,RUN_NAME_SUFFIX=${RUN_TAG},RUN_SLOT=qwen3-opd-${SPEC}-${RUN_TAG},VERL_VLLM_PORT_BASE=54000"
 ENV_VARS+=",EXP_NAME=OPD-qwen3-${SPEC}-${RUN_TAG}"
@@ -60,7 +69,7 @@ ENV_VARS+=",N_RESP_PER_PROMPT=1,TRAIN_PROMPT_BSZ=128,TRAIN_PROMPT_MINI_BSZ=128,G
 ENV_VARS+=",ACTOR_FSDP_SIZE=-1,ACTOR_LR=2e-6,ACTOR_LR_WARMUP_STEPS=20,EARLY_STOPPING_ENABLED=False"
 # RL contract: lengths, validation, checkpoints
 ENV_VARS+=",HF_PUSH_FREQ=10,HF_PUSH_MAX_TO_KEEP=8,LOG_TRAIN_GENERATIONS=100,LOG_VAL_GENERATIONS=100,MAX_MODEL_LEN=12288,MAX_PROMPT_LENGTH=4096,MAX_RESPONSE_LENGTH=8192"
-ENV_VARS+=",ROLLOUT_ENFORCE_EAGER=False,ROUTER_REPLAY_MODE=disabled,ROUTER_Z_LOSS_COEF=0.0,SAVE_FREQ=10,SP_SIZE=1,TEST_FREQ=10,TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS},VAL_BEFORE_TRAIN=True,VAL_N=1,VLLM_DISABLE_COMPILE_CACHE=0"
+ENV_VARS+=",ROLLOUT_ENFORCE_EAGER=False,ROUTER_REPLAY_MODE=disabled,ROUTER_Z_LOSS_COEF=0.0,SAVE_FREQ=${SAVE_FREQ:-10},SP_SIZE=1,TEST_FREQ=${TEST_FREQ:-10},TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS},VAL_BEFORE_TRAIN=True,VAL_N=1,VLLM_DISABLE_COMPILE_CACHE=0"
 ENV_VARS+=",${LAYOUT}"
 ENV_VARS+=",PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 ENV_VARS+=",HF_PUSH_ENABLE=False,HF_PUSH_REQUIRED=False,MAX_ACTOR_CKPT_TO_KEEP=2"
