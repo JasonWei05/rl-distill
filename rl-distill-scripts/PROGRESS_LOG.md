@@ -12,6 +12,20 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-23 — FLOP-matched sweep: on-policy distillation from intermediate 4B medium RL checkpoints into the 1.7B BASE LAUNCHED
+
+Goal (10-22 meeting): FLOP-vs-performance curves for distillation vs RL at 1.7B on medium. Direct-RL curve = the existing 1.7B medium
+RL run; distillation points = 4B medium RL checkpoint at step k (teacher) -> on-policy distillation into the untrained 1.7B base, with
+x = 4B RL FLOPs to step k + distillation FLOPs (essential FLOPs: no checkpoint recompute, padding, old-log-prob recompute, LM head on
+prompts, validation; see the FLOP notes in the 10-23 discussion).
+- Teachers: qwen3-4b-base-rl-full-checkpoints/qwen30b-medium-es5/global_step_{20,50,100,150}/actor/huggingface (val 30.5 / 43.2 / 51.2 / ~57).
+- Student: Qwen3-1.7B-Base @ea980cb0 (no off-policy init). Same PG-k1 recipe as the 10-20 batch (128 x 1, one update / step, lr 2e-6,
+  20 warmup, advantage clip [-5, 5], IcePop [0.5, 2]); 250 steps, NO early stopping, validation every 5 steps, permanent checkpoint
+  (model + Adam + HF) every 10, rolling every 5; 2 GPUs; borrowing false, priority high. Code = HEAD (includes the distillation
+  global_batch_info fix 07e9460f, unlike the pinned pgk1-v1 batch).
+- SPEC=q4bm-s<STEP>-to-q1p7b-base, RUN_TAG=pgk1-base-v1 (launcher f1112b4d). Jobs: s20 job_dbdpc08cdkag08afn8f0, s50
+  job_dbdpc08cdkag08afn8eg, s100 job_dbdpc08cdkag07kobajg, s150 job_dbdpc0degg5g08bj72bg; W&B q3-opd-<SPEC>-pgk1-base-v1-s42.
+
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
 From the 10-22 meeting (`distill-vs-rl` notes doc): add a dense 8B to the Qwen ladder (replaces 30B-A3B MoE as the large dense
