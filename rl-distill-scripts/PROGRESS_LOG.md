@@ -12,6 +12,22 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
+
+From the 10-22 meeting (`distill-vs-rl` notes doc): add a dense 8B to the Qwen ladder (replaces 30B-A3B MoE as the large dense
+teacher) and fill in the easy band for the boundary condition. Same DAPO recipe as the other Qwen RL runs (GRPO n=16, 64 prompts /
+mini 32, lr 1e-6 + 20 warmup, clip 0.2/0.28, token-mean, 8k + 2k overlong buffer, token TIS 2, val mean@16 every 10 steps).
+- Early stopping: 5 validations in a row more than 1 point (0.01) below the best (patience 5, miss tolerance 0.01).
+- Checkpoints: permanent every 10 steps (model + Adam + LR/RNG + dataloader + HF export), rolling every 5; supervisors relaunch
+  on preemption / failure and the run-file resumes from the newest complete S3 checkpoint.
+- Qwen3-8B-Base @49e3418f: 4 GPUs, FSDP2 DP4, no offload (training state resident), vLLM TP1 x4 with 16 GiB KV, 4 GiB weight-sync
+  buckets, micro-batch 4 seqs / 8192 padded tokens; max 500 steps. 4B / 1.7B easy: 4 / 2 GPUs, micro-batch doubled (8 / 16384);
+  max 600 steps.
+- Launcher `scale_train/launch_qwen3_30b_a3b_medium_rl.sh` gained QWEN_SIZE=8b, BAND=easy and MBS / PADDED_TOKENS (f21cdf42).
+- Jobs: 8B easy job_dbddma8cdkag08afn7n0, 8B medium job_dbddma8cdkag07koba1g, 8B hard job_dbddmadegg5g08bj71ig, 4B easy
+  job_dbddmadegg5g07kc3gq0, 1.7B easy job_dbddmadegg5g08bj71i0; supervisors tmux `rl-q3-{8b-rl-easy,8b-rl-med,8b-rl-hard,4b-rl-easy,1p7b-rl-easy}`.
+  W&B q3-{8b,4b,1.7b}-<band>-es5-s42-v1; S3 qwen3-{8b,4b,1.7b}-base-rl{,-full-checkpoints}.
+
 ## 2026-10-22 — Mode-covering (forward KL, off-policy) vs mode-seeking (reverse KL, on-policy): entropy + diversity analysis
 
 Scripts: `analysis/qwen3_opd_entropy_from_logs.py` (student per-token entropy = NLL of its own T=1 samples, from the OPD pod logs'
