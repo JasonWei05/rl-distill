@@ -25,6 +25,10 @@ prompts, validation; see the FLOP notes in the 10-23 discussion).
   global_batch_info fix 07e9460f, unlike the pinned pgk1-v1 batch).
 - SPEC=q4bm-s<STEP>-to-q1p7b-base, RUN_TAG=pgk1-base-v1 (launcher f1112b4d). Jobs: s20 job_dbdpc08cdkag08afn8f0, s50
   job_dbdpc08cdkag08afn8eg, s100 job_dbdpc08cdkag07kobajg, s150 job_dbdpc0degg5g08bj72bg; W&B q3-opd-<SPEC>-pgk1-base-v1-s42.
+- Teacher steps 200 and 250 (checkpoints verified on S3) start automatically once 2 of the first 4 runs complete:
+  `scale_train/run_qwen3_opd_sweep_followup.sh` in tmux `q3-opd-sweep-followup` (b3f3f7b8), same settings.
+- 20:59Z (student steps 119/114/89/69): val ~18 / ~24 / ~28 / ~32 for teacher steps 20 / 50 / 100 / 150; k1 0.125/0.146/0.151/0.197 at
+  step 1 -> 0.057/0.059/0.070/0.079; no divergence. Stronger teacher checkpoint -> stronger student.
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
