@@ -13,7 +13,11 @@ while :; do
   done_n=0; done_list=""
   for st in ${WATCH}; do
     f=".scale_train_supervisors/q3-opd-q4bm-s${st}-to-q1p7b-base-${RUN_TAG}/state.json"
-    if grep -q '"status": "COMPLETED_RECEIPTS"' "${f}" 2>/dev/null; then done_n=$((done_n + 1)); done_list+=" s${st}"; fi
+    # done = supervisor saw the completion receipts, or (ScaleTrain API down) the run-file's S3 receipt exists
+    if grep -q '"status": "COMPLETED_RECEIPTS"' "${f}" 2>/dev/null \
+      || AWS_PROFILE=ml-worker timeout 60 aws s3 ls "s3://scale-ml/genai/rl-distill/qwen3-opd-full-checkpoints/q4bm-s${st}-to-q1p7b-base-${RUN_TAG}/run_complete.json" >/dev/null 2>&1; then
+      done_n=$((done_n + 1)); done_list+=" s${st}"
+    fi
   done
   (( done_n >= NEED )) && break
   sleep 120
