@@ -39,6 +39,9 @@ prompts, validation; see the FLOP notes in the 10-23 discussion).
   still running at ~180); 1.7B direct RL 33.8@520; two-stage (off-policy 1000 + OPD from the 4B @510 teacher) 38.2@120.
 - 2026-10-24: anchor run with the best teacher, 4B medium RL @510 -> 1.7B base, same settings (job_dbecqqocdkag08afna50), to test
   whether the off-policy stage adds anything beyond speed at a fixed teacher.
+- 2026-10-24: same OPD-from-base recipe with the best 4B RL teacher of the other bands: easy (4B easy RL @500, val 89.1;
+  job_dbed39gcdkag08afna5g) and hard (4B hard RL @560, val 41.2; job_dbed39legg5g08bj74p0); launcher tag q4be added (5cfea86f).
+  Compare against the two-stage (off-policy + OPD) students and direct 1.7B RL per band.
 - TODO: best_hf of the finished OPD runs is the final step (no early stopping); re-publish the best-val step from W&B (the pod
   logs miss 22:28Z-07:00Z) before any math suite; build the FLOP ledger once all 6 sweep runs finish.
 
