@@ -184,6 +184,13 @@ class ValidationEarlyStopping:
         self._validate_runtime_state()
         return patience_migrated
 
+    def reset_patience(self) -> None:
+        """Clear the miss streak and terminal flag; the all-time best (and its step) is kept."""
+
+        self.non_improving_rounds = 0
+        self.last_observed_triggered = False
+        self._validate_runtime_state()
+
     def save(self, checkpoint_dir: Path) -> Path:
         """Atomically persist state inside a trainer checkpoint directory."""
 

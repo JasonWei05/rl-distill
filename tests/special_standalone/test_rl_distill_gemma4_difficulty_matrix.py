@@ -288,6 +288,30 @@ def test_early_stopping_state_explicitly_migrates_only_patience_and_recomputes_t
     assert persisted["state"]["last_observed_triggered"] is True
 
 
+def test_early_stopping_reset_patience_keeps_best_and_clears_trigger(tmp_path):
+    trainer = _load(
+        "difficulty_early_stopping_reset_patience",
+        ROOT / "dapo/validation_early_stopping.py",
+    )
+    metric = "val-core/math/acc/mean@16"
+    original = trainer.ValidationEarlyStopping(metric=metric, patience=2)
+    original.observe({metric: 0.5}, step=0)
+    original.observe({metric: 0.4}, step=10)
+    assert original.observe({metric: 0.4}, step=20)[0]
+    original.save(tmp_path)
+
+    restored = trainer.ValidationEarlyStopping(metric=metric, patience=2)
+    restored.load(tmp_path)
+    restored.reset_patience()
+    restored.save(tmp_path)
+
+    persisted = json.loads((tmp_path / trainer.EARLY_STOPPING_STATE_FILENAME).read_text())["state"]
+    assert persisted["best_score"] == 0.5 and persisted["best_step"] == 0
+    assert persisted["non_improving_rounds"] == 0 and persisted["last_observed_triggered"] is False
+    assert not restored.observe({metric: 0.4}, step=30)[0]
+    assert restored.observe({metric: 0.4}, step=40)[0]
+
+
 def test_early_stopping_patience_migration_rejects_other_policy_changes():
     trainer = _load(
         "difficulty_early_stopping_patience_migration_guard",

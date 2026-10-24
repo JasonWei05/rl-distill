@@ -225,6 +225,16 @@ class RayDAPOTrainer(RayPPOTrainer):
             raise ValueError(f"EARLY_STOPPING_MIGRATE_PATIENCE_FROM must be a positive integer, got {raw_value!r}")
         return value
 
+    @staticmethod
+    def _early_stopping_reset_patience_at_step() -> int | None:
+        raw_value = os.environ.get("EARLY_STOPPING_RESET_PATIENCE_AT_STEP", "").strip()
+        if not raw_value:
+            return None
+        value = int(raw_value)
+        if value < 1:
+            raise ValueError(f"EARLY_STOPPING_RESET_PATIENCE_AT_STEP must be a positive integer, got {raw_value!r}")
+        return value
+
     def _restore_early_stopping_state(self, early_stopping: ValidationEarlyStopping | None) -> bool:
         """Restore stopping history and report whether this is a logical resume."""
         self._validation_early_stopping = early_stopping
@@ -308,6 +318,17 @@ class RayDAPOTrainer(RayPPOTrainer):
                     f"misses={early_stopping.non_improving_rounds} path={state_path}",
                     flush=True,
                 )
+        # Extending a run that already early-stopped: clear the miss streak once, only when resuming from exactly the
+        # named checkpoint, so later preemption resumes keep counting misses normally.
+        if self._early_stopping_reset_patience_at_step() == self.global_steps:
+            early_stopping.reset_patience()
+            early_stopping.save(checkpoint_dir)
+            print(
+                "EARLY_STOPPING_PATIENCE_RESET "
+                f"checkpoint_step={self.global_steps} best={early_stopping.best_score} "
+                f"best_step={early_stopping.best_step} path={state_path}",
+                flush=True,
+            )
         if early_stopping.last_observed_step is not None and early_stopping.last_observed_step > self.global_steps:
             raise ValueError(
                 "early-stopping state is newer than the restored trainer checkpoint: "
