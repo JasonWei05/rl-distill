@@ -47,13 +47,14 @@ prompts, validation; see the FLOP notes in the 10-23 discussion).
 - 2026-10-24: FLOP ledger + plot (`analysis/qwen3_flops_matched_opd_vs_rl.py`, `figures/qwen3_flops_matched_opd_vs_rl_medium.{png,json}`).
   Accounting: essential FLOPs incl. attention scores (2*L*n_q*d_h*S^2 per forward); RL trains only mixed-correctness groups (all-0 /
   all-1 groups still pay generation); per-sample lengths from the per-step 100-trace W&B tables, rescaled to the logged batch means.
-  Distill point: x = 4B RL to step k + 200 OPD steps, y = best val in OPD steps 1-200. Attention is only 5-12% of FLOPs (~1-2k-token
+  Distill point: x = 4B RL to step k + OPD to its peak step, y = peak val in OPD steps 1-200; faint line = the whole OPD val
+  curve offset by the teacher FLOPs (4B@510 dropped from the plot). Attention is only 5-12% of FLOPs (~1-2k-token
   responses); the zero-advantage exclusion cuts RL by 20% (1.7B: 9.4 -> 7.5 EFLOP over 600 steps).
-  | 4B teacher step | 20 | 50 | 100 | 150 | 200 | 250 | 510 (OPD at 74/200) |
-  |---|---|---|---|---|---|---|---|
-  | EFLOP (teacher + OPD) | 0.7+0.7 | 1.7+0.7 | 3.5+0.9 | 5.8+1.3 | 8.8+1.6 | 11.8+1.5 | 30.0+0.5 |
-  | best val (OPD step) | 18.7 (50) | 25.1 (120) | 30.0 (135) | 34.0 (180) | 34.9 (175) | 35.9 (180) | 32.6 (70) |
-  | 1.7B RL running best at same EFLOP | 23.4 | 27.9 | 31.1 | 33.8 | 33.8 | 33.8 | 33.8 |
+  | 4B teacher step | 20 | 50 | 100 | 150 | 200 | 250 |
+  |---|---|---|---|---|---|---|
+  | EFLOP (teacher + OPD to peak) | 0.7+0.16 | 1.7+0.41 | 3.5+0.58 | 5.8+1.16 | 8.8+1.35 | 11.8+1.38 |
+  | peak val (OPD step) | 18.7 (50) | 25.1 (120) | 30.0 (135) | 34.0 (180) | 34.9 (175) | 35.9 (180) |
+  | 1.7B RL running best at same EFLOP | 20.2 | 26.8 | 30.9 | 33.8 | 33.8 | 33.8 |
   1.7B RL best 33.8 @520 = 6.3 EFLOP. Below ~6 EFLOP direct RL is ahead; above it, teacher+OPD passes the RL plateau (+0.2 to +2.1).
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
