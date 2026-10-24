@@ -35,6 +35,10 @@ prompts, validation; see the FLOP notes in the 10-23 discussion).
   steps 200 / 250 at 01:24Z (jobs job_dbe10etegg5g08bj73h0 / job_dbe10eocdkag07kobbag, submitted 01:56Z; code tarball verified).
 - Completed (supervisor-verified receipts, attempt 1): 4B easy RL, 1.7B easy RL (600 steps each), OPD teacher steps 20, 50, 100.
   Teacher-200 / 250 students run ~10-14 steps/h (long responses + validation every 5 steps).
+- Best val (W&B) vs teacher step: s20 18.7@50, s50 25.5@225, s100 30.2@210, s150 34.0@180, s200 34.9@175 / s250 35.9@180 (both
+  still running at ~180); 1.7B direct RL 33.8@520; two-stage (off-policy 1000 + OPD from the 4B @510 teacher) 38.2@120.
+- 2026-10-24: anchor run with the best teacher, 4B medium RL @510 -> 1.7B base, same settings (job_dbecqqocdkag08afna50), to test
+  whether the off-policy stage adds anything beyond speed at a fixed teacher.
 - TODO: best_hf of the finished OPD runs is the final step (no early stopping); re-publish the best-val step from W&B (the pod
   logs miss 22:28Z-07:00Z) before any math suite; build the FLOP ledger once all 6 sweep runs finish.
 
