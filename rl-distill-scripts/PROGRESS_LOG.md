@@ -29,6 +29,14 @@ prompts, validation; see the FLOP notes in the 10-23 discussion).
   `scale_train/run_qwen3_opd_sweep_followup.sh` in tmux `q3-opd-sweep-followup` (b3f3f7b8), same settings.
 - 20:59Z (student steps 119/114/89/69): val ~18 / ~24 / ~28 / ~32 for teacher steps 20 / 50 / 100 / 150; k1 0.125/0.146/0.151/0.197 at
   step 1 -> 0.057/0.059/0.070/0.079; no divergence. Stronger teacher checkpoint -> stronger student.
+- 2026-10-23 ~20:16Z -> 2026-10-24 ~07:00Z: ScaleTrain / k8s API outage (status polls `status_unavailable`, every pod-log stream
+  ended 22:28Z with `http2: server sent GOAWAY`, kubectl hung). Jobs kept training; progress was tracked from S3 checkpoint pointers
+  (rolling + permanent). The follow-up trigger was made to accept the S3 `run_complete.json` receipt (17ac6582) and launched teacher
+  steps 200 / 250 at 01:24Z (jobs job_dbe10etegg5g08bj73h0 / job_dbe10eocdkag07kobbag, submitted 01:56Z; code tarball verified).
+- Completed (supervisor-verified receipts, attempt 1): 4B easy RL, 1.7B easy RL (600 steps each), OPD teacher steps 20, 50, 100.
+  Teacher-200 / 250 students run ~10-14 steps/h (long responses + validation every 5 steps).
+- TODO: best_hf of the finished OPD runs is the final step (no early stopping); re-publish the best-val step from W&B (the pod
+  logs miss 22:28Z-07:00Z) before any math suite; build the FLOP ledger once all 6 sweep runs finish.
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
