@@ -142,6 +142,8 @@ def main(root, out_png):
     hist, _ = runs["rl1p7b"]
     rl_val = sorted((k, v[VAL]) for k, v in hist.items() if v.get(VAL) is not None and k >= 1)
     rl_curve = [(rl_cum["rl1p7b"][k], max(y for kk, y in rl_val if kk <= k), y) for k, y in rl_val]
+    hist, _ = runs["rl4b"]
+    teacher_curve = sorted((rl_cum["rl4b"][k], v[VAL], k) for k, v in hist.items() if v.get(VAL) is not None and k >= 1)
 
     points = []
     for k in (20, 50, 100, 150, 200, 250):
@@ -162,11 +164,11 @@ def main(root, out_png):
 
     best_rl = max(rl_val, key=lambda x: x[1])
     print(f"1.7B RL best val {100 * best_rl[1]:.1f} @ step {best_rl[0]} = {rl_cum['rl1p7b'][best_rl[0]] / 1e18:.1f} EFLOP")
-    json.dump(dict(rl_curve=rl_curve, points=points), open(os.path.splitext(out_png)[0] + ".json", "w"), indent=1)
-    plot(rl_curve, points, out_png)
+    json.dump(dict(rl_curve=rl_curve, teacher_curve=teacher_curve, points=points), open(os.path.splitext(out_png)[0] + ".json", "w"), indent=1)
+    plot(rl_curve, teacher_curve, points, out_png)
 
 
-def plot(rl_curve, points, out_png):
+def plot(rl_curve, teacher_curve, points, out_png):
     import matplotlib
 
     matplotlib.use("Agg")
@@ -176,6 +178,13 @@ def plot(rl_curve, points, out_png):
     x, best, raw = (np.array(c) for c in zip(*rl_curve))
     ax.plot(x / 1e18, 100 * raw, color="tab:blue", alpha=0.25, lw=1)
     ax.plot(x / 1e18, 100 * best, color="tab:blue", lw=2, label="1.7B-base RL (running best val)")
+    x_max = 1.05 * max(max(c[0] for c in pt["curve"]) for pt in points)
+    tx, ty, tk = (np.array(c) for c in zip(*teacher_curve))
+    shown = tx <= x_max
+    ax.plot(tx[shown] / 1e18, 100 * ty[shown], color="tab:red", alpha=0.35, lw=1.2, ls="--", label="4B RL teacher val curve")
+    for pt in points:
+        i = int(np.argmin(np.abs(tk - pt["k"])))
+        ax.scatter(tx[i] / 1e18, 100 * ty[i], s=25, zorder=3, facecolor="white", edgecolor="tab:red", alpha=0.7)
     for pt in points:
         cx, cy = (np.array(c) for c in zip(*pt["curve"]))
         ax.plot(cx / 1e18, 100 * cy, color="tab:red", alpha=0.25, lw=1)
@@ -183,6 +192,7 @@ def plot(rl_curve, points, out_png):
         ax.annotate(f"4B@{pt['k']}", (pt["x"] / 1e18, 100 * pt["y"]), textcoords="offset points", xytext=(6, -10), fontsize=8)
     ax.plot([], [], color="tab:red", alpha=0.25, lw=1, label="OPD val curve (starts after the 4B RL teacher FLOPs)")
     ax.scatter([], [], color="tab:red", s=60, label=f"OPD peak val within first {OPD_STEPS} steps")
+    ax.set_xlim(right=x_max / 1e18)
     ax.set_xlabel("Total training FLOPs (EFLOP = 1e18; incl. attention, zero-advantage RL groups untrained)")
     ax.set_ylabel("Val mean@16 (medium, %)")
     ax.set_title("Qwen3 medium: FLOPs-matched direct RL vs RL-teacher + OPD (1.7B student)")
