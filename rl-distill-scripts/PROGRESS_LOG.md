@@ -56,6 +56,14 @@ prompts, validation; see the FLOP notes in the 10-23 discussion).
   | peak val (OPD step) | 18.7 (50) | 25.1 (120) | 30.0 (135) | 34.0 (180) | 34.9 (175) | 35.9 (180) |
   | 1.7B RL running best at same EFLOP | 20.2 | 26.8 | 30.9 | 33.8 | 33.8 | 33.8 |
   1.7B RL best 33.8 @520 = 6.3 EFLOP. Below ~6 EFLOP direct RL is ahead; above it, teacher+OPD passes the RL plateau (+0.2 to +2.1).
+- 2026-10-24 20:30Z: 1.7B medium RL **continued 600 -> 1000** (user request): it stopped on the 600-step cap, not early stopping
+  (2 misses carried; val slope still ~+1 pt/100 steps over 300-600, 75% mixed groups), so the plot's flat RL line past 6.3 EFLOP was an
+  extrapolation. Exact resume from global_step_600 (Adam + data cursor + ES state), same S3 prefixes / W&B id; first-run markers +
+  a copy of best_hf (step 520, used by the math suite) in `<ckpt>/archive_first_run/{run_complete.json,run_outcome.json,
+  best_hf_REMOTE_COMPLETE.json,best_hf_step520/}`. `QWEN_SIZE=1.7b BAND=medium TOTAL_TRAINING_STEPS=1000 SUP_TAG=-to1000
+  ALLOW_BORROWING=false MAX_RELAUNCHES=200 FAILURE_BACKOFF_SECONDS=3600 MAX_FAILURE_BACKOFF_SECONDS=3600 bash
+  start_qwen3_30b_a3b_medium_rl_supervisor.sh`; job_dbehaltegg5g08bj74tg (priority high, 2 GPUs); state
+  `.scale_train_supervisors/q3-1p7b-rl-med-20261024-to1000`. Re-run the FLOP script when it finishes.
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
