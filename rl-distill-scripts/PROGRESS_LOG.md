@@ -64,6 +64,15 @@ prompts, validation; see the FLOP notes in the 10-23 discussion).
   ALLOW_BORROWING=false MAX_RELAUNCHES=200 FAILURE_BACKOFF_SECONDS=3600 MAX_FAILURE_BACKOFF_SECONDS=3600 bash
   start_qwen3_30b_a3b_medium_rl_supervisor.sh`; job_dbehaltegg5g08bj74tg (priority high, 2 GPUs); state
   `.scale_train_supervisors/q3-1p7b-rl-med-20261024-to1000`. Re-run the FLOP script when it finishes.
+- 2026-10-24 ~21:00Z: plateau audit of the 9 Qwen RL runs (1.7B/4B/8B x easy/medium/hard). Plateaued / declining: 1.7B easy, 4B easy,
+  4B medium (ES @590), 4B hard (peak 41.2 @560, then 36.4/38.7/36.2), 8B easy. Stopped while improving: 8B medium (ES @330, best 64.7
+  @270) and 8B hard (ES @220, best 36.9 @170, 89% mixed groups) -- 8B led 4B at every common step but ended below 4B's final best
+  (65.8 / 41.2) because a 5-eval dip inside the 1-pt tolerance tripped patience 5. 1.7B hard: slow climb (+0.5-0.8 pt/100 steps).
+  Continued (user request; borrowing false, priority high, exact resume, same S3 prefixes / W&B ids; first-run markers + best_hf copy in
+  `<ckpt>/archive_first_run/`): 8B medium 330 -> 500 (job_dbehjq8cdkag07kobcag) and 8B hard 220 -> 500 (job_dbehjq8cdkag07kobcb0) with
+  the miss streak reset once via the new `EARLY_STOPPING_RESET_PATIENCE_AT_STEP=330|220` (fdfa6053; keeps the all-time best, patience 5
+  afterwards); 1.7B hard 600 -> 1000 (job_dbehjqdegg5g08bj74u0, 0 misses carried, no reset). Supervisors
+  `.scale_train_supervisors/q3-8b-rl-{med,hard}-20261024-ext`, `q3-1p7b-rl-hard-20261024-to1000`.
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
