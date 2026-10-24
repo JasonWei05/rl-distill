@@ -22,7 +22,7 @@ TEACHER_TAG="${SPEC%%-to-*}"; STUDENT="${SPEC##*-to-}"
 TEACHER_STEP=""
 if [[ "${TEACHER_TAG}" == *-s[0-9]* ]]; then TEACHER_STEP="${TEACHER_TAG##*-s}"; TEACHER_TAG="${TEACHER_TAG%-s*}"; fi
 case "${TEACHER_TAG}" in
-  q4bm) T_SIZE=4b; BAND=medium ;; q4bh) T_SIZE=4b; BAND=hard ;; q4bvh) T_SIZE=4b; BAND=very_hard ;;
+  q4be) T_SIZE=4b; BAND=easy ;; q4bm) T_SIZE=4b; BAND=medium ;; q4bh) T_SIZE=4b; BAND=hard ;; q4bvh) T_SIZE=4b; BAND=very_hard ;;
   q30bm) T_SIZE=30b; BAND=medium ;; q30bh) T_SIZE=30b; BAND=hard ;; q30bvh) T_SIZE=30b; BAND=very_hard ;;
   *) echo "FATAL: unknown teacher in SPEC=${SPEC}" >&2; exit 2 ;;
 esac
