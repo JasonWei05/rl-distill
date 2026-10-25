@@ -97,6 +97,13 @@ prompts, validation; see the FLOP notes in the 10-23 discussion).
   2026-10-25 15:50Z: 4B hard @560 -> 1.7B base OPD DONE: best **19.5 @215** (final 19.1) = two-stage 19.7 @110 (-0.2), vs 1.7B RL hard 14.1.
   2026-10-25 16:04Z: 8B hard RL continuation EARLY-STOPPED @390: best **40.8 @310** (was 36.9 @170; 4B hard 41.2). Follow-up launched
   8B hard @310 -> 1.7B base (job_dbf2jk0cdkag07kobe0g) and -> 4B base (job_dbf2jk5egg5g08bj7730) at 16:09Z; all 9 grid pairs now done or running.
+- 2026-10-25 ~17:30Z: **continuations of the non-saturated finished runs** (user request; borrowing false, priority high, exact resume,
+  same S3 prefixes / W&B ids; markers + best_hf copy archived): 8B medium RL 500 -> 800 (job_dbf2qmtegg5g07kc3kb0, normal ES: patience 5,
+  1-pt tolerance; its two students keep the step-480 teacher); 4B -> 1.7B best-teacher OPD easy / medium / hard 250 -> 500
+  (job_dbf2qmtegg5g08bj773g / job_dbf2qmocdkag08afncl0 / job_dbf2qmocdkag07kobe20) with early stopping ON = no +0.5 pt gain in 100 steps
+  (patience 10, min_delta 0.005, val every 10 so every best has an HF export). Their checkpoints predate ES state, so the history is
+  seeded from W&B via EARLY_STOPPING_LEGACY_STATE_B64 (`scale_train/build_es_migration_from_wandb.py`, 8e56b858; step-10 evals only):
+  easy best 73.5 @240 (1 miss), medium 36.9 @190 (6 misses), hard 19.1 @250 (0 misses).
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
