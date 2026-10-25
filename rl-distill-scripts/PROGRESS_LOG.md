@@ -105,6 +105,28 @@ prompts, validation; see the FLOP notes in the 10-23 discussion).
   seeded from W&B via EARLY_STOPPING_LEGACY_STATE_B64 (`scale_train/build_es_migration_from_wandb.py`, 8e56b858; step-10 evals only):
   easy best 73.5 @240 (1 miss), medium 36.9 @190 (6 misses), hard 19.1 @250 (0 misses).
 
+## 2026-10-25 — Pre-training vs RL ablation for the 4B -> 1.7B distillation gain (LAUNCHED stage 1)
+
+Question: 4B-RL -> 1.7B-base OPD beats 1.7B RL (+1.3 / +2.6 / +5.4 easy / medium / hard). Is that from the 4B's better
+pre-training behavior (P) or its larger capacity / better RL optimization (C)? 2x2 over teacher {P source} x {capacity}, every
+teacher RL-trained on the band then on-policy distilled into the 1.7B base; baseline = direct 1.7B RL:
+- (P 1.7B, C 1.7B) control: 1.7B RL -> 1.7B base (same-size self-distillation)
+- (P 4B,   C 4B)   main result: 4B RL -> 1.7B base
+- (P 1.7B, C 4B)   Exp 1: 4B' = 4B base on-policy distilled FROM the 1.7B base, then RL, then -> 1.7B base
+- (P 4B,   C 1.7B) Exp 2: 1.7B' = 1.7B base on-policy distilled FROM the 4B base, then RL, then -> 1.7B base
+All distillation = on-policy (PG-k1, user decision 10-25). Budgets: pre-distill 250 steps fixed (k1 closes 95% by step 37-111 in
+every finished OPD run), per band; ablation RL cap 1000 with patience 10 evals + 1-pt tolerance (replay: never stops any of the 9
+main RL curves before its best; patience 5 cut 8B med/hard 3.6-3.9 pts early); final OPD cap 500 with "+0.5 in 100 steps" ES.
+**Stage 1 launched 2026-10-25 ~17:45Z** (launcher 2245bdd2: base teachers qb1p7b*/qb4b* from pinned Hub revisions, 1.7B RL
+teachers q1p7b*), borrowing false, priority high:
+- pre-distill (RUN_TAG pgk1-pre-v1, 250 steps, val + HF export every 10, no ES): qb1p7b{e,m,h}-to-q4b-base (4 GPUs) and
+  qb4b{e,m,h}-to-q1p7b-base (2 GPUs).
+- control (RUN_TAG pgk1-base-v1, cap 500, val every 10, ES patience 10 / min_delta 0.005): q1p7be-s470 / q1p7bm-s680 /
+  q1p7bh-s910 -to-q1p7b-base (teacher = 1.7B RL best step).
+**USER GATE: after pre-distillation, STOP and let the user inspect** (val by step vs the source base, k1, entropy, length) and pick
+the checkpoint per band/direction; only then launch the ablation RL (needs an S3-init option in the Qwen RL launcher) and the
+final OPD stage.
+
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
 From the 10-22 meeting (`distill-vs-rl` notes doc): add a dense 8B to the Qwen ladder (replaces 30B-A3B MoE as the large dense
