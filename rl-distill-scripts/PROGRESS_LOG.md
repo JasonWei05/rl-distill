@@ -135,6 +135,8 @@ final OPD stage.
   @480 -> 4B base DONE 20:39Z best 61.1 @245 (4B RL medium 65.8) -> on medium the 8B teacher is a worse teacher than the 4B for
   1.7B and distillation from base trails RL for the 4B student (like easy, -0.8). Controls (same-size 1.7B RL -> 1.7B base) reach
   their teacher's val within ~60-130 steps with k1 ~0.001-0.004.
+  Controls early-stopped (no +0.5 in 100 steps): easy 1.7B RL @470 -> 1.7B base best 72.5 @130 (stop 230; teacher 72.6), hard @910
+  best 13.7 @80 (stop 180; teacher 14.1) -> same-size distillation reproduces the RL teacher, no gain beyond it.
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
