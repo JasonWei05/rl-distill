@@ -16,6 +16,8 @@
 # Teacher = an intermediate RL checkpoint, student = the untrained base (FLOP-matched sweep):
 #   SPEC=q4bm-s<STEP>-to-q1p7b-base -> teacher qwen3-4b-base-rl-full-checkpoints/qwen30b-medium-es5/global_step_<STEP>, student
 #   Qwen3-1.7B-Base itself (no off-policy init). TEST_FREQ / SAVE_FREQ override the validation / permanent-checkpoint cadence.
+# EARLY_STOPPING_PATIENCE=<evals> [EARLY_STOPPING_MIN_DELTA=<abs>] turns validation early stopping on (no miss tolerance), e.g. for
+# extending a finished run; EARLY_STOPPING_LEGACY_STATE_B64 seeds its history when the restored checkpoint predates it.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 SPEC="${SPEC:?SPEC=<teacher><band>-to-<student>, e.g. q4bm-to-q1p7b}"
@@ -73,7 +75,13 @@ ENV_VARS+=",ONPOLICY_DISTILL_TEACHER_TP=${TEACHER_TP},ONPOLICY_DISTILL_TEACHER_G
 ENV_VARS+=",ROLLOUT_IS_THRESHOLD=0.5_2.0"
 # batch / optimiser: 128 prompts x 1 sample, one update per step
 ENV_VARS+=",N_RESP_PER_PROMPT=1,TRAIN_PROMPT_BSZ=128,TRAIN_PROMPT_MINI_BSZ=128,GEN_PROMPT_BSZ=128,ENABLE_FILTER_GROUPS=False,ENABLE_OVERLONG_BUFFER=False"
-ENV_VARS+=",ACTOR_FSDP_SIZE=-1,ACTOR_LR=2e-6,ACTOR_LR_WARMUP_STEPS=20,EARLY_STOPPING_ENABLED=False"
+ENV_VARS+=",ACTOR_FSDP_SIZE=-1,ACTOR_LR=2e-6,ACTOR_LR_WARMUP_STEPS=20"
+if [ -n "${EARLY_STOPPING_PATIENCE:-}" ]; then
+  ENV_VARS+=",EARLY_STOPPING_ENABLED=True,EARLY_STOPPING_PATIENCE=${EARLY_STOPPING_PATIENCE},EARLY_STOPPING_MIN_DELTA=${EARLY_STOPPING_MIN_DELTA:-0.0}"
+  [ -z "${EARLY_STOPPING_LEGACY_STATE_B64:-}" ] || ENV_VARS+=",EARLY_STOPPING_LEGACY_STATE_B64=${EARLY_STOPPING_LEGACY_STATE_B64}"
+else
+  ENV_VARS+=",EARLY_STOPPING_ENABLED=False"
+fi
 # RL contract: lengths, validation, checkpoints
 ENV_VARS+=",HF_PUSH_FREQ=10,HF_PUSH_MAX_TO_KEEP=8,LOG_TRAIN_GENERATIONS=100,LOG_VAL_GENERATIONS=100,MAX_MODEL_LEN=12288,MAX_PROMPT_LENGTH=4096,MAX_RESPONSE_LENGTH=8192"
 ENV_VARS+=",ROLLOUT_ENFORCE_EAGER=False,ROUTER_REPLAY_MODE=disabled,ROUTER_Z_LOSS_COEF=0.0,SAVE_FREQ=${SAVE_FREQ:-10},SP_SIZE=1,TEST_FREQ=${TEST_FREQ:-10},TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS},VAL_BEFORE_TRAIN=True,VAL_N=1,VLLM_DISABLE_COMPILE_CACHE=0"

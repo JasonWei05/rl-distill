@@ -19,7 +19,8 @@ tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scrip
   --completion-s3-uri ${CKPT_URI} --max-completion-step ${TOTAL_TRAINING_STEPS} --expected-completion-world-size ${GPUS} \
   --completion-best-hf-s3-uri ${S3_BASE}/${SPEC}-${RUN_TAG} \
   -- env SPEC=${SPEC} RUN_TAG=${RUN_TAG} S3_BASE=${S3_BASE} TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS} ALLOW_BORROWING=${ALLOW_BORROWING:-false} \
-  TEST_FREQ=${TEST_FREQ:-10} SAVE_FREQ=${SAVE_FREQ:-10} \
+  TEST_FREQ=${TEST_FREQ:-10} SAVE_FREQ=${SAVE_FREQ:-10} EARLY_STOPPING_PATIENCE=${EARLY_STOPPING_PATIENCE:-} \
+  EARLY_STOPPING_MIN_DELTA=${EARLY_STOPPING_MIN_DELTA:-} EARLY_STOPPING_LEGACY_STATE_B64=${EARLY_STOPPING_LEGACY_STATE_B64:-} \
   bash rl-distill-scripts/scale_train/launch_qwen3_onpolicy_distill.sh --image ${IMG} 2>&1 | tee -a ${sup}/supervisor.out"
 tmux kill-session -t "ckpt-janitor-${name}" 2>/dev/null || true
 tmux new-session -d -s "ckpt-janitor-${name}" "while [ ! -e ${sup}/STOP ] && tmux has-session -t rl-${name} 2>/dev/null; do \
