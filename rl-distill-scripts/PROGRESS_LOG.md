@@ -95,6 +95,8 @@ prompts, validation; see the FLOP notes in the 10-23 discussion).
   launched 8B medium @480 -> 1.7B base (job_dbetjalegg5g07kc3jqg) and -> 4B base (job_dbetjalegg5g08bj76b0) at 10:27Z.
   2026-10-25 11:41Z: 1.7B hard RL continuation DONE at the 1000 cap: best **14.1 @910** (was 12.6 @550; +1.5 over 400 steps).
   2026-10-25 15:50Z: 4B hard @560 -> 1.7B base OPD DONE: best **19.5 @215** (final 19.1) = two-stage 19.7 @110 (-0.2), vs 1.7B RL hard 14.1.
+  2026-10-25 16:04Z: 8B hard RL continuation EARLY-STOPPED @390: best **40.8 @310** (was 36.9 @170; 4B hard 41.2). Follow-up launched
+  8B hard @310 -> 1.7B base (job_dbf2jk0cdkag07kobe0g) and -> 4B base (job_dbf2jk5egg5g08bj7730) at 16:09Z; all 9 grid pairs now done or running.
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
