@@ -126,6 +126,11 @@ teachers q1p7b*), borrowing false, priority high:
 **USER GATE: after pre-distillation, STOP and let the user inspect** (val by step vs the source base, k1, entropy, length) and pick
 the checkpoint per band/direction; only then launch the ablation RL (needs an S3-init option in the Qwen RL launcher) and the
 final OPD stage.
+- ~18:30Z (user request: 2/3 of the queued borrowing-false jobs -> borrowing true, auto-resume on preemption): queued jobs cancelled by
+  ID and relaunched by fresh supervisors (SUP_TAG -borrow, ALLOW_BORROWING=true; PREEMPTED -> immediate relaunch from the newest
+  S3 checkpoint, MAX_RELAUNCHES=200): qb1p7b{e,m,h}-to-q4b-base (job_dbf49p8cdkag08afncug / job_dbf49pdegg5g07kc3kfg /
+  job_dbf49p8cdkag08afncv0) and controls q1p7bm-s680 / q1p7bh-s910 (job_dbf49qocdkag08afncvg / job_dbf4a1ocdkag08afnd00) -- all
+  IN_PROGRESS within minutes. qb4b{e,m,h}-to-q1p7b-base stay queued on borrowing false.
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
