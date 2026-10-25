@@ -78,6 +78,15 @@ prompts, validation; see the FLOP notes in the 10-23 discussion).
   the miss streak reset once via the new `EARLY_STOPPING_RESET_PATIENCE_AT_STEP=330|220` (fdfa6053; keeps the all-time best, patience 5
   afterwards); 1.7B hard 600 -> 1000 (job_dbehjqdegg5g08bj74u0, 0 misses carried, no reset). Supervisors
   `.scale_train_supervisors/q3-8b-rl-{med,hard}-20261024-ext`, `q3-1p7b-rl-hard-20261024-to1000`.
+- 2026-10-25 03:51Z: **dense-ladder OPD-from-base grid** (user decision: Qwen sizes 1.7B / 4B / 8B only, bands easy / medium / hard;
+  9 teacher->student pairs = 4B->1.7B, 8B->1.7B, 8B->4B; 4B->1.7B easy/medium/hard already done / running). Same recipe as the
+  from-base sweep: PG-k1, 128 x 1, lr 2e-6, 250 steps, NO early stopping, val every 5, permanent ckpt every 10; 2 GPUs for a 1.7B
+  student, 4 for a 4B student; borrowing false, priority high; RUN_TAG=pgk1-base-v1; teacher pinned to its RL best step.
+  Launcher gained 8B teachers (dd5396c9: q8be/q8bm/q8bh, vLLM TP1, 0.32 util). Launched now: 8B easy @460 -> 1.7B base
+  (job_dbenpjocdkag08afnb40) and -> 4B base (job_dbenpjocdkag07kobctg). Medium / hard start automatically when the 8B RL
+  continuations finish (`scale_train/run_qwen3_opd_8b_teacher_followup.sh`, tmux q3-opd-8b-followup, log
+  `.scale_train_supervisors/q3-opd-8b-followup.log`): it waits for the fresh run_complete.json, takes best_step from run_outcome.json
+  once its final_step matches the receipt, then launches q8b<band>-s<best>-to-{q1p7b,q4b}-base.
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
