@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # On-policy distillation (policy-gradient form) of the off-policy-distilled Qwen3 students toward their RL teachers.
 #   SPEC=<teacher><band>-to-<student>: q4bm|q4bh|q4bvh|q30bm|q30bh|q30bvh - to - q1p7b|q4b (q4b* teachers only -> q1p7b)
+#   q8be|q8bm|q8bh (Qwen3-8B RL teachers) exist only for base students: SPEC=q8b<band>-s<STEP>-to-<q1p7b|q4b>-base
 #   student = that off-policy distillation's global_step_1000 HF export; teacher = the teacher's RL best_hf; band = its band
 # Recipe (Nemotron-Cascade 2 OPD + MOPD advantage clip; PROGRESS_LOG 2026-10-20):
 #   per-token advantage A_t = sg[log pi_teacher(y_t) - log pi_train(y_t)] (k1 + policy gradient, no task reward, no
@@ -23,6 +24,7 @@ TEACHER_STEP=""
 if [[ "${TEACHER_TAG}" == *-s[0-9]* ]]; then TEACHER_STEP="${TEACHER_TAG##*-s}"; TEACHER_TAG="${TEACHER_TAG%-s*}"; fi
 case "${TEACHER_TAG}" in
   q4be) T_SIZE=4b; BAND=easy ;; q4bm) T_SIZE=4b; BAND=medium ;; q4bh) T_SIZE=4b; BAND=hard ;; q4bvh) T_SIZE=4b; BAND=very_hard ;;
+  q8be) T_SIZE=8b; BAND=easy ;; q8bm) T_SIZE=8b; BAND=medium ;; q8bh) T_SIZE=8b; BAND=hard ;;
   q30bm) T_SIZE=30b; BAND=medium ;; q30bh) T_SIZE=30b; BAND=hard ;; q30bvh) T_SIZE=30b; BAND=very_hard ;;
   *) echo "FATAL: unknown teacher in SPEC=${SPEC}" >&2; exit 2 ;;
 esac
@@ -31,12 +33,17 @@ if [ "${T_SIZE}" = 4b ]; then
   TEACHER_S3="${B}/qwen3-4b-base-rl/qwen3-4b-${BAND}-es5/best_hf"; DIST="${B}/qwen3-4b-rl-distill-ckpts-v1"
   [ -z "${TEACHER_STEP}" ] || TEACHER_S3="${B}/qwen3-4b-base-rl-full-checkpoints/qwen30b-${BAND}-es5/global_step_${TEACHER_STEP}/actor/huggingface"
   TEACHER_UTIL=0.20; TEACHER_TP=1   # 8 GiB bf16 weights + KV
+elif [ "${T_SIZE}" = 8b ]; then
+  TEACHER_S3="${B}/qwen3-8b-base-rl/qwen3-8b-${BAND}-es5/best_hf"; DIST=""
+  [ -z "${TEACHER_STEP}" ] || TEACHER_S3="${B}/qwen3-8b-base-rl-full-checkpoints/qwen30b-${BAND}-es5/global_step_${TEACHER_STEP}/actor/huggingface"
+  TEACHER_UTIL=0.32; TEACHER_TP=1   # 16.4 GiB bf16 weights + ~9 GiB KV, one engine per GPU
 else
   TEACHER_S3="${B}/qwen3-30b-a3b-base-rl/qwen3-30b-a3b-${BAND}-es5/best_hf"; DIST="${B}/qwen3-30b-rl-distill-ckpts-v1"
   [ -z "${TEACHER_STEP}" ] || TEACHER_S3="${B}/qwen3-30b-a3b-base-rl-full-checkpoints/qwen30b-${BAND}-es5/global_step_${TEACHER_STEP}/actor/huggingface"
   TEACHER_UTIL=0.45; TEACHER_TP=2   # 61 GiB bf16 weights -> ~30.5 GiB per GPU at TP 2 + ~5 GiB KV
 fi
 STUDENT_INIT=distilled; [[ "${STUDENT}" == *-base ]] && { STUDENT_INIT=base; STUDENT="${STUDENT%-base}"; }
+[ "${T_SIZE}" != 8b ] || [ "${STUDENT_INIT}" = base ] || { echo "FATAL: 8B teachers have no off-policy students; use a -base student" >&2; exit 2; }
 case "${STUDENT}" in
   q1p7b) MODEL=Qwen/Qwen3-1.7B-Base; REVISION=ea980cb0a6c2ae4b936e82123acc929f1cec04c1; GPUS=2 ;;
   q4b) MODEL=Qwen/Qwen3-4B-Base; REVISION=906bfd4b4dc7f14ee4320094d8b41684abff8539; GPUS=4
