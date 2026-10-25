@@ -192,6 +192,9 @@ def plot(rl_curve, teacher_curve, points, out_png, rl_last_step):
         ax.annotate(f"4B@{pt['k']}", (pt["x"] / 1e18, 100 * pt["y"]), textcoords="offset points", xytext=(6, -10), fontsize=8)
     ax.plot([], [], color="tab:red", alpha=0.25, lw=1, label="OPD val curve (starts after the 4B RL teacher FLOPs)")
     ax.scatter([], [], color="tab:red", s=60, label=f"OPD peak val within first {OPD_STEPS} steps")
+    if x_max > x[-1]:  # the RL run has stopped: its best is final, so carry it to the right edge
+        ax.plot([x[-1] / 1e18, x_max / 1e18], [100 * best[-1]] * 2, color="tab:blue", lw=1.5, ls="--",
+                label=f"1.7B-base RL best after it stopped (step {rl_last_step})")
     ax.set_xlim(right=x_max / 1e18)
     ax.set_xlabel("Total training FLOPs (EFLOP = 1e18; incl. attention, zero-advantage RL groups untrained)")
     ax.set_ylabel("Val mean@16 (medium, %)")
