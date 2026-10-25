@@ -94,6 +94,7 @@ prompts, validation; see the FLOP notes in the 10-23 discussion).
   2026-10-25 10:25Z: 8B medium RL continuation DONE at the 500 cap: best **68.3 @480** (was 64.7 @270; 4B medium 65.8). Follow-up
   launched 8B medium @480 -> 1.7B base (job_dbetjalegg5g07kc3jqg) and -> 4B base (job_dbetjalegg5g08bj76b0) at 10:27Z.
   2026-10-25 11:41Z: 1.7B hard RL continuation DONE at the 1000 cap: best **14.1 @910** (was 12.6 @550; +1.5 over 400 steps).
+  2026-10-25 15:50Z: 4B hard @560 -> 1.7B base OPD DONE: best **19.5 @215** (final 19.1) = two-stage 19.7 @110 (-0.2), vs 1.7B RL hard 14.1.
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
