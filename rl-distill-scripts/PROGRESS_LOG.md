@@ -137,6 +137,8 @@ final OPD stage.
   their teacher's val within ~60-130 steps with k1 ~0.001-0.004.
   Controls early-stopped (no +0.5 in 100 steps): easy 1.7B RL @470 -> 1.7B base best 72.5 @130 (stop 230; teacher 72.6), hard @910
   best 13.7 @80 (stop 180; teacher 14.1) -> same-size distillation reproduces the RL teacher, no gain beyond it.
+  Medium control @680 best 34.5 @90 (stop 190; teacher 34.7). 4B -> 1.7B extensions early-stopped: easy best 74.0 @340 (stop 440;
+  was 73.9 @245), medium 37.5 @260 (stop 360; was 37.3 @210; two-stage 38.2) -> the step-250 slope was a tail, +0.1-0.2 only.
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
