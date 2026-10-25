@@ -90,7 +90,7 @@ prompts, validation; see the FLOP notes in the 10-23 discussion).
   `.scale_train_supervisors/q3-opd-8b-followup.log`): it waits for the fresh run_complete.json, takes best_step from run_outcome.json
   once its final_step matches the receipt, then launches q8b<band>-s<best>-to-{q1p7b,q4b}-base.
   2026-10-25 09:25Z: 8B easy -> 1.7B base DONE: best 73.2 @240 (final 71.3) ~= 4B easy teacher's 73.9 and above 1.7B RL easy 72.6.
-  8B easy -> 4B base at step 220: 87.8 @70, flat since (4B RL easy 89.1 @500).
+  8B easy -> 4B base DONE 10:03Z: best 88.3 @240 (87.8 by step 70, ~87 plateau after) vs 4B RL easy 89.1 @500 -> OPD -0.8.
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
