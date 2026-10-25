@@ -131,6 +131,10 @@ final OPD stage.
   S3 checkpoint, MAX_RELAUNCHES=200): qb1p7b{e,m,h}-to-q4b-base (job_dbf49p8cdkag08afncug / job_dbf49pdegg5g07kc3kfg /
   job_dbf49p8cdkag08afncv0) and controls q1p7bm-s680 / q1p7bh-s910 (job_dbf49qocdkag08afncvg / job_dbf4a1ocdkag08afnd00) -- all
   IN_PROGRESS within minutes. qb4b{e,m,h}-to-q1p7b-base stay queued on borrowing false.
+- 2026-10-25 grid results: 8B medium @480 -> 1.7B base DONE 19:44Z best 33.5 @230 (4B-teacher student 37.3, 1.7B RL 34.7); 8B medium
+  @480 -> 4B base DONE 20:39Z best 61.1 @245 (4B RL medium 65.8) -> on medium the 8B teacher is a worse teacher than the 4B for
+  1.7B and distillation from base trails RL for the 4B student (like easy, -0.8). Controls (same-size 1.7B RL -> 1.7B base) reach
+  their teacher's val within ~60-130 steps with k1 ~0.001-0.004.
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
