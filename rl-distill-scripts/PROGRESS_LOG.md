@@ -55,6 +55,8 @@ prompts, validation; see the FLOP notes in the 10-23 discussion).
   | EFLOP (teacher + OPD to peak) | 0.7+0.16 | 1.7+0.41 | 3.5+0.58 | 5.8+1.16 | 8.8+1.35 | 11.8+1.38 |
   | peak val (OPD step) | 18.7 (50) | 25.1 (120) | 30.0 (135) | 34.0 (180) | 34.9 (175) | 35.9 (180) |
   | 1.7B RL running best at same EFLOP | 20.2 | 26.8 | 30.9 | 33.8 | 33.8 | 33.8 |
+  2026-10-25 01Z refresh (1.7B RL continuation at step 720 = 9.2 EFLOP): RL new best 34.7 @680 (8.6 EFLOP); 4B@200 (34.9, 10.1
+  EFLOP) and 4B@250 (35.9, 13.2 EFLOP) are now past the end of the RL curve -- compare again when the run reaches 1000.
   1.7B RL best 33.8 @520 = 6.3 EFLOP. Below ~6 EFLOP direct RL is ahead; above it, teacher+OPD passes the RL plateau (+0.2 to +2.1).
 - 2026-10-24 20:30Z: 1.7B medium RL **continued 600 -> 1000** (user request): it stopped on the 600-step cap, not early stopping
   (2 misses carried; val slope still ~+1 pt/100 steps over 300-600, 75% mixed groups), so the plot's flat RL line past 6.3 EFLOP was an

@@ -165,10 +165,10 @@ def main(root, out_png):
     best_rl = max(rl_val, key=lambda x: x[1])
     print(f"1.7B RL best val {100 * best_rl[1]:.1f} @ step {best_rl[0]} = {rl_cum['rl1p7b'][best_rl[0]] / 1e18:.1f} EFLOP")
     json.dump(dict(rl_curve=rl_curve, teacher_curve=teacher_curve, points=points), open(os.path.splitext(out_png)[0] + ".json", "w"), indent=1)
-    plot(rl_curve, teacher_curve, points, out_png)
+    plot(rl_curve, teacher_curve, points, out_png, rl_last_step=rl_val[-1][0])
 
 
-def plot(rl_curve, teacher_curve, points, out_png):
+def plot(rl_curve, teacher_curve, points, out_png, rl_last_step):
     import matplotlib
 
     matplotlib.use("Agg")
@@ -177,7 +177,7 @@ def plot(rl_curve, teacher_curve, points, out_png):
     fig, ax = plt.subplots(figsize=(8, 5))
     x, best, raw = (np.array(c) for c in zip(*rl_curve))
     ax.plot(x / 1e18, 100 * raw, color="tab:blue", alpha=0.25, lw=1)
-    ax.plot(x / 1e18, 100 * best, color="tab:blue", lw=2, label="1.7B-base RL (running best val)")
+    ax.plot(x / 1e18, 100 * best, color="tab:blue", lw=2, label=f"1.7B-base RL (running best val, steps 1-{rl_last_step})")
     x_max = 1.05 * max(max(c[0] for c in pt["curve"]) for pt in points)
     tx, ty, tk = (np.array(c) for c in zip(*teacher_curve))
     shown = tx <= x_max
