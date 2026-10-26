@@ -24,7 +24,11 @@ def main():
     ap.add_argument("--per-question", type=int, default=8, help="score the first K responses of every question")
     ap.add_argument("--tensor-parallel-size", type=int, default=1)
     ap.add_argument("--max-model-len", type=int, default=12288)
-    ap.add_argument("--gpu-memory-utilization", type=float, default=0.85)
+    # prompt_logprobs materializes full-vocab (152k) logits for every scored position OUTSIDE the vLLM memory budget: keep the
+    # budget low and the per-step token count small (30B-A3B at TP 2 OOMed at 0.85 / default batching)
+    ap.add_argument("--gpu-memory-utilization", type=float, default=0.6)
+    ap.add_argument("--max-num-batched-tokens", type=int, default=8192)
+    ap.add_argument("--max-num-seqs", type=int, default=16)
     ap.add_argument("--output", required=True)
     a = ap.parse_args()
 
@@ -51,7 +55,8 @@ def main():
             n_prompt.append(len(p_ids))
 
     llm = LLM(model=a.model, tensor_parallel_size=a.tensor_parallel_size, max_model_len=a.max_model_len,
-              gpu_memory_utilization=a.gpu_memory_utilization, enable_prefix_caching=False)
+              gpu_memory_utilization=a.gpu_memory_utilization, enable_prefix_caching=False,
+              max_num_batched_tokens=a.max_num_batched_tokens, max_num_seqs=a.max_num_seqs, enable_chunked_prefill=True)
     outs = llm.generate(requests, SamplingParams(max_tokens=1, prompt_logprobs=0, temperature=1.0))
     seq_nll, seq_len = [], []
     for out, n_p in zip(outs, n_prompt):
