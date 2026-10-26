@@ -54,7 +54,8 @@ export HF_HOME="${HF_HOME:-/tmp/hf_cache}" HF_HUB_CACHE="${HF_HUB_CACHE:-/tmp/hf
 # ScaleTrain pods on ml-gpu-batch (EKS) are IPv6-only, interface eth0
 export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${NETWORK_INTERFACE_NAME:-eth0}}" NCCL_SOCKET_FAMILY="${NCCL_SOCKET_FAMILY:-AF_INET6}" GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${NETWORK_INTERFACE_NAME:-eth0}}"
 n_gpus="$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)"
-case "${STUDENT}" in q4b) min_gpus=4 ;; q1p7b) min_gpus=2 ;; *) echo "FATAL: STUDENT must be q4b|q1p7b" >&2; exit 2 ;; esac
+# q4b at DP2: 4B x 16 B fp32 params + grads + Adam = ~32 GB/GPU (DP4 was the old default for the 30B-teacher runs)
+case "${STUDENT}" in q4b) min_gpus=2 ;; q1p7b) min_gpus=2 ;; *) echo "FATAL: STUDENT must be q4b|q1p7b" >&2; exit 2 ;; esac
 (( n_gpus >= min_gpus )) || { echo "FATAL: needs ${min_gpus} GPUs (FSDP2 DP${min_gpus} for the ${STUDENT} student; 4 for trace collection), got ${n_gpus}" >&2; exit 2; }
 GPU_IDS_CSV="$(seq -s, 0 $((n_gpus - 1)))"
 unset CUDA_VISIBLE_DEVICES
