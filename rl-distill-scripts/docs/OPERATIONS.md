@@ -39,8 +39,9 @@ venv was built in. The devbox venvs live in the main checkout (`/mnt/efs/jasonwe
 worktree. Check with `.venv/bin/python -c "import verl; print(verl.__file__)"`. Pods are unaffected (the tarball is unpacked
 over `/workspace/rl-distill`, which the image venv points at).
 
-RL entry point: every RL/OPD run goes `run_dapo_rl.sh` -> `python3 -m dapo.main_dapo`, so `dapo/dapo_ray_trainer.py` is what
-executes. `rl-distill-scripts/dapo_ray_trainer.py` is currently a byte-identical copy; edit `dapo/` (or both, deliberately).
+RL entry point: every RL/OPD run goes `run_dapo_rl.sh` -> `python3 -m dapo.main_dapo` (from the repo root). `dapo/` is a package
+of symlinks into `rl-distill-scripts/` (`__init__.py`, `main_dapo.py`, `dapo_ray_trainer.py`, `hf_push.py`, `config/`) plus the real
+file `dapo/validation_early_stopping.py`, so editing `rl-distill-scripts/dapo_ray_trainer.py` *is* editing the runtime trainer.
 
 ## 2. Launch path on ScaleTrain
 
@@ -308,7 +309,7 @@ Hub for cross-cluster resume; [mirror_hf_to_s3.py](../scale_train/mirror_hf_to_s
 | Family | Contents |
 |---|---|
 | `code/` | `rl-distill-code-<sha8>.tar.gz` code tarballs |
-| `qwen3-{1.7b,4b,8b,30b-a3b}-base-rl/qwen3-<size>-<band>-<RUN_TAG>/` | RL artifacts: `best_hf/`, `run_outcome.json` (+ `best_hf_at_step<N>/` after extensions). `RUN_TAG` default `es5` |
+| `qwen3-{1.7b,4b,8b,14b,30b-a3b}-base-rl/qwen3-<size>-<band>-<RUN_TAG>/` | RL artifacts: `best_hf/`, `run_outcome.json` (+ `best_hf_at_step<N>/` after extensions). `RUN_TAG` default `es5` |
 | `qwen3-<size>-base-rl-full-checkpoints/qwen30b-<band>-<RUN_TAG>/` | RL checkpoints: `global_step_N/`, `rolling/`, `run_complete.json`, `archive_first_run/` |
 | `qwen3-opd/<SPEC>-<RUN_TAG>/`, `qwen3-opd-full-checkpoints/<SPEC>-<RUN_TAG>/` | on-policy distillation artifacts / checkpoints (`pgk1-v1`, `pgk1-base-v1`, `pgk1-base-lr1e6w50`) |
 | `qwen3-{30b,4b}-rl-traces-topk128-v1/`, `qwen3-4b-base-traces-topk128-v1/` | off-policy teacher trace bundles (`<spec>/COMPLETE.json`) |
@@ -325,7 +326,7 @@ Hub for cross-cluster resume; [mirror_hf_to_s3.py](../scale_train/mirror_hf_to_s
 
 | Run | `WANDB_RUN_ID` |
 |---|---|
-| Qwen RL | `<q3-30b-a3b\|q3-8b\|q3-4b\|q3-1.7b>-<band>-<RUN_TAG>-s42-v1` |
+| Qwen RL | `<q3-30b-a3b\|q3-14b\|q3-8b\|q3-4b\|q3-1.7b>-<band>-<RUN_TAG>-s42-v1` |
 | Qwen OPD | `q3-opd-<SPEC>-<RUN_TAG>-s42` |
 | Gemma 4 RL seeds | `g4ds26b-<size>-<band>-s<seed>-<WANDB_TAG:-v1>` |
 

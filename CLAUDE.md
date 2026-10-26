@@ -4,201 +4,125 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A fork of [`verl-project/verl`](https://github.com/verl-project/verl) used as a research
-codebase ("rl-distill") for RL training and distillation of **Gemma 3** models (dense,
-dense→MoE upcycled, PT and IT variants) on **B200 / H100**. Almost all of the fork-specific
-work lives in two places, which this file focuses on:
+A fork of [`verl-project/verl`](https://github.com/verl-project/verl) used as the research codebase "rl-distill":
+**RL vs distillation** for math reasoning on **Gemma 4 E2B / E4B / 12B** and **Qwen3 base 1.7B / 4B / 8B (+14B RL)**, trained on
+**H100** ScaleTrain (EKS `p5.48xlarge`) pods. Three recipes are in scope:
 
-- `rl-distill-scripts/` — launch scripts, docs, and custom code (datasets, losses, MoE
-  converter, validation harnesses) for DAPO RL and distillation.
-- `lm-evaluation-harness/` — an **unmodified** upstream EleutherAI clone (v0.4.13.dev0), used
-  standalone to evaluate trained checkpoints. It is *not* imported by the training code.
+1. **DAPO/GRPO RL** (`python3 -m dapo.main_dapo`, FSDP2 + vLLM).
+2. **Off-policy top-k 128 forward-KL distillation with a tail bucket** (`main_full_vocab_distill_fsdp2.py`).
+3. **On-policy distillation, policy-gradient form ("PG-k1")**, run through the RL trainer with a colocated vLLM teacher.
 
-`verl/` is the upstream framework, edited only lightly in this fork (see
-[custom fork changes](#custom-fork-changes-in-verl)).
+Start with [`rl-distill-scripts/README.md`](rl-distill-scripts/README.md) (entry point + directory map), then
+[`docs/RECIPES.md`](rl-distill-scripts/docs/RECIPES.md) (exact hyperparameters), [`docs/OPERATIONS.md`](rl-distill-scripts/docs/OPERATIONS.md)
+(launch / supervise / checkpoint / S3 / W&B / gotchas) and the results docs
+([Qwen3](rl-distill-scripts/docs/QWEN3_RESULTS.md), [Gemma 4](rl-distill-scripts/docs/GEMMA4_RESULTS.md)).
+[`rl-distill-scripts/PROGRESS_LOG.md`](rl-distill-scripts/PROGRESS_LOG.md) is the running experiment log (newest first): add an
+entry per experiment (goal, config, scripts, results, status) and keep it at that path.
 
-> **`CLAUDE.md` was formerly a symlink to `AGENTS.md`.** `AGENTS.md` is the upstream
-> **verl contribution policy** — read it before proposing any PR to `verl-project/verl`
-> (duplicate-work checks, no busywork PRs, human-accountable review). Those rules still apply;
-> this file adds the fork-specific architecture that the symlink didn't cover.
+Gemma 3, MoE upcycling, Megatron, SFT, few-shot RL, B200 recipes, Ouro/Huginn/IFM and the NeMo-RL repro were removed on
+2026-10-26; they are in git history (last pre-cleanup commit `8aefaa5a`).
 
-## Two isolated environments — do not mix them
+> **`AGENTS.md` is the upstream verl contribution policy.** Read it before proposing any PR to `verl-project/verl`
+> (duplicate-work checks, no busywork PRs, human-accountable review). Those rules still apply; this file covers the fork.
 
-The two training stacks have incompatible pins and live in separate venvs at the repo root.
-Pick the venv that matches the task; the wrong `vllm`/`transformers`/`torch` will fail at import
-or model load.
+## Where the runtime code is
 
-| Venv | Built by | Stack | Used for |
-|---|---|---|---|
-| `.venv` | `rl-distill-scripts/setup_env.sh` | torch 2.9.1+cu128, vllm 0.15.1, transformers 4.57.6, flash-attn 2.8.3 (built) | FSDP2 DAPO RL + FSDP2 distillation |
-| `.venv-megatron` | `setup_megatron.sh` | torch 2.10+cu129, vllm 0.18.0, transformers 5.3.0, Megatron-Core v0.16.0, vendored `third_party/Megatron-Bridge`, TransformerEngine v2.12 | Megatron DAPO RL, incl. Gemma 3 MoE |
+- **`rl-distill-scripts/`** holds all fork-specific code. Its root keeps the runtime core *flat on purpose*: `main_dapo.py`,
+  `dapo_ray_trainer.py` (`RayDAPOTrainer`: custom `fit()`, early stopping, rolling/permanent S3 checkpoints, best_hf), `hf_push.py`,
+  `config/`, `run_dapo_rl.sh` (the Hydra command every RL/OPD run ends in), the distill trainer
+  (`main_full_vocab_distill_fsdp2.py`, `full_vocab_distill_dataset.py`, `full_vocab_kl_loss.py` with `tail_bucket`,
+  `gemma4_topk_distill_fsdp2.sh`) and `full_checkpoint_s3.py`. The distill trainer runs with cwd `rl-distill-scripts/` and imports
+  siblings by bare name (`from full_checkpoint_s3 import ...`), so don't move these into subfolders without fixing imports.
+- **`dapo/`** (repo root) is the package `python3 -m dapo.main_dapo` imports: `__init__.py`, `main_dapo.py`, `dapo_ray_trainer.py`,
+  `hf_push.py` and `config/` are **symlinks** into `rl-distill-scripts/`; `dapo/validation_early_stopping.py` is a real file.
+  Editing `rl-distill-scripts/dapo_ray_trainer.py` edits the runtime trainer.
+- **`rl-distill-scripts/scale_train/`**: devbox launchers + pod run-files. `run_gemma4_pt_deepscaler_4of4strict_rl.sh` is the pod
+  run-file for **all** RL and on-policy distillation (Gemma 4 and Qwen3, despite the name); `launch_qwen3_30b_a3b_medium_rl.sh` is the
+  Qwen3 RL launcher for **every** `QWEN_SIZE` (despite the name). Gemma-4-only scripts are in `scale_train/gemma4/`.
+- Other folders: `data/` (band builders, trace generation, samplers/graders, prompts), `eval/` (+ `eval/local/`), `analysis/`,
+  `utils/`, `docs/`, `figures/`.
+- **`verl/`** is upstream, edited narrowly (reward `verl/utils/reward_score/{math_verify,miles_sympy}.py` — only the last well-formed
+  `\boxed{}` scores; on-policy distillation in `verl/trainer/distillation/`; Gemma 4 / Qwen3 FSDP engine fixes; vLLM port base;
+  router replay). Don't reorganize upstream dirs (`verl/`, `recipe/`, `examples/`, `docs/`, upstream `tests/`). Prefer new behavior in
+  `rl-distill-scripts/` or `dapo/`. Some Gemma 3 MoE fork edits remain in `verl/vllm/` (+ the `vllm.general_plugins` entry point in
+  `pyproject.toml`); they are dormant for Gemma 4 / Qwen3.
+- `lm-evaluation-harness/` is a vendored, unmodified EleutherAI gitlink used only by the Gemma 4 OOD evals
+  (`eval/eval_gemma4_ood.py`). Don't hand-edit it.
 
-```bash
-# FSDP2 stack (one-shot, per fresh node)
-bash rl-distill-scripts/setup_env.sh && source .venv/bin/activate
+## Environments
 
-# Megatron / MoE stack (H100 example)
-UV_NO_CONFIG=1 PIP_INDEX_URL=https://pypi.org/simple CUDA_HOME=/usr/local/cuda-12.9 \
-  TORCH_CUDA_ARCH_LIST=9.0 MAX_JOBS=64 bash setup_megatron.sh
-# B200: TORCH_CUDA_ARCH_LIST=10.0
-```
+Both venvs live at the repo root of the **main checkout** (`/mnt/efs/jasonwei/rl-distill`) and are editable installs pointing at it.
+When testing a worktree, set `PYTHONPATH=<worktree>:<worktree>/rl-distill-scripts` and check `python -c "import verl; print(verl.__file__)"`.
 
-Both require a repo-root `.env` (untracked) with `HF_TOKEN=...` and `WANDB_API_KEY=...`. Launch
-scripts source it and forward both into Ray's `runtime_env.env_vars`.
+| Venv | Build | Use |
+|---|---|---|
+| `.venv` | `bash rl-distill-scripts/setup_env.sh` (torch 2.9.1+cu128, vLLM 0.15.1, transformers 4.57.6) | devbox tooling (S3 janitors, republish, W&B backfill), most CPU tests; baked into the ScaleTrain image. Cannot load Gemma 4. |
+| `.venv-gemma4` | `GEMMA4_CUDA_VARIANT=cu129 bash rl-distill-scripts/setup_env_gemma4.sh` (torch 2.11, vLLM 0.25.1, transformers 5.14.1, no flash-attn) | every training / eval job (Gemma 4 **and** Qwen3; pods build it into `/tmp`), Gemma 4 CPU tests (`tests/workers/engine/test_gemma4_distill_logits_on_cpu.py`). |
 
-Editable install (`uv pip install --no-deps -e .`) is mandatory for the Megatron venv — vLLM
-discovers the native `verl_gemma3_moe` MoE plugin through this package's entry point.
+A repo-root `.env` (untracked) holds `HF_TOKEN` / `WANDB_API_KEY`; `launch_st_job.py` forwards them to jobs.
 
-## Architecture — where the runtime code actually is
+## Launching and monitoring
 
-There are **two near-duplicate sibling directories**, and which one runs depends on how the entry
-point is invoked. This is the most common source of confusion; know it before editing.
+- Jobs run on ScaleTrain from the **main checkout**: `launch_*.sh` → `launch_st_with_code.sh` (ships `git archive <CODE_REF>`, default
+  HEAD, over a pre-built image) → `launch_st_job.py` → pod run-file. **Commit before launching**; uncommitted changes are not shipped.
+- Long runs go through `start_*_supervisor.sh` → `supervise_borrowing_job.py` in tmux session `rl-<name>` (state in
+  `.scale_train_supervisors/`), which relaunches after preemption / failure until the S3 completion receipt + `best_hf` exist and pins
+  `CODE_REF` to the commit the run started on. Rolling checkpoints are pruned from the devbox by `ckpt-janitor-<name>` sessions
+  (`full_checkpoint_s3.py cleanup-rolling`; pods can't delete S3 objects). `borrowing_fallback_watcher.sh` switches dedicated jobs
+  queued > 60 min to borrowing.
+- Stop a supervised run: `touch <state>/STOP`, then `tmux kill-session -t =rl-<name>` — **always use the `=` exact-match target**
+  (a bare name prefix-matches other sessions).
+- Live supervisors relaunch by running these paths from the main checkout, so **don't move, rename or change the CLI/env interface** of:
+  `rl-distill-scripts/full_checkpoint_s3.py` and `rl-distill-scripts/scale_train/{supervise_borrowing_job.py, launch_st_with_code.sh,
+  launch_st_job.py, launch_qwen3_onpolicy_distill.sh, launch_qwen3_30b_a3b_medium_rl.sh, start_qwen3_onpolicy_distill_supervisor.sh,
+  start_qwen3_30b_a3b_medium_rl_supervisor.sh, run_gemma4_pt_deepscaler_4of4strict_rl.sh, launch_qwen3_opd_recipe_v2_batch.sh,
+  borrowing_fallback_watcher.sh}` (+ the scripts the watcher's job table restarts). The run-file must also exist at that path in the
+  pinned `CODE_REF`.
+- Dry runs that never submit: `launch_qwen3_opd_recipe_v2_batch.sh` with no args; `launch_st_job.py --dry-run ...`;
+  `DRY_RUN=1 bash rl-distill-scripts/run_dapo_rl.sh` (Hydra config only). `launch_st_with_code.sh` is *not* a dry run (it uploads the tarball).
+- Debugging ScaleTrain: `scale-train get job <ID>` is TTY-only; use `env -u AWS_PROFILE kubectl get pods -n train` / `kubectl logs -n train <pod>`
+  (instance role; the kubectl SSO token silently returns empty when expired). Pod-log markers: `CODE_BOOTSTRAPPED`, `RUN_DONE rc=N`.
 
-- **`dapo/`** (repo-root package) is the RL runtime. All `*.sh` RL launchers in
-  `rl-distill-scripts/` invoke `python3 -m dapo.main_dapo`, so `dapo/main_dapo.py`,
-  `dapo/dapo_ray_trainer.py`, and `dapo/config/*.yaml` are what execute — **not** the
-  identically-named files under `rl-distill-scripts/`.
-- `rl-distill-scripts/main_dapo.py` / `dapo_ray_trainer.py` are currently byte-identical copies of
-  the `dapo/` versions, but they can drift. When changing RL trainer behavior, **edit `dapo/`** (or
-  both, deliberately). `rl-distill-scripts/config/` similarly mirrors `dapo/config/`.
-- **Distillation** is the exception: its launchers `cd rl-distill-scripts/` then
-  `torchrun main_distill_offpolicy.py` / `main_full_vocab_distill_fsdp2.py`, so those entry points
-  run **in place** from `rl-distill-scripts/`.
+## Tests
 
-### Three training modalities
-
-| Modality | Entry (invoked) | Config | Launch scripts | Venv |
-|---|---|---|---|---|
-| DAPO RL, FSDP2 | `dapo.main_dapo` (`dapo_trainer`) | `dapo/config/dapo_trainer.yaml` | `gemma3_{4b,12b,27b}_it_fsdp2_20k.sh`, `gemma3_4b_pt_*_b200_1node.sh` | `.venv` |
-| DAPO RL, Megatron (dense + MoE) | `dapo.main_dapo --config-name=dapo_megatron_trainer` | `dapo/config/dapo_megatron_trainer.yaml` | `gemma3_4b_pt_megatron_20k.sh`, `gemma3_4b_pt_moe_*megatron*.sh` | `.venv-megatron` |
-| Distillation, FSDP2 (SFT-based) | `main_distill_offpolicy.py` (forward-KL) / `main_full_vocab_distill_fsdp2.py` (top-k KL) | `config/distill_offpolicy.yaml`, `config/full_vocab_distill_fsdp2.yaml` | `gemma3_4b_it_distill_offpolicy.sh`, `gemma3_27b_pt_full_vocab_distill_from_4b_pt_fsdp2.sh` | `.venv` |
-
-`main_dapo.py` subclasses verl's `TaskRunner` → `DAPOTaskRunner` and swaps in `RayDAPOTrainer`
-(custom `fit()` with trajectory saving, pre-filter accuracy, and extra metrics). Distillation
-subclasses verl's `SFTTrainer` and swaps the loss via `set_loss_fn()` — no verl core changes.
-
-### Distillation internals
-
-- Off-policy forward-KL: `distill_dataset.py` (`DistillSFTDataset`, loads pre-generated
-  `teacher_log_probs`/`teacher_token_ids` from parquet) + `forward_kl_loss.py`
-  (`log p_teacher − log p_student` on the sampled token; same gradient as CE, but a proper ≥0
-  divergence). See `rl-distill-scripts/DISTILLATION.md`.
-- Full-vocab top-k KL: `full_vocab_distill_dataset.py` + `full_vocab_kl_loss.py`. See
-  `FULL_VOCAB_DISTILLATION_PLAN.md`.
-- Teacher data is generated **offline** (`data/generate_teacher_data.py`, TP=2 data-parallel
-  shards via `data/launch_teacher_gen.sh`, merged by `data/merge_teacher_shards.py`).
-
-### Reward scoring
-
-Math RL/eval routes through `verl/utils/reward_score/math_verify.py` (`LatexExtractionConfig`
-only — **only `\boxed{}` answers score**; bare numbers do not). Boxed-only grading is the
-default (`VERL_MATH_VERIFY_STRICT_BOXED=0` restores lenient): a response with zero `\boxed{}`
-scores 0, and when it has multiple boxes only the **last well-formed** one is graded (so a model
-can correct an earlier answer). Grading is `math_verify` OR a bounded Miles-style SymPy fallback
-in `verl/utils/reward_score/miles_sympy.py`. `verl/utils/reward_score/__init__.py` routes `math`, `math_dapo`, `math500`,
-`olympiadbench`, `minervamath`, `gsm8k`, `beyondaime`, and any `aime*` source to it, returning
-`{"score": s, "acc": s > 0.5, "pred": <extracted boxed answer>}` (`pred` feeds verl's maj@N
-machinery). CPU test: `tests/utils/reward_score/test_math_verify_strict_boxed_on_cpu.py`.
-
-## Common commands
+There is no unit-test suite for most launcher scripts; correctness is checked by the CPU tests below plus training metrics.
 
 ```bash
-# Data prep (writes to ${HOME}/verl/data by default)
-bash rl-distill-scripts/data/prepare_all_datasets.sh          # DAPO-Math-17k + AIME/MATH500/... val sets
-bash rl-distill-scripts/data/prepare_dapo_17k_split.sh        # train/test split used by MoE smoke + H100 wrapper
-python3 rl-distill-scripts/data/split_dapo_openmath2_mix.py   # DAPO+OpenMathInstruct2 mix (seed 42)
-
-# FSDP2 RL (single B200 node)
-bash rl-distill-scripts/gemma3_4b_it_fsdp2_20k.sh
-
-# Megatron dense RL (single node); MEGATRON_VENV defaults to repo-local .venv-megatron
-MEGATRON_VENV="$PWD/.venv-megatron" bash rl-distill-scripts/gemma3_4b_pt_megatron_20k.sh
-
-# MoE: known-good one-node 2E H100 recipe (after validation gates pass — see below)
-UPCYCLED_MOE_DIR="$MOE_DIR" bash rl-distill-scripts/gemma3_4b_pt_moe_2e_megatron_rl_1node_h100.sh
+cd <worktree>; export PYTHONPATH=$PWD:$PWD/rl-distill-scripts
+/mnt/efs/jasonwei/rl-distill/.venv/bin/python -m pytest -q tests/special_standalone/test_rl_distill_*.py \
+  tests/utils/reward_score/test_math_verify_strict_boxed_on_cpu.py tests/workers/utils/test_losses.py rl-distill-scripts/data/tests
+/mnt/efs/jasonwei/rl-distill/.venv-gemma4/bin/python -m pytest -q tests/workers/engine/test_gemma4_distill_logits_on_cpu.py
 ```
 
-There is no unit-test suite for `rl-distill-scripts/` — correctness is enforced by the MoE
-validation gates and by comparing training metrics (entropy, response length, router loss) against
-a dense baseline. verl's own tests live in `tests/` and run via `pytest`.
+Known pre-existing failures (stub tokenizer `SimpleNamespace` has no `len()`): 4 in `tests/workers/engine/test_full_vocab_distill_dataset.py`,
+12 in `rl-distill-scripts/data/tests/test_gemma4_distill_traces.py`, 2 dataset tests in `test_gemma4_distill_logits_on_cpu.py`.
 
-## Gemma 3 dense→MoE workflow (read `GEMMA3_MOE_RL_TRAINING.md` first)
+## Gotchas (repo / infra facts)
 
-The single most important rule: **do not start a long MoE run until validation gates A–D pass.**
-
-1. **Convert** dense → MoE: `gemma3_moe_hf/create_gemma3_moe_from_dense_hf.py` duplicates each
-   dense MLP into every expert and adds a deterministic random router. It emits two outputs — a
-   normal **sparse** checkpoint (for training) and a **canonical** view (expert-0-over-full-batch,
-   for exact tests only; **never train it**). Must print `GEMMA3_MOE_CHECKPOINT_VERIFIED`.
-2. **Gates** (all must be exact, not "99%"):
-   - A — HF layerwise parity: `check_gemma3_dense_moe_activations.py` → `HF_DENSE_MOE_ACTIVATION_PARITY_OK`
-   - B — Megatron actor parity at prod topology: `check_gemma3_mcore_dense_moe_activations.py` → `MCORE_DENSE_MOE_ACTIVATION_PARITY_OK`
-   - C — native vLLM parity: `diagnose_gemma3_vllm_parity.py` → `NATIVE_VLLM_DENSE_MOE_PARITY_OK`
-   - D — bounded end-to-end RL round trip: `gemma3_4b_pt_moe_megatron_correctness_1node_h100.sh`
-3. **Runtime defaults that must hold** (correctness, not tuning knobs): `ROLLOUT_MODEL_IMPL=native`
-   (the generic vLLM Transformers backend is diagnostic-only — it produced entropy ≈9 and
-   non-terminating responses), `ROLLOUT_ATTENTION_BACKEND=TRITON_ATTN`, `ROUTER_REPLAY_MODE=R2`.
-   Entropy near 9 or generations hitting `MAX_RESPONSE_LENGTH` is a **correctness alarm** — never
-   mask it by tuning entropy coeffs or response limits.
-
-Router replay: **R2** (record routes in the actor's old-logprob pass, replay for the update) is the
-supported default. `disabled` is diagnostic. **R3** (vLLM captures generation routes) is
-experimental and gated behind `ALLOW_EXPERIMENTAL_R3=True`; a guardrail raises on an all-zero replay
-map rather than silently routing every token to expert 0. Use R2 for real runs.
-
-The Megatron venv forces a **fresh single-node local Ray** (`RAY_ADDRESS=local`, isolated
-`_temp_dir`) so it never attaches to the long-lived FSDP2-venv Ray cluster (which would spawn
-workers in the wrong interpreter → `AssertionError: Unknown backend: megatron`).
-
-## lm-evaluation-harness
-
-An unmodified upstream EleutherAI clone used standalone to evaluate trained checkpoints. **Treat it
-as a vendored tool**: don't hand-edit it to fix bugs — those go upstream; local edits to a vanilla
-clone are easy to lose and hard to review. It has its own git repo, `.venv`/install, and
-`pyproject.toml` (extras: install a backend explicitly).
-
-```bash
-cd lm-evaluation-harness
-pip install -e ".[vllm]"      # base package no longer bundles torch/transformers; vllm>=0.18
-
-# Evaluate a checkpoint (vLLM backend). New CLI also supports `lm_eval run|ls|validate`.
-lm_eval --model vllm \
-  --model_args pretrained=/path/to/checkpoint/huggingface,dtype=bfloat16,gpu_memory_utilization=0.9 \
-  --tasks aime,gsm8k --batch_size auto
-```
-
-Tasks are YAML/Python under `lm_eval/tasks/`; the evaluation engine is `lm_eval/evaluator.py` and
-model backends are `lm_eval/models/`. Note the harness's task-level answer extraction is not the
-same as this repo's `\boxed{}`-only `math_verify` reward — numbers in `EVAL_RESULTS.md` come from
-the repo's own math scoring, so don't compare the two head-to-head without checking the scorer.
-
-## Checkpoints, resume, and HF upload
-
-- A `SAVE_FREQ` save writes `global_step_N/{actor,actor/huggingface,data.pt}`. `save_contents`
-  includes `hf_model` (a weight-only HF snapshot for inference); resume `load_contents` uses only
-  `model`/`optimizer`/`extra`. The `huggingface/` dir is an inference artifact, **not** an Adam
-  checkpoint.
-- Exact resume: `RESUME_MODE=resume_path trainer.resume_from_path=<STEP_DIR>` — keep data paths,
-  shuffle seed, batch size, response count, and DP layout unchanged, and ensure `data.pt` exists.
-- HF Hub upload runs **only on local-save steps**: set `HF_PUSH_ENABLE=True`, `HF_PUSH_REPO=...`,
-  and make `HF_PUSH_FREQ` a multiple of `SAVE_FREQ`.
-
-## Custom fork changes in verl
-
-Beyond `dapo/` and `rl-distill-scripts/`, the fork touches verl narrowly:
-`verl/utils/reward_score/{__init__.py,math_verify.py}` (routing + `\boxed{}`-only scoring) and
-`verl/trainer/ppo/ray_trainer.py` (per-sample `response_length` logged in validation). Prefer adding
-new behavior in `dapo/`/`rl-distill-scripts/` over editing `verl/` core.
-
-## Gotchas
-
-- `sp_size=1` always for Gemma 3 — it loads as a VLM and the sequence-parallel path has a
-  `temperature_rmpad` shape bug.
-- FSDP wrap must be explicit: `wrap_policy.transformer_layer_cls_to_wrap=["Gemma3DecoderLayer"]`
-  (auto-discovery fails for the Gemma 3 VLM).
-- `transformers` must be 4.57.6 in `.venv` (5.x breaks vLLM 0.15.1's `rope_scaling` check).
-- `ray stop --grace-period 30` only — `--force` breaks `/proc`. `_clean_restart.sh` also kills
-  orphan GPU PIDs from `nvidia-smi`.
-- NCCL interface: single node `NCCL_SOCKET_IFNAME=lo` / `AF_INET`; multi-node `bond0` / `AF_INET6`.
-- Megatron on B200: `TORCH_CUDA_ARCH_LIST="10.0"` **quoted** (Hydra otherwise coerces it to float
-  and megatron-core's import-time JIT crashes).
+- `git commit --no-verify`: the pre-commit hooks can time out and eat unstaged work (recoverable from `.cache/pre-commit` patches).
+  The main checkout has many long-lived uncommitted files: stage explicit paths, rebase only with `--autostash`, and check the dirty
+  count is unchanged afterwards.
+- ScaleTrain EKS pods are **IPv6-only**: NCCL/Gloo need `NCCL_SOCKET_FAMILY=AF_INET6` + `eth0` (`AF_INET` → "no socket interface
+  found"); GKE a3-mega pods are IPv4. The run-file picks from `SCALE_CLUSTER`.
+- Pods run the run-file in a login shell that **resets PATH** (image `ENV PATH` dropped): call venv binaries by absolute path. Job
+  commands are `string.Template`-rendered: never put `$(...)` or `$VAR` in them.
+- The `ml-worker` AWS profile can submit jobs and write `s3://scale-ml` but has no `ecr:GetAuthorizationToken`: reuse the known-good
+  `--image`; don't build.
+- Never write checkpoints / HF exports / traces / caches to EFS (`/mnt/efs`, $HOME): one shared NFS connection; `assert_local_fs.sh`
+  refuses it. Use `/tmp` + S3.
+- Gemma 4: FSDP wrap `Gemma4TextDecoderLayer` (E2B/E4B) / `Gemma4UnifiedTextDecoderLayer` (12B); no flash-attn → `use_remove_padding=False`
+  + `attn_implementation=sdpa`; weight-sync bucket `rollout.checkpoint_engine.update_weights_bucket_megabytes=8192`;
+  `VERL_GEMMA4_CUDNN_SDPA=0` on E4B (`TORCH_CUDNN_SDPA_ENABLED=0` alone never reaches `update_actor`).
+- Gemma 4 in vLLM: load the native unified architecture; never `hf_overrides` → `Gemma4ForCausalLM` (inflates multimodal-token
+  logits, corrupts top-k logprobs). Copy the base model's `processor_config.json` next to exports missing it. Gemma 4 has no
+  `<end_of_turn>` token: stops are literal strings. `gemma4-bestckpt-traces-topk128-v1` is contaminated; use v2.
+- `.venv-gemma4` pins `torchcodec==0.15.0` (0.17 needs `libnvrtc.so.13` → `import vllm` fails on cu129 pods).
+- Concurrent RL jobs on one host need distinct `VERL_VLLM_PORT_BASE` (≥1000 apart); `VLLM_PORT` is overwritten.
+- verl's logged `best@N` is a with-replacement bootstrap (≈ pass@10 for N = 16); `mean@N` is exact. Use offline evals for pass@k.
+- Distilling into an untied-head student (Qwen3-8B and larger; the 30B-A3B control used it) needs `VERL_FSDP2_WRAP_EMBED_LM_HEAD=0`
+  and `VERL_FSDP2_LOCAL_LOAD=0` (otherwise NCCL hangs in the first distill validation); see `run_gemma4_distill_one.sh`.
+- W&B `run.scan_history()` drops steps logged after a resume; use `run.history(keys=[key], samples=...)` per key and merge by `_step`.
+  Re-logging into an old run id drops steps ≤ its last logged step (use a new id for weight-only continuations).
+- Process hygiene on the shared devbox: never `pkill -f <pattern>` (matches the killing shell); `tmux kill-session` SIGHUPs a pane's
+  background children (start long jobs with `setsid`); only `scale-train cancel` jobs you can name by ID.
+- `sp_size=1` always (the Gemma VLM sequence-parallel path has a shape bug).
