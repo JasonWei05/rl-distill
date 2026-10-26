@@ -8,7 +8,7 @@ IMG="${ST_IMAGE:-692474966980.dkr.ecr.us-west-2.amazonaws.com/scale_train/shared
 RUN_TAG="${RUN_TAG:-from-e4bbase-distill-es5}"; CUDNN_SDPA="${CUDNN_SDPA:-1}"; ALLOW_BORROWING="${ALLOW_BORROWING:-true}"
 S3_BASE="${S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-26b-from-e4bbase-distill-rl}"
 name="g4-26b-distill-rl-med"; [ "${ALLOW_BORROWING}" = false ] && name="${name}-nb"; sup=".scale_train_supervisors/${name}-$(date -u +%Y%m%d)${SUP_TAG:-}"; mkdir -p "${sup}/pod-logs"; rm -f "${sup}/STOP"
-tmux kill-session -t "rl-${name}" 2>/dev/null || true
+tmux kill-session -t "=rl-${name}" 2>/dev/null || true
 tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scripts/scale_train/supervise_borrowing_job.py --name ${name} \
   --relaunch-on-cancel --relaunch-on-failure --max-relaunches 40 --quick-cancel-seconds 300 --max-quick-cancels 3 --failure-backoff-seconds 900 \
   --launch-log ${sup}/launch.log --monitor-log ${sup}/monitor.log --state-file ${sup}/state.json --stop-file ${sup}/STOP --pod-log-dir ${sup}/pod-logs \

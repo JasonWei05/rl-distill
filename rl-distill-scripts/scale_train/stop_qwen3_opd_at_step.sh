@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Stop a running Qwen on-policy distillation run (launched with more steps) at STOP_STEP: wait until the pod log has the
 # step-STOP_STEP validation and S3 has the complete permanent global_step_STOP_STEP checkpoint, then stop the supervisor +
-# janitor, cancel the ScaleTrain job (by ID), and publish best_hf = the HF export of the best-validation step <= STOP_STEP
-# (val mean@16; earliest on ties; step 0 = the init and is not eligible) plus a run_outcome.json, as the run-file would.
+# janitor, cancel the ScaleTrain job (by ID), backfill step STOP_STEP into W&B if its upload was cut off, and publish best_hf =
+# the HF export of the best-validation saved step <= STOP_STEP (W&B val mean@16; earliest on ties; step 0 = the init is not
+# eligible) plus a run_outcome.json via republish_best_hf.py (stale marker removed first, verified marker written last).
 #   SPEC=q30bm-to-q1p7b STOP_STEP=120 bash stop_qwen3_opd_at_step.sh
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
@@ -25,30 +26,17 @@ rows = wandb.Api(timeout=60).run('rl-distill/DAPO/${WANDB_RUN_ID}').history(keys
 sys.exit(0 if any(r['_step'] == ${STOP_STEP} for r in rows) else 1)" >/dev/null 2>&1)
 }
 for _ in $(seq 1 30); do wandb_has_step && break; sleep 30; done
-job="$(grep -oE 'job_d[a-z0-9]+' "${sup}/state.json" | head -1)"
+job="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["job_id"])' "${sup}/state.json")"
+[ -n "${job}" ] || { log "FATAL: no job_id in ${sup}/state.json"; exit 2; }
 touch "${sup}/STOP"
-tmux kill-session -t "rl-${name}" 2>/dev/null || true
-tmux kill-session -t "ckpt-janitor-${name}" 2>/dev/null || true
+tmux kill-session -t "=rl-${name}" 2>/dev/null || true
+tmux kill-session -t "=ckpt-janitor-${name}" 2>/dev/null || true
 env -u AWS_PROFILE scale-train cancel job "${job}" >/dev/null 2>&1 || true
 log "STOPPED at step ${STOP_STEP}: supervisor + janitor killed, job ${job} cancel requested ($(env -u AWS_PROFILE scale-train get job "${job}" 2>&1 | grep -o 'status: [A-Z_]*'))"
-read -r best_step best_score < <(cat "${sup}"/pod-logs/*.log | grep -a " step:[0-9]* - " | python3 -c "
-import re, sys
-val = {}
-for line in sys.stdin:
-    m = re.search(r' step:(\d+) - ', line); v = re.search(r'val-core/math/acc/mean@16:(?:np\.float64\()?([0-9.e-]+)', line)
-    if m and v and 0 < int(m.group(1)) <= ${STOP_STEP}: val.setdefault(int(m.group(1)), float(v.group(1)))
-step = max(sorted(val), key=lambda s: val[s]); print(step, val[step])")
-aws s3 sync --only-show-errors "${CKPT}/global_step_${best_step}/actor/huggingface/" "${ART}/best_hf/"
-python3 - "${SPEC}" "${RUN_TAG}" "${STOP_STEP}" "${best_step}" "${best_score}" > /tmp/opd_outcome_${SPEC}.json <<'PY'
-import json, sys
-from datetime import datetime, timezone
-spec, tag, stop, best, score = sys.argv[1:6]
-print(json.dumps({"spec": spec, "run_tag": tag, "status": "complete", "stop_reason": f"manual_stop_at_{stop}", "final_step": int(stop),
-                  "best_step": int(best), "best_score": float(score), "early_stopping_metric": "val-core/math/acc/mean@16",
-                  "best_hf_source": f"global_step_{best}/actor/huggingface", "written_at": datetime.now(timezone.utc).isoformat()}, indent=2))
-PY
-aws s3 cp --only-show-errors "/tmp/opd_outcome_${SPEC}.json" "${ART}/run_outcome.json"
-aws s3 cp --only-show-errors "/tmp/opd_outcome_${SPEC}.json" "${ART}/best_hf/_RUN_OUTCOME.json"
-log "BEST_HF_PUBLISHED best_step=${best_step} val=${best_score} -> ${ART}/best_hf"
+# backfill BEFORE selecting: the selection reads validation from W&B
 (set -a; source .env; set +a; .venv/bin/python rl-distill-scripts/scale_train/wandb_backfill_step_from_pod_log.py \
   --run-id "${WANDB_RUN_ID}" --step "${STOP_STEP}" --pod-log "${sup}"/pod-logs/*.log) 2>&1 | grep -E "WANDB_STEP_" | while read -r l; do log "${l}"; done
+(set -a; source .env; set +a; .venv/bin/python rl-distill-scripts/scale_train/republish_best_hf.py \
+  --artifact-s3 "${ART}" --ckpt-s3 "${CKPT}" --wandb-run "rl-distill/DAPO/${WANDB_RUN_ID}" --max-step "${STOP_STEP}" \
+  --stop-reason "manual_stop_at_${STOP_STEP}" --final-step "${STOP_STEP}") 2>&1 | while read -r l; do log "${l}"; done
+exit "${PIPESTATUS[0]}"

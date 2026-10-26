@@ -23,7 +23,7 @@ while [ ! -e "${STATE}/STOP" ]; do
     if [[ " ${files} " != *" _RUN_OUTCOME.json "* ]]; then
       # finished on its own: the run-file published the FINAL step (early stopping off) -> re-publish the best-val step first
       [[ " ${files} " == *" _REMOTE_COMPLETE.json "* ]] || continue
-      SPEC="${spec}" bash rl-distill-scripts/scale_train/publish_qwen3_opd_best_hf.sh >> "${STATE}/watch.log" 2>&1 || { log "PUBLISH_FAILED ${spec}"; continue; }
+      SPEC="${spec}" MAX_STEP=120 bash rl-distill-scripts/scale_train/publish_qwen3_opd_best_hf.sh >> "${STATE}/watch.log" 2>&1 || { log "PUBLISH_FAILED ${spec}"; continue; }
     fi
     log "START math suite ${name} <- ${uri}"
     MODEL_NAME="${name}" MODEL_SRC="${src}" JOB_TAG="opd-${spec}" GPUS=1 EXTRA_ENV_VARS=SINGLE_PASS=1 ALLOW_BORROWING=false \

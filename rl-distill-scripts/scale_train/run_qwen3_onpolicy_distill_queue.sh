@@ -13,7 +13,7 @@ log() { echo "$(date -u +%FT%TZ) $*" | tee -a "${STATE}/queue.log"; }
 while [ ! -e "${STATE}/STOP" ]; do
   used=0; pending=""
   for s in ${SPECS}; do
-    if tmux has-session -t "rl-q3-opd-${s}" 2>/dev/null; then used=$((used + $(gpus_of "${s}")))
+    if tmux has-session -t "=rl-q3-opd-${s}" 2>/dev/null; then used=$((used + $(gpus_of "${s}")))
     elif [ ! -e "${STATE}/started.${s}" ]; then pending+=" ${s}"; fi
   done
   [ -n "${pending}" ] || { log "QUEUE_DONE all specs started"; break; }

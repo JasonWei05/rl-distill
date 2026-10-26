@@ -29,7 +29,7 @@ for spec in "${SPECS[@]}"; do
     if AWS_PROFILE=ml-worker aws s3 ls "${B}/qwen3-opd-full-checkpoints/${spec}-${RUN_TAG}/run_complete.json" >/dev/null 2>&1; then
       echo "SKIP ${spec}: complete"; continue
     fi
-    if tmux has-session -t "rl-q3-opd-${spec}" 2>/dev/null; then echo "SKIP ${spec}: supervisor already running"; continue; fi
+    if tmux has-session -t "=rl-q3-opd-${spec}" 2>/dev/null; then echo "SKIP ${spec}: supervisor already running"; continue; fi
     env SPEC="${spec}" "${COMMON[@]}" bash start_qwen3_onpolicy_distill_supervisor.sh | sed 's/ + ckpt-janitor.*//'
   else
     env SPEC="${spec}" "${COMMON[@]}" bash ./.opd_v2_dry.sh --image IMG 2>&1 | tr ',' '\n' \

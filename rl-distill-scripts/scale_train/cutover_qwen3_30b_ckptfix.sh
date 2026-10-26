@@ -15,8 +15,8 @@ sleep 90   # let the post-upload rolling retirement finish
 job_id=$(python3 -c "import json; print(json.load(open('${sup}/state.json'))['job_id'])")
 log "step ${TARGET_STEP} committed; stopping supervisor and cancelling ${job_id}"
 touch "${sup}/STOP"
-tmux kill-session -t "rl-${name}" 2>/dev/null || true
-tmux kill-session -t "ckpt-janitor-${name}" 2>/dev/null || true
+tmux kill-session -t "=rl-${name}" 2>/dev/null || true
+tmux kill-session -t "=ckpt-janitor-${name}" 2>/dev/null || true
 env -u AWS_PROFILE scale-train cancel job "${job_id}" 2>&1 | grep -ioE "cancel[a-z]*|error[^,]*" | sort -u | sed "s/^/  /" || true
 sleep 120
 log "relaunching (500 steps, permanent-only saves, async upload)"

@@ -13,7 +13,7 @@ ENV_VARS="MODEL_REPO=Qwen/Qwen3-30B-A3B-Base,MODEL_REVISION=1b75feb79f60b8dc6c5b
 ENV_VARS+=",N=16,TP=1,SEED=1042,MAX_NUM_SEQS=64,GPU_MEMORY_UTILIZATION=0.92"
 BORROW_FLAG="--allow-borrowing"; [ "${ALLOW_BORROWING:-true}" = false ] && BORROW_FLAG=""
 sup=".scale_train_supervisors/${name}-$(date -u +%Y%m%d)${SUP_TAG:-}"; mkdir -p "${sup}/pod-logs"; rm -f "${sup}/STOP"
-tmux kill-session -t "rl-${name}" 2>/dev/null || true
+tmux kill-session -t "=rl-${name}" 2>/dev/null || true
 tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scripts/scale_train/supervise_borrowing_job.py --name ${name} \
   --relaunch-on-cancel --relaunch-on-failure --max-relaunches ${MAX_RELAUNCHES:-200} --quick-cancel-seconds 300 --max-quick-cancels 3 --failure-backoff-seconds ${FAILURE_BACKOFF_SECONDS:-3600} --max-failure-backoff-seconds ${MAX_FAILURE_BACKOFF_SECONDS:-3600} \
   --launch-log ${sup}/launch.log --monitor-log ${sup}/monitor.log --state-file ${sup}/state.json --stop-file ${sup}/STOP --pod-log-dir ${sup}/pod-logs \

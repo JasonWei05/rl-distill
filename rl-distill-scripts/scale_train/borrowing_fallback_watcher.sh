@@ -44,7 +44,7 @@ check_once() {
     (( age_min > QUEUE_LIMIT_MIN )) || continue
     log "${name}: ${job} QUEUED for ${age_min} min (> ${QUEUE_LIMIT_MIN}) on borrowing false -> switching to borrowing true"
     touch "${sup}/STOP" "${sup}/BORROW_SWITCHED"
-    tmux kill-session -t "rl-${name}" 2>/dev/null || true
+    tmux kill-session -t "=rl-${name}" 2>/dev/null || true
     log "${name}: cancel ${job}: $(env -u AWS_PROFILE scale-train cancel job "${job}" 2>&1 | grep -ioE 'cancel[a-z]*|error[^,]{0,80}' | sort -u | tr '\n' ' ')"
     log "${name}: $(env ALLOW_BORROWING=true SUP_TAG=-brw bash -c "${cmd}" 2>&1 | tail -1)"
   done

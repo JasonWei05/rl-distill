@@ -11,7 +11,7 @@ until [ "$(AWS_PROFILE=ml-worker aws s3 ls $S3 | grep -c '\.parquet$')" -ge "${M
 sleep 60   # let the last shard's manifest upload finish
 job=$(python3 -c "import json; print(json.load(open('${sup}/state.json'))['job_id'])")
 log "$(AWS_PROFILE=ml-worker aws s3 ls $S3 | grep -c '\.parquet$') shards on S3; stopping supervisor and cancelling ${job}"
-touch "${sup}/STOP"; tmux kill-session -t rl-q3-30bh-dist-4b 2>/dev/null || true
+touch "${sup}/STOP"; tmux kill-session -t =rl-q3-30bh-dist-4b 2>/dev/null || true
 env -u AWS_PROFILE scale-train cancel job "${job}" 2>&1 | grep -ioE "cancel[a-z]*" | head -1 || true
 sleep 90
 log "relaunching: TP 1 x 8 engines, MAX_NUM_SEQS=48, GPU_MEMORY_UTILIZATION=0.92, pinned identity, 16 validation workers"

@@ -23,7 +23,7 @@ done
 [ "${DRY_RUN:-0}" = 1 ] && { echo "DRY_RUN: would stop ${TMUX[*]} and launch 26bd-medium (BEST_STEP_OVERRIDE=${BEST[26bd]}) + 26bw-medium (BEST_STEP_OVERRIDE=${BEST[26bw]})"; exit 0; }
 # --- stop the RL runs: STOP file, kill supervisor, cancel job, wait for pods to go
 for k in 26bd 26bw; do
-  d=".scale_train_supervisors/${SUP[$k]}"; touch "$d/STOP"; tmux kill-session -t "${TMUX[$k]}" 2>/dev/null || true
+  d=".scale_train_supervisors/${SUP[$k]}"; touch "$d/STOP"; tmux kill-session -t "=${TMUX[$k]}" 2>/dev/null || true
   for j in $(cat .scale_train_supervisors/${SUP[$k]%-r2}*/supervisor.out 2>/dev/null | grep -aoE 'job_id=job_[a-z0-9]+' | cut -d= -f2 | sort -u); do
     st="$(env -u AWS_PROFILE timeout 120 scale-train get job "$j" 2>/dev/null | grep -oE "status: [A-Z_]+" | head -1)"
     case "$st" in *QUEUED*|*IN_PROGRESS*|*PENDING*|*RUNNING*) env -u AWS_PROFILE timeout 120 scale-train cancel job "$j" 2>&1 | grep -iE "cancel" | head -1 ;; *) echo "  $j already $st" ;; esac

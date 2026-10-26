@@ -11,7 +11,7 @@ MARKERS=""
 for mb in q30b-base/medium q30b-base/hard q4b-base/medium q4b-base/hard; do MARKERS+=" --completion-marker-s3-uri ${E}/${mb}/summary.json"; done
 for b in medium hard; do for s in 250 500 750 1000; do MARKERS+=" --completion-marker-s3-uri ${E}/q4b30b-${b}-s${s}/${b}/summary.json"; done; done
 sup=".scale_train_supervisors/${name}-$(date -u +%Y%m%d)${SUP_TAG:-}"; mkdir -p "${sup}/pod-logs"; rm -f "${sup}/STOP"
-tmux kill-session -t "rl-${name}" 2>/dev/null || true
+tmux kill-session -t "=rl-${name}" 2>/dev/null || true
 tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scripts/scale_train/supervise_borrowing_job.py --name ${name} \
   --relaunch-on-cancel --relaunch-on-failure --max-relaunches ${MAX_RELAUNCHES:-200} --quick-cancel-seconds 300 --max-quick-cancels 3 --failure-backoff-seconds ${FAILURE_BACKOFF_SECONDS:-3600} --max-failure-backoff-seconds ${MAX_FAILURE_BACKOFF_SECONDS:-3600} \
   --launch-log ${sup}/launch.log --monitor-log ${sup}/monitor.log --state-file ${sup}/state.json --stop-file ${sup}/STOP --pod-log-dir ${sup}/pod-logs${MARKERS}${INITIAL_JOB_ID:+ --initial-job-id ${INITIAL_JOB_ID}} \

@@ -10,7 +10,7 @@ IMG="${ST_IMAGE:-692474966980.dkr.ecr.us-west-2.amazonaws.com/scale_train/shared
 for band in ${BANDS:-medium hard}; do
   short=$([ "${band}" = medium ] && echo med || echo "${band}")
   name="q4b-tr-${short}"; sup=".scale_train_supervisors/${name}-$(date -u +%Y%m%d)"; mkdir -p "${sup}/pod-logs"; rm -f "${sup}/STOP"
-  tmux kill-session -t "tr-${name}" 2>/dev/null || true
+  tmux kill-session -t "=tr-${name}" 2>/dev/null || true
   tmux new-session -d -s "tr-${name}" "env -u AWS_PROFILE python3 rl-distill-scripts/scale_train/supervise_borrowing_job.py --name ${name} \
     --relaunch-on-cancel --relaunch-on-failure --max-relaunches 30 --quick-cancel-seconds 300 --max-quick-cancels 3 --failure-backoff-seconds 600 \
     --launch-log ${sup}/launch.log --monitor-log ${sup}/monitor.log --state-file ${sup}/state.json --stop-file ${sup}/STOP --pod-log-dir ${sup}/pod-logs \
