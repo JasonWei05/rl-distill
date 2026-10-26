@@ -151,6 +151,8 @@ final OPD stage.
   Medium control @680 best 34.5 @90 (stop 190; teacher 34.7). 4B -> 1.7B extensions early-stopped: easy best 74.0 @340 (stop 440;
   was 73.9 @245), medium 37.5 @260 (stop 360; was 37.3 @210; two-stage 38.2) -> the step-250 slope was a tail, +0.1-0.2 only.
   Hard extension: no new best on the step-10 evals (19.1 @250; stop 350; best on any eval stays 19.5 @215) -> 250 steps was enough.
+  8B medium RL 500 -> 800 continuation EARLY-STOPPED @610 with no new best (68.3 @480 stands) -> saturated; its two OPD students
+  already used the final best teacher (step 480).
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
