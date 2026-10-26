@@ -17,10 +17,11 @@ case "${BAND}" in easy) BAND_SHORT=easy ;; medium) BAND_SHORT=med ;; hard) BAND_
   very_hard) BAND_SHORT=vhard ;; *) echo "FATAL: BAND must be easy, medium, hard or very_hard" >&2; exit 2 ;; esac
 case "${QWEN_SIZE}" in
   30b-a3b) SLUG=qwen3-30b-a3b; name=q3-30b-rl-${BAND_SHORT}; GPUS=8 ;;
+  14b) SLUG=qwen3-14b; name=q3-14b-rl-${BAND_SHORT}; GPUS=8 ;;
   8b) SLUG=qwen3-8b; name=q3-8b-rl-${BAND_SHORT}; GPUS=4 ;;
   4b) SLUG=qwen3-4b; name=q3-4b-rl-${BAND_SHORT}; GPUS=4 ;;
   1.7b) SLUG=qwen3-1.7b; name=q3-1p7b-rl-${BAND_SHORT}; GPUS=2 ;;
-  *) echo "FATAL: QWEN_SIZE must be 30b-a3b, 8b, 4b or 1.7b" >&2; exit 2 ;;
+  *) echo "FATAL: QWEN_SIZE must be 30b-a3b, 14b, 8b, 4b or 1.7b" >&2; exit 2 ;;
 esac
 S3_BASE="${S3_BASE:-s3://scale-ml/genai/rl-distill/${SLUG}-base-rl}"
 CKPT_URI="${S3_BASE}-full-checkpoints/qwen30b-${BAND}-${RUN_TAG}"
