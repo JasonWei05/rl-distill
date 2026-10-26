@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Re-run of the from-base on-policy distillations with the v2 recipe (PROGRESS_LOG 2026-10-26): PG-k1 as before, but a CONSTANT
 # learning rate of 1e-6 after a 50-step linear warmup (was 2e-6 / 20 -- the first ~50 steps overshot: grad norm ~3, response length
-# 2.8k +- 0.8k with 8% truncation), 400 steps, no early stopping, validation + permanent checkpoint every 10, borrowing true,
+# 2.8k +- 0.8k with 8% truncation), cap 400 steps, stop on no +0.5 gain in 100 steps, val + permanent checkpoint every 10, borrowing true,
 # priority high, auto-resume. RUN_TAG pgk1-base-lr1e6w50 keeps the v1 runs intact. Scope (user 2026-10-26): the 1.7B / 4B / 8B ladder
 # x easy / medium / hard only (no 30B); the 8B hard teacher is excluded until its RL rerun finishes. Teachers are pinned to their RL best step; GPUs follow the student (1.7B: 2, 4B: 4).
 #   bash launch_qwen3_opd_recipe_v2_batch.sh            # dry run: print each spec's resolved launch env
@@ -9,15 +9,14 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 RUN_TAG=pgk1-base-lr1e6w50
+# early stopping (user): stop when there is no +0.5-point gain in val mean@16 over 100 steps (patience 10 evals x TEST_FREQ 10)
 COMMON=(RUN_TAG=${RUN_TAG} TOTAL_TRAINING_STEPS=400 TEST_FREQ=10 SAVE_FREQ=10 OPD_LR=1e-6 OPD_LR_WARMUP_STEPS=50
-        ALLOW_BORROWING=true MAX_RELAUNCHES=200)
+        EARLY_STOPPING_PATIENCE=10 EARLY_STOPPING_MIN_DELTA=0.005 ALLOW_BORROWING=true MAX_RELAUNCHES=200)
 SPECS=(
   # 4B RL teacher -> 1.7B base
   q4be-s500-to-q1p7b-base q4bm-s510-to-q1p7b-base q4bh-s560-to-q1p7b-base
   # 8B RL teacher (easy / medium; hard excluded) -> 1.7B / 4B base
   q8be-s460-to-q1p7b-base q8bm-s480-to-q1p7b-base q8be-s460-to-q4b-base q8bm-s480-to-q4b-base
-  # same-size control: 1.7B RL teacher -> 1.7B base
-  q1p7be-s470-to-q1p7b-base q1p7bm-s680-to-q1p7b-base q1p7bh-s910-to-q1p7b-base
 )
 MODE="${1:-}"
 B=s3://scale-ml/genai/rl-distill
