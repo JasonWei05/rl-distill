@@ -1,4 +1,0 @@
-{#- Ouro (ByteDance) ChatML rendering of the 0-shot math prompt (gemma3_it_0shot_math.jinja analogue): Ouro's native default system turn and <|im_start|>/<|im_end|> markers. -#}
-{%- if messages[0]['role'] == 'system' -%}{{- '<|im_start|>system\n' + messages[0]['content'] + '<|im_end|>\n' }}{%- else -%}{{- '<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n' }}{%- endif -%}
-{%- for message in messages -%}{%- if message.role == 'system' and loop.first -%}{# Skip #}{%- else -%}{{- '<|im_start|>' + message['role'] + '\n' + message['content'] | trim + '<|im_end|>' + '\n' }}{%- endif -%}{%- endfor -%}
-{%- if add_generation_prompt -%}{{- '<|im_start|>assistant\n' }}{%- endif -%}
