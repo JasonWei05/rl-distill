@@ -165,6 +165,13 @@ final OPD stage.
   1-pt tolerance, RUN_TAG p4b1000-es10 (own S3 prefixes / W&B ids q3-4b-<band>-p4b1000-es10-s42-v1), 4 GPUs, borrowing false, priority
   high; supervisors rl-q3-4b-rl-{easy,med,hard} (state *-p4b). Next: distill each 4B'-RL best into the 1.7B base (OPD, cap 500,
   +0.5/100-step ES) vs 1.7B RL. Exp 2 (1.7B') on hold pending the user's call.
+- 2026-10-26: **8B RL ~= 4B RL after RL** (bases 57.0 / 27.6 / 12.6 vs 44.5 / 21.0 / 8.6, RL bests 91.3 / 68.3 / 40.8 vs 89.1 / 65.8 /
+  41.2). No infra fault (trainer-vLLM log-ppl gap ~0.001). All runs collapse entropy to ~0.13-0.20 by step 50-150, then let it grow
+  (no KL / entropy term, clip-higher 0.28); 8B hard is the outlier: entropy jumped 0.20 -> 0.48 at ~step 160-180 (training reward
+  stalled ~60 steps, val 36.9 -> 33.9, per-seq ppl spikes up to 4.5k), recovered, then ran away 0.55 -> 0.93 at 340-400 with falling
+  training accuracy. 8B easy fully stable; 8B medium no spike but overfits after ~450 (train acc up, val down). **8B hard RERUN**
+  (user): same recipe + seed, RUN_TAG rerun-es10 (patience 10, 1-pt tolerance, cap 500), borrowing true, supervisor
+  rl-q3-8b-rl-hard (state *-rerun). Recipe ablations (lr 5e-7 / symmetric clip) proposed, not launched.
 - 2026-10-25 grid results: 8B medium @480 -> 1.7B base DONE 19:44Z best 33.5 @230 (4B-teacher student 37.3, 1.7B RL 34.7); 8B medium
   @480 -> 4B base DONE 20:39Z best 61.1 @245 (4B RL medium 65.8) -> on medium the 8B teacher is a worse teacher than the 4B for
   1.7B and distillation from base trails RL for the 4B student (like easy, -0.8). Controls (same-size 1.7B RL -> 1.7B base) reach
