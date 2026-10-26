@@ -65,6 +65,11 @@ class FullVocabKLLoss:
     precomputed_topk: bool = False
     clamp_min_kl: bool = False
     checkpoint_student_chunks: bool = True
+    # Top-k only: add the "tail bucket" (ghost token) term p_tail * log(p_tail / q_tail), with p_tail / q_tail the teacher /
+    # student mass OUTSIDE the teacher's top-k. Without it the top-k sum is minimized by q = renormalized teacher head with
+    # zero tail mass, so the student deletes the teacher's tail (lower entropy than the teacher); with it the loss is the
+    # exact forward KL between the (top-k + 1 bucket) coarse-grainings of the two distributions.
+    tail_bucket: bool = False
 
     def __post_init__(self):
         if self.precomputed_topk:
@@ -244,6 +249,14 @@ class FullVocabKLLoss:
         if not torch.isfinite(teacher_logprobs).all():
             raise ValueError("precomputed teacher top-k log probabilities contain non-finite values")
         return teacher_ids, teacher_logprobs
+
+    @staticmethod
+    def _tail_bucket_kl(teacher_topk_log_probs: torch.Tensor, student_topk_log_probs: torch.Tensor) -> torch.Tensor:
+        """p_tail * (log p_tail - log q_tail) over the mass outside the teacher's top-k (0 where p_tail == 0)."""
+        teacher_tail = (1.0 - teacher_topk_log_probs.exp().sum(dim=-1)).clamp_min(0.0)   # fp16 storage can sum to > 1
+        student_tail_log = torch.log1p(-student_topk_log_probs.exp().sum(dim=-1).clamp(max=1.0 - 1e-6))
+        safe_teacher_tail = teacher_tail.clamp_min(1e-12)
+        return torch.where(teacher_tail > 0, teacher_tail * (safe_teacher_tail.log() - student_tail_log), torch.zeros_like(teacher_tail))
 
     def _compute_token_kl(
         self,
@@ -437,9 +450,10 @@ class FullVocabKLLoss:
                             student_chunk, dim=-1, keepdim=True
                         )
                         teacher_topk_probs = chunk_teacher_log_probs.exp()
-                        chunk_kl = (teacher_topk_probs * (chunk_teacher_log_probs - student_topk_log_probs)).sum(
-                            dim=-1
-                        ) * scale
+                        chunk_kl = (teacher_topk_probs * (chunk_teacher_log_probs - student_topk_log_probs)).sum(dim=-1)
+                        if self.tail_bucket:
+                            chunk_kl = chunk_kl + self._tail_bucket_kl(chunk_teacher_log_probs, student_topk_log_probs)
+                        chunk_kl = chunk_kl * scale
                         chunk_teacher_mass = teacher_topk_probs.sum(dim=-1)
                         chunk_student_mass = student_topk_log_probs.exp().sum(dim=-1)
                     elif top_k > 0:
@@ -453,9 +467,10 @@ class FullVocabKLLoss:
                             student_chunk, dim=-1, keepdim=True
                         )
                         teacher_topk_probs = online_teacher_log_probs.exp()
-                        chunk_kl = (teacher_topk_probs * (online_teacher_log_probs - student_topk_log_probs)).sum(
-                            dim=-1
-                        ) * scale
+                        chunk_kl = (teacher_topk_probs * (online_teacher_log_probs - student_topk_log_probs)).sum(dim=-1)
+                        if self.tail_bucket:
+                            chunk_kl = chunk_kl + self._tail_bucket_kl(online_teacher_log_probs, student_topk_log_probs)
+                        chunk_kl = chunk_kl * scale
                         chunk_teacher_mass = teacher_topk_probs.sum(dim=-1)
                         chunk_student_mass = student_topk_log_probs.exp().sum(dim=-1)
                     else:

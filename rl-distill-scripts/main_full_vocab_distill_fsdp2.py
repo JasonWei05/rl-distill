@@ -98,6 +98,7 @@ class FullVocabDistillTrainer(SFTTrainer):
             precomputed_topk=bool(teacher_cfg.get("precomputed_topk", False)),
             clamp_min_kl=bool(teacher_cfg.get("clamp_min_kl", False)),
             checkpoint_student_chunks=bool(teacher_cfg.get("checkpoint_student_chunks", True)),
+            tail_bucket=bool(teacher_cfg.get("tail_bucket", False)),
         )
 
         config = TrainingWorkerConfig(

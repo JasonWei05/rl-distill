@@ -422,6 +422,7 @@ done
 # tail would supply the compensating positive term. Clamping would silently
 # zero its gradient, so preserve the established objective by default.
 export CLAMP_MIN_TOPK_KL=${CLAMP_MIN_TOPK_KL:-false}
+export TOPK_KL_TAIL_BUCKET=${TOPK_KL_TAIL_BUCKET:-false}   # + p_tail log(p_tail/q_tail) for the mass outside the teacher top-k
 export CHECKPOINT_DISTILL_CHUNKS=${CHECKPOINT_DISTILL_CHUNKS:-true}
 for boolean_name in CLAMP_MIN_TOPK_KL CHECKPOINT_DISTILL_CHUNKS; do
     case "${!boolean_name,,}" in
@@ -617,6 +618,7 @@ COMMON_OVERRIDES=(
     teacher_model.chunk_size="${FULL_VOCAB_KL_CHUNK_SIZE}"
     teacher_model.temperature=1.0
     teacher_model.clamp_min_kl="${CLAMP_MIN_TOPK_KL}"
+    teacher_model.tail_bucket="${TOPK_KL_TAIL_BUCKET}"
     teacher_model.checkpoint_student_chunks="${CHECKPOINT_DISTILL_CHUNKS}"
     "${DATA_FILE_OVERRIDES[@]}"
     data.train_batch_size="${TRAIN_BATCH_SIZE}"

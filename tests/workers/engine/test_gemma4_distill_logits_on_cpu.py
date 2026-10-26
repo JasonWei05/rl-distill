@@ -422,3 +422,59 @@ def test_precomputed_topk_left_truncation_rejects_trace_without_retained_prompt(
 
     with pytest.raises(ValueError, match="retain both prompt and response"):
         dataset[0]
+
+
+def _tail_bucket_case(tail_bucket):
+    scripts_dir = Path(__file__).parents[3] / "rl-distill-scripts"
+    sys.path.insert(0, str(scripts_dir))
+    from full_vocab_kl_loss import FullVocabKLLoss
+
+    top_k, vocab_size = 2, 7
+    teacher_full_logprobs = torch.tensor(
+        [[0.1, 1.2, -0.3, 0.0, 0.5, -0.7, 0.2], [0.7, -0.1, 0.3, 1.5, -0.5, 0.2, 0.0]]
+    ).log_softmax(dim=-1)
+    teacher_topk_logprobs, teacher_topk_ids = teacher_full_logprobs.topk(top_k, dim=-1)
+    samples = [
+        {
+            "input_ids": torch.tensor([1, 2, 3]),
+            "position_ids": torch.arange(3),
+            "loss_mask": torch.tensor([0, 1, 1]),
+            "teacher_topk_token_ids": teacher_topk_ids.to(torch.int32).flatten(),
+            "teacher_topk_logprobs": teacher_topk_logprobs.to(torch.float16).flatten(),
+        }
+    ]
+    collated = SFTTensorCollator("no_padding")(samples)
+    data = tu.get_tensordict(collated, non_tensor_dict={"sp_size": 1, "pad_token_id": 0, "pad_mode": "no_padding"})
+    # a student whose mass is concentrated on the teacher's top-k: far less tail mass than the teacher
+    student_logits = torch.full((1, 3, vocab_size), -4.0)
+    for pos, ids in zip((0, 1), teacher_topk_ids):
+        student_logits[0, pos, ids] = 3.0
+    student_logits.requires_grad_(True)
+    loss_impl = FullVocabKLLoss(precomputed_topk=True, top_k=top_k, chunk_size=1, tail_bucket=tail_bucket)
+    output = loss_impl(student_logits=student_logits, data=data)
+    return output, student_logits, teacher_topk_logprobs.to(torch.float16).float(), teacher_topk_ids
+
+
+def test_precomputed_topk_tail_bucket_is_coarse_grained_forward_kl():
+    output, student_logits, stored, ids = _tail_bucket_case(tail_bucket=True)
+    student_logprobs = student_logits[0, :2].detach().log_softmax(dim=-1)
+    q_head = student_logprobs.gather(1, ids).exp()
+    p_head = stored.exp()
+    p_tail, q_tail = 1 - p_head.sum(-1), 1 - q_head.sum(-1)
+    expected = (p_head * (p_head.log() - q_head.log())).sum(-1) + p_tail * (p_tail.log() - q_tail.log())
+    torch.testing.assert_close(output["full_vocab_kl"][0, :2], expected, rtol=1e-4, atol=1e-5)
+
+
+def test_precomputed_topk_tail_bucket_grows_a_too_small_student_tail():
+    def tail_mass_after_step(tail_bucket):
+        output, student_logits, _, ids = _tail_bucket_case(tail_bucket)
+        output["full_vocab_kl"].sum().backward()
+        stepped = (student_logits - 1.0 * student_logits.grad)[0, :2].detach().softmax(-1)
+        before = student_logits[0, :2].detach().softmax(-1)
+        tail = lambda probs: 1 - probs.gather(1, ids).sum(-1)
+        return tail(before), tail(stepped)
+
+    before, after = tail_mass_after_step(tail_bucket=True)
+    assert (after > before).all()          # bucket term pulls the student's tail mass up toward the teacher's
+    before, after = tail_mass_after_step(tail_bucket=False)
+    assert (after < before).all()          # plain top-k sum pushes it further toward zero

@@ -78,6 +78,8 @@ export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-128}" LR="${LR:-2e-6}" TOTAL_TRAINI
 export LR_WARMUP_STEPS="${LR_WARMUP_STEPS:-100}" LR_SCHEDULER_TYPE="${LR_SCHEDULER_TYPE:-linear}" MIN_LR_RATIO="${MIN_LR_RATIO:-0.1}" TEST_FREQ="${TEST_FREQ:-10}" SAVE_FREQ="${SAVE_FREQ:-250}"
 export TRAIN_SAMPLES_PER_QUESTION="${SPQ_DEFAULT}" MICRO_BATCH_SIZE_PER_GPU="${MICRO_BATCH_SIZE_PER_GPU:-4}" MAX_PADDED_TOKENS_PER_MICROBATCH="${MAX_PADDED_TOKENS_PER_MICROBATCH:-8192}"
 # band union: train on all 9000 questions x 8; validation KL on 300 of the teacher's 900 validation generations (all bands)
+# band union (base -> base pre-distillation): tail-bucket top-k forward KL so the student keeps the base teacher's tail mass
+[ "${BAND}" = all ] && export TOPK_KL_TAIL_BUCKET="${TOPK_KL_TAIL_BUCKET:-true}"
 [ "${BAND}" = all ] && export SOURCE_QUESTIONS="${SOURCE_QUESTIONS:-9000}" TRAIN_QUESTIONS="${TRAIN_QUESTIONS:-9000}" VALIDATION_QUESTIONS="${VALIDATION_QUESTIONS:-300}"
 export FULL_VOCAB_KL_CHUNK_SIZE="${FULL_VOCAB_KL_CHUNK_SIZE:-4096}" VERL_FAIL_ON_NONFINITE_GRAD="${VERL_FAIL_ON_NONFINITE_GRAD:-0}"
 export CHECKPOINT_SAVE_CONTENTS="${CHECKPOINT_SAVE_CONTENTS:-[\"model\",\"optimizer\",\"extra\",\"hf_model\"]}" MAX_CKPT_TO_KEEP="${MAX_CKPT_TO_KEEP:-1}"

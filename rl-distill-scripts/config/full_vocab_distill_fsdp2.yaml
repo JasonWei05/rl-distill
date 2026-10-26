@@ -20,6 +20,8 @@ teacher_model:
   attn_implementation: flash_attention_2
   use_hidden_states: true
   clamp_min_kl: ${oc.decode:${oc.env:CLAMP_MIN_TOPK_KL,false}}
+  # top-k only: + p_tail log(p_tail / q_tail) for the mass outside the teacher's top-k (keeps the teacher's tail mass)
+  tail_bucket: ${oc.decode:${oc.env:TOPK_KL_TAIL_BUCKET,false}}
   checkpoint_student_chunks: ${oc.decode:${oc.env:CHECKPOINT_DISTILL_CHUNKS,true}}
 
 data:
