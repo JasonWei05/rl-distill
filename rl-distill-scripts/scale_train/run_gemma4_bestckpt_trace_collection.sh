@@ -67,6 +67,10 @@ case "${TRACE_SPEC}" in
   # Qwen3-30B-defined bands (JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k); 16 samples per training question.
   q4b-base-medium) RUN_KEY=qwen3-4b-base; BAND=medium; BEST_STEP=0; DIRECTION=q4b_base_medium_to_30b; TEACHER_HF_REPO=Qwen/Qwen3-4B-Base; TEACHER_HF_REVISION=906bfd4b4dc7f14ee4320094d8b41684abff8539; TEACHER_HF_ROOT=1 ;;
   q4b-base-hard)   RUN_KEY=qwen3-4b-base; BAND=hard;   BEST_STEP=0; DIRECTION=q4b_base_hard_to_30b;   TEACHER_HF_REPO=Qwen/Qwen3-4B-Base; TEACHER_HF_REVISION=906bfd4b4dc7f14ee4320094d8b41684abff8539; TEACHER_HF_ROOT=1 ;;
+  # Pre-training-vs-RL ablation (PROGRESS_LOG 2026-10-26): untrained base teachers on the UNION of the easy + medium + hard train
+  # splits (BAND=all: 9000 train q, 900 val q), 8 samples per training question; students = the other base (4B' / 1.7B').
+  q1p7b-base-all) RUN_KEY=qwen3-1.7b-base; BAND=all; BEST_STEP=0; DIRECTION=q1p7b_base_all_to_4b; TEACHER_HF_REPO=Qwen/Qwen3-1.7B-Base; TEACHER_HF_REVISION=ea980cb0a6c2ae4b936e82123acc929f1cec04c1; TEACHER_HF_ROOT=1 ;;
+  q4b-base-all)   RUN_KEY=qwen3-4b-base;   BAND=all; BEST_STEP=0; DIRECTION=q4b_base_all_to_1p7b; TEACHER_HF_REPO=Qwen/Qwen3-4B-Base;   TEACHER_HF_REVISION=906bfd4b4dc7f14ee4320094d8b41684abff8539; TEACHER_HF_ROOT=1 ;;
   # Qwen3-30B-A3B-Base medium RL (es5 run: early stop @420, best val mean@16 0.7575 @ step 320) as the teacher for a Qwen3-4B-Base
   # student; S3 full checkpoint only (permanent every 10 steps carries actor/huggingface). 16 train samples.
   q30bm-medium) RUN_KEY=qwen30b-medium-es5; BAND=medium; BEST_STEP=320; DIRECTION=q30bm_medium_r320_to_4b; TEACHER_HF_REPO=""; TEACHER_HF_REVISION=""; FULL_CHECKPOINT_S3_BASE="${FULL_CHECKPOINT_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-30b-a3b-base-rl-full-checkpoints}" ;;
@@ -267,7 +271,7 @@ MAX_WORKER_ATTEMPTS="${MAX_WORKER_ATTEMPTS:-5}"
 # Trace family: RL-teacher study bundles vs the E4B-base (pre-training control) bundles.
 case "${TRACE_SPEC}" in
   e4b-base-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/gemma4_e4b_base_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-e4b-base-traces-topk128-v1}" ;;
-  q4b-base-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/qwen3_4b_base_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-base-traces-topk128-v1}" ;;
+  q4b-base-*|q1p7b-base-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/qwen3_4b_base_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-base-traces-topk128-v1}" ;;
   q30bm-*|q30bh-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/qwen3_30b_rl_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-30b-rl-traces-topk128-v1}" ;;
   q4bm-*|q4bh-*)   TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/qwen3_4b_rl_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-rl-traces-topk128-v1}" ;;
   *)          TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/gemma4_bestckpt_traces_v2}";  TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-bestckpt-traces-topk128-v2}" ;;
@@ -283,8 +287,29 @@ VALIDATION_DIR="${OUTPUT_ROOT}/validation"
 mkdir -p "${DATA_DIR}" "${TRAIN_DIR}" "${VALIDATION_DIR}" "${OUTPUT_ROOT}/logs"
 
 # validation-repeats 1 => the 300 unique validation questions (1 response each).
-"${VENV}/bin/python" "${DATA_PREP_SCRIPT}" \
-  --data-dir "${DATA_DIR}" --band "${BAND}" --validation-repeats 1
+if [[ ${BAND} == all ]]; then
+  # Union of the three Qwen3-30B bands: prep each band in a scratch dir, then write ONE train / val parquet under source/
+  # (the training-view builder requires exactly one of each). Bands are disjoint by construction; checked here anyway.
+  "${VENV}/bin/python" "${DATA_PREP_SCRIPT}" --data-dir "${OUTPUT_ROOT}/source_bands" --band easy --band medium --band hard --validation-repeats 1
+  "${VENV}/bin/python" - "${OUTPUT_ROOT}/source_bands" "${DATA_DIR}" "${DATA_PREFIX}" <<'PY'
+import sys
+from pathlib import Path
+import pandas as pd
+src, dst, prefix = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+for split, suffix in (("train", "train"), ("val", "val300_x16")):
+    parts = [pd.read_parquet(src / f"{prefix}_{band}_{suffix}.parquet") for band in ("easy", "medium", "hard")]
+    uids = [set(p["uid"]) for p in parts]
+    assert not (uids[0] & uids[1] or uids[0] & uids[2] or uids[1] & uids[2]), f"{split}: bands share uids"
+    out = pd.concat(parts, ignore_index=True)
+    out.to_parquet(dst / f"{prefix}_all_{suffix}.parquet", index=False)
+    print(f"BAND_UNION {split}: {len(out)} rows, {out['uid'].nunique()} uids")
+train = set(pd.read_parquet(dst / f"{prefix}_all_train.parquet")["uid"]); val = set(pd.read_parquet(dst / f"{prefix}_all_val300_x16.parquet")["uid"])
+assert not train & val, "train / val share uids"
+PY
+else
+  "${VENV}/bin/python" "${DATA_PREP_SCRIPT}" \
+    --data-dir "${DATA_DIR}" --band "${BAND}" --validation-repeats 1
+fi
 TRAIN_PARQUET="${DATA_DIR}/${DATA_PREFIX}_${BAND}_train.parquet"
 VALIDATION_PARQUET="${DATA_DIR}/${DATA_PREFIX}_${BAND}_val300_x16.parquet"
 if [[ ! -f ${TRAIN_PARQUET} || ! -f ${VALIDATION_PARQUET} ]]; then

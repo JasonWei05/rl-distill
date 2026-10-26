@@ -16,11 +16,17 @@ case "${TEACHER_SPEC}" in
   q4bh-hard)    name=q3-4bh-dist-${stag};  FAMILY=qwen3-4b-rl ;;   # 4B hard RL teacher (step 560), use STUDENT=q1p7b
   q30bvh-very_hard) name=q3-30bvh-dist-${stag}; FAMILY=qwen3-30b-rl ;;   # 30B very_hard RL teacher (step 460)
   q4bvh-very_hard)  name=q3-4bvh-dist-${stag};  FAMILY=qwen3-4b-rl ;;    # 4B very_hard RL teacher (step 620), use STUDENT=q1p7b
-  *) echo "FATAL: TEACHER_SPEC must be q30bm-medium|q30bh-hard|q4bm-medium|q4bh-hard|q30bvh-very_hard|q4bvh-very_hard" >&2; exit 2 ;;
+  q1p7b-base-all) name=q3-1p7bbase-dist-${stag}; FAMILY=qwen3-4b-base ;;   # untrained 1.7B base teacher, all bands -> use STUDENT=q4b (4B')
+  q4b-base-all)   name=q3-4bbase-dist-${stag};   FAMILY=qwen3-4b-base ;;   # untrained 4B base teacher, all bands -> use STUDENT=q1p7b (1.7B')
+  *) echo "FATAL: TEACHER_SPEC must be q30bm-medium|q30bh-hard|q4bm-medium|q4bh-hard|q30bvh-very_hard|q4bvh-very_hard|q1p7b-base-all|q4b-base-all" >&2; exit 2 ;;
 esac
 EVAL_S3=s3://scale-ml/genai/rl-distill/${FAMILY}-distill-evals-v1/${TEACHER_SPEC}-to-${STUDENT}-bs128-s1000-lr2e-6
 # ScaleTrain can report a preempted borrowing pod as COMPLETED: done = all four eval summaries on S3, otherwise relaunch.
-MARKERS=""; for s in 250 500 750 1000; do MARKERS+=" --completion-marker-s3-uri ${EVAL_S3}/step_${s}/summary.json"; done
+MARKERS=""
+case "${TEACHER_SPEC}" in
+  *-all) for s in 0 250 500 750 1000; do for b in easy medium hard; do MARKERS+=" --completion-marker-s3-uri ${EVAL_S3}/step_${s}/${b}/summary.json"; done; done ;;
+  *) for s in 250 500 750 1000; do MARKERS+=" --completion-marker-s3-uri ${EVAL_S3}/step_${s}/summary.json"; done ;;
+esac
 sup=".scale_train_supervisors/${name}-$(date -u +%Y%m%d)${SUP_TAG:-}"; mkdir -p "${sup}/pod-logs"; rm -f "${sup}/STOP"
 tmux kill-session -t "rl-${name}" 2>/dev/null || true
 tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scripts/scale_train/supervise_borrowing_job.py --name ${name} \

@@ -66,6 +66,8 @@ ALLOWED_DIRECTIONS = {
     # Qwen3-4B-Base medium / hard RL teachers (best steps 510 / 560) -> Qwen3-1.7B-Base student, 16 samples.
     "q4bm_medium_r510_to_1p7b",
     "q4bh_hard_r560_to_1p7b",
+    "q1p7b_base_all_to_4b",
+    "q4b_base_all_to_1p7b",
     # very_hard band RL teachers: 30B (best step 460) -> 4B / 1.7B and 4B (best step 620) -> 1.7B, 16 samples.
     "q30bvh_very_hard_r460_to_4b",
     "q4bvh_very_hard_r620_to_1p7b",
@@ -82,6 +84,8 @@ SAMPLING_OVERRIDES_BY_DIRECTION = {
     "q30bh_hard_r410_to_4b": QWEN3_SAMPLING_OVERRIDES,
     "q4bm_medium_r510_to_1p7b": QWEN3_SAMPLING_OVERRIDES,
     "q4bh_hard_r560_to_1p7b": QWEN3_SAMPLING_OVERRIDES,
+    "q1p7b_base_all_to_4b": QWEN3_SAMPLING_OVERRIDES,
+    "q4b_base_all_to_1p7b": QWEN3_SAMPLING_OVERRIDES,
     "q30bvh_very_hard_r460_to_4b": QWEN3_SAMPLING_OVERRIDES,
     "q4bvh_very_hard_r620_to_1p7b": QWEN3_SAMPLING_OVERRIDES,
 }
