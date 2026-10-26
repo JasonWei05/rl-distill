@@ -424,7 +424,7 @@ def test_precomputed_topk_left_truncation_rejects_trace_without_retained_prompt(
         dataset[0]
 
 
-def _tail_bucket_case(tail_bucket):
+def _tail_bucket_case(tail_bucket, head_logit=3.0):
     scripts_dir = Path(__file__).parents[3] / "rl-distill-scripts"
     sys.path.insert(0, str(scripts_dir))
     from full_vocab_kl_loss import FullVocabKLLoss
@@ -448,7 +448,7 @@ def _tail_bucket_case(tail_bucket):
     # a student whose mass is concentrated on the teacher's top-k: far less tail mass than the teacher
     student_logits = torch.full((1, 3, vocab_size), -4.0)
     for pos, ids in zip((0, 1), teacher_topk_ids):
-        student_logits[0, pos, ids] = 3.0
+        student_logits[0, pos, ids] = head_logit
     student_logits.requires_grad_(True)
     loss_impl = FullVocabKLLoss(precomputed_topk=True, top_k=top_k, chunk_size=1, tail_bucket=tail_bucket)
     output = loss_impl(student_logits=student_logits, data=data)
@@ -478,3 +478,13 @@ def test_precomputed_topk_tail_bucket_grows_a_too_small_student_tail():
     assert (after > before).all()          # bucket term pulls the student's tail mass up toward the teacher's
     before, after = tail_mass_after_step(tail_bucket=False)
     assert (after < before).all()          # plain top-k sum pushes it further toward zero
+
+
+def test_precomputed_topk_tail_bucket_keeps_its_gradient_when_the_student_tail_is_tiny():
+    # head logit 12 vs tail -4: student tail mass ~3e-7, below the 1e-6 where 1 - sum(q_head) cancels to a clamped constant
+    output, student_logits, _, ids = _tail_bucket_case(tail_bucket=True, head_logit=12.0)
+    output["full_vocab_kl"].sum().backward()
+    grad = student_logits.grad[0, :2]
+    tail_grad = grad.scatter(1, ids, 0.0)
+    assert torch.isfinite(grad).all()
+    assert (tail_grad.sum(-1) < -1e-3).all()   # descent still raises the tail logits toward the teacher's tail mass
