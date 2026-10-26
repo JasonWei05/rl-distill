@@ -2,8 +2,8 @@
 # Re-run of the from-base on-policy distillations with the v2 recipe (PROGRESS_LOG 2026-10-26): PG-k1 as before, but a CONSTANT
 # learning rate of 1e-6 after a 50-step linear warmup (was 2e-6 / 20 -- the first ~50 steps overshot: grad norm ~3, response length
 # 2.8k +- 0.8k with 8% truncation), 400 steps, no early stopping, validation + permanent checkpoint every 10, borrowing true,
-# priority high, auto-resume. RUN_TAG pgk1-base-lr1e6w50 keeps the v1 runs intact. The 8B hard teacher is excluded (its RL is
-# being re-run). Teachers are pinned to their RL best step; GPUs follow the student (1.7B: 2, 4B: 4).
+# priority high, auto-resume. RUN_TAG pgk1-base-lr1e6w50 keeps the v1 runs intact. Scope (user 2026-10-26): the 1.7B / 4B / 8B ladder
+# x easy / medium / hard only (no 30B); the 8B hard teacher is excluded until its RL rerun finishes. Teachers are pinned to their RL best step; GPUs follow the student (1.7B: 2, 4B: 4).
 #   bash launch_qwen3_opd_recipe_v2_batch.sh            # dry run: print each spec's resolved launch env
 #   bash launch_qwen3_opd_recipe_v2_batch.sh --launch   # start one supervisor per spec (skips finished / running ones)
 set -euo pipefail
@@ -16,8 +16,6 @@ SPECS=(
   q4be-s500-to-q1p7b-base q4bm-s510-to-q1p7b-base q4bh-s560-to-q1p7b-base
   # 8B RL teacher (easy / medium; hard excluded) -> 1.7B / 4B base
   q8be-s460-to-q1p7b-base q8bm-s480-to-q1p7b-base q8be-s460-to-q4b-base q8bm-s480-to-q4b-base
-  # 30B-A3B RL teacher (medium / hard; no 30B easy RL) -> 1.7B / 4B base: the from-base counterpart of the two-stage 30B runs
-  q30bm-s320-to-q1p7b-base q30bh-s410-to-q1p7b-base q30bm-s320-to-q4b-base q30bh-s410-to-q4b-base
   # same-size control: 1.7B RL teacher -> 1.7B base
   q1p7be-s470-to-q1p7b-base q1p7bm-s680-to-q1p7b-base q1p7bh-s910-to-q1p7b-base
 )

@@ -174,9 +174,10 @@ final OPD stage.
   rl-q3-8b-rl-hard (state *-rerun). Recipe ablations (lr 5e-7 / symmetric clip) proposed, not launched.
 - 2026-10-26: **OPD recipe v2 batch PREPARED, not launched** (user): from-base PG-k1 with a CONSTANT lr 1e-6 after a 50-step warmup
   (v1 2e-6 / 20 overshot in the first ~50 steps), 400 steps, no ES, val + ckpt every 10, borrowing true, priority high, RUN_TAG
-  pgk1-base-lr1e6w50. 14 specs (8B hard teacher excluded until its RL rerun): 4B -> 1.7B {e,m,h}; 8B -> 1.7B / 4B {e,m}; 30B ->
+  pgk1-base-lr1e6w50. 10 specs after the user trimmed to the 1.7B/4B/8B ladder (30B dropped; 8B hard teacher waits for its RL
+  rerun): 4B -> 1.7B {e,m,h}; 8B -> 1.7B / 4B {e,m}; [30B dropped:]
   1.7B / 4B {m,h} (from-base counterpart of the two-stage 30B runs); 1.7B RL -> 1.7B control {e,m,h}. 36 GPUs (1.7B students 2,
-  4B students 4). Start with `bash scale_train/launch_qwen3_opd_recipe_v2_batch.sh --launch` (no flag = dry run).
+  4B students 4; 28 GPUs after the trim). Start with `bash scale_train/launch_qwen3_opd_recipe_v2_batch.sh --launch` (no flag = dry run).
 - 2026-10-25 grid results: 8B medium @480 -> 1.7B base DONE 19:44Z best 33.5 @230 (4B-teacher student 37.3, 1.7B RL 34.7); 8B medium
   @480 -> 4B base DONE 20:39Z best 61.1 @245 (4B RL medium 65.8) -> on medium the 8B teacher is a worse teacher than the 4B for
   1.7B and distillation from base trails RL for the 4B student (like easy, -0.8). Controls (same-size 1.7B RL -> 1.7B base) reach
