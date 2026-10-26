@@ -159,6 +159,12 @@ final OPD stage.
   * 1.7B' (4B base -> 1.7B base): copies the style (entropy / length) but NOT the ability -- accuracy stays at (slightly below) the
     1.7B base on every band (medium mean@32 8.7 vs base 9.3 vs teacher 20.6; hard pass@32 39.7 vs 44.0 vs 70.3); fwd KL only
     0.088 -> 0.073. Exp 2 therefore cannot separate pre-training from capacity (1.7B' ~ the 1.7B base). GATE: user picks checkpoints.
+- 2026-10-26: user picked **4B' step 1000** (final checkpoint, lowest KL). **Exp 1 RL launched** on easy / medium / hard: init =
+  s3://.../qwen3-4b-base-distill-ckpts-v1/q1p7b-base-all-to-q4b-bs128-s1000-lr2e-6/global_step_1000/huggingface (INIT_MODEL_S3_URI,
+  e9f1158d), the 4B RL recipe (GRPO n=16, bsz 64 / mini 32, lr 1e-6), cap 1000 steps, early stopping patience 10 evals (100 steps) +
+  1-pt tolerance, RUN_TAG p4b1000-es10 (own S3 prefixes / W&B ids q3-4b-<band>-p4b1000-es10-s42-v1), 4 GPUs, borrowing false, priority
+  high; supervisors rl-q3-4b-rl-{easy,med,hard} (state *-p4b). Next: distill each 4B'-RL best into the 1.7B base (OPD, cap 500,
+  +0.5/100-step ES) vs 1.7B RL. Exp 2 (1.7B') on hold pending the user's call.
 - 2026-10-25 grid results: 8B medium @480 -> 1.7B base DONE 19:44Z best 33.5 @230 (4B-teacher student 37.3, 1.7B RL 34.7); 8B medium
   @480 -> 4B base DONE 20:39Z best 61.1 @245 (4B RL medium 65.8) -> on medium the 8B teacher is a worse teacher than the 4B for
   1.7B and distillation from base trails RL for the 4B student (like easy, -0.8). Controls (same-size 1.7B RL -> 1.7B base) reach
