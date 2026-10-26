@@ -473,7 +473,7 @@ truncated).
 
 ### 5.6 Run status as of 2026-10-26
 
-This section uses the newest entry in the main checkout's `PROGRESS_LOG.md` (~20:20Z). It supersedes the earlier same-day
+This section follows the newest `PROGRESS_LOG.md` entry (~20:20Z). It supersedes the earlier same-day
 "8B hard rerun + 7 OPD v2 runs live" status.
 
 - **Running**: 4B′ RL ×3 (easy / medium / hard, `p4b1000-es10`) and OPD v2 4B→1.7B ×3.
@@ -485,7 +485,7 @@ This section uses the newest entry in the main checkout's `PROGRESS_LOG.md` (~20
   - Same RL recipe, cap 1000, early stopping patience 10 + 1-point tolerance, `RUN_TAG=es10`.
   - Layout: 8 GPUs, FSDP2 DP8 without offload, vLLM 4 × TP2 with 16 GiB KV.
   - W&B `q3-14b-<band>-es10-s42-v1`; S3 `B/qwen3-14b-base-rl[-full-checkpoints]/`.
-  - The `QWEN_SIZE=14b` launcher branch is commit `0573540a` in the main checkout and is not in this branch's launcher yet.
+  - Launch: `QWEN_SIZE=14b` in `scale_train/launch_qwen3_30b_a3b_medium_rl.sh` / its supervisor (commit `0573540a`).
 
 ---
 
