@@ -1,11 +1,11 @@
 # Progress Log
 
 > Gemma 4 E2B/E4B distillation-vs.-RL planning, current artifact status, and the production runbook
-> now live in [`GEMMA4_DISTILL_VS_RL_EXPERIMENTS.md`](GEMMA4_DISTILL_VS_RL_EXPERIMENTS.md). That
+> now live in [`docs/GEMMA4_RESULTS.md`](docs/GEMMA4_RESULTS.md) (was GEMMA4_DISTILL_VS_RL_EXPERIMENTS.md). That
 > canonical document supersedes older Gemma 4 status statements in this chronological log.
 
 > All Qwen3 math-suite scores (base / RL / off-policy / on-policy distillation, 1.7B and 4B students) in one place:
-> [`QWEN3_MATH_SUITE_RESULTS.md`](QWEN3_MATH_SUITE_RESULTS.md), regenerated from S3 by `summarize_qwen3_math_suite.py`.
+> [`docs/QWEN3_MATH_SUITE_RESULTS.md`](docs/QWEN3_MATH_SUITE_RESULTS.md), regenerated from S3 by `eval/summarize_qwen3_math_suite.py`.
 
 A running log of experiments/work in this repo. Newest entries on top. Each entry records the goal,
 what was run (config + exact scripts/data), results, and status, so work is resumable and auditable.
@@ -375,7 +375,7 @@ MATH500 mean@16 base Gemma E4B 10.9 vs Qwen 4B 39.9 / 1.7B 30.1 (Gemma 26B base 
 
 Both band datasets come from the same 38,796-question DeepScaleR `dedup_v2` pool graded at n=8 with the same strict-boxed grader
 (Gemma bands: `JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k`; Qwen: `...-Qwen3-30B-A3B-Base-10k` incl. `very_hard`).
-Script: `data/compare_gemma_qwen_band_overlap.py`.
+Script: `analysis/compare_gemma_qwen_band_overlap.py`.
 
 - Qwen solves far more: mean pass rate 0.339 vs Gemma 0.104; Qwen > Gemma on 68% of questions, Gemma > Qwen on 6%; Spearman 0.48.
 - Released 3,300-q sets, shared questions (Jaccard %), rows Gemma / cols Qwen easy, medium, hard, very_hard:
@@ -426,7 +426,7 @@ rising slowly at step 1000 (mean@16), pass@16 flat-to-down after step 750.
 30B -> 1.7B (done 02:49Z) is the weakest: 7.5 best vs 10.0 from the 4B teacher -- the bigger teacher is the worse 1.7B
 teacher, same ordering as medium/hard (25.9 vs 28.6, 11.3 vs 11.9) but a wider gap on very_hard. All 3 runs COMPLETED_RECEIPTS.
 pass@16 comparison (10-14): same stage-3 protocol run locally on GPU 5 for the RL best checkpoints + bases
-(`run_qwen3_very_hard_val_evals_local.sh`, s3://scale-ml/genai/rl-distill/qwen3-very_hard-val-evals-v1/<tag>/summary.json;
+(`eval/local/run_qwen3_band_val_evals_local.sh`, then named run_qwen3_very_hard_val_evals_local.sh; s3://scale-ml/genai/rl-distill/qwen3-very_hard-val-evals-v1/<tag>/summary.json;
 RL logs only have mean@16 + bootstrap best@16). mean@16 / pass@16:
 
 | Model | 30B | 4B | 1.7B |
@@ -443,7 +443,7 @@ base 30B / 4B / 1.7B medium 29.3/95.7, 21.4/83.3, 9.6/55.7; hard 13.8/84.7, 9.0/
 65.5/93.7 (@510), 33.1/80.0 (@520); hard 61.4/89.0 (@410), 40.6/85.7 (@560), 12.1/51.0 (@550). Every RL re-eval is 0.3-1.5 pt below the
 logged best (max-of-~50-evals selection bias; one eval's sampling SE ~0.4-0.5). pass@16: RL >= distill on medium (4B 93.7 vs 93.3,
 1.7B 80.0 vs 78.3), distill >= RL on hard (4B 86.7 vs 85.7, 1.7B 54.0 vs 51.0), all within noise. Within-1-SE checkpoint re-evals for
-4B / 1.7B (`run_qwen3_rl_ckpt_candidates_local.sh`) were started then stopped at the user's request (none completed).
+4B / 1.7B (`eval/local/run_qwen3_rl_ckpt_candidates_local.sh`) were started then stopped at the user's request (none completed).
 
 ---
 
@@ -537,8 +537,8 @@ Existing training/eval code pins revision be4dcd8b and is unaffected; use revisi
 User request: for the E4B RL and distilled models trained on the medium band, eval on a random 300-question sample of the training
 set (avg@16 / pass@16, normal Gemma 4 sampling). Sample: 300 text-deduplicated questions (seed 42) from
 JWei05/DeepScaleR-Easy-Medium-Hard-Gemma-26B-PT-10k@a0ba3c3d medium/train.parquet (`data/prepare_gemma4_train_sample_eval_data.py`).
-Protocol = the study's recorded eval config (eval_math_passk.py: 12-shot template, temp 1, top-p 1, 8192 tokens, strict boxed, monte-carlo
-pass@k, no logprobs, 2 vLLM slots/GPU at util 0.4 + 16 GiB KV), local GPUs 0/1/5/6 (`run_gemma4_train_sample_eval_local.sh`, d90e6478),
+Protocol = the study's recorded eval config (eval/eval_math_passk.py: 12-shot template, temp 1, top-p 1, 8192 tokens, strict boxed, monte-carlo
+pass@k, no logprobs, 2 vLLM slots/GPU at util 0.4 + 16 GiB KV), local GPUs 0/1/5/6 (`eval/local/run_gemma4_train_sample_eval_local.sh`, d90e6478),
 ~20-30 min. The registry URI for distill_26bw_lr2e6_medium_to_e4b_step1000 is empty; the reported 26bw student is the `-n8` run
 (.../26bw-medium-to-e4b-bs128-s1000-lr2e-6-n8/global_step_1000), whose stored val scores match the doc. Results:
 s3://scale-ml/genai/rl-distill/gemma4-train-sample-evals-v1/train_medium/<tag>/metrics.json.
@@ -669,36 +669,6 @@ Beats both 1.7B medium distillations (30B RL -> 1.7B 25.9, 4B RL -> 1.7B 28.6). 
 
 ---
 
-## 2026-10-09 — pass@32 evals: Qwen3-30B-A3B-Base vs Qwen3-4B-Base vs 4B->30B distilled students LAUNCHED
-
-User request: eval the 4B->30B distilled 30B students on their own band's validation set, plus Qwen3-4B-Base (the teacher) and
-Qwen3-30B-A3B-Base on both, pass@k up to 32, compare directly. One 8-GPU ScaleTrain job, borrowing off (`run_qwen3_passk32_evals_st.sh`,
-supervisor `start_qwen3_passk32_evals_supervisor.sh` -> tmux rl-q3-passk32-evals, job_db4g7qrmjdjg07lcrs1g): 12 tasks pulled from a
-shared queue by 4 TP-2 vLLM engines -- q30b-base + q4b-base on medium and hard, q4b30b-<band>-s{250,500,750,1000} on their own band
-(bases + step 1000 first). Protocol = Qwen band-eval at n=32 (300 q, 0-shot ChatML + boxed instruction, temp 1, 8192 tokens, strict
-boxed math_verify): mean@32, unbiased pass@k / pass^k for k = 1..32. Results: s3://scale-ml/genai/rl-distill/qwen3-passk32-evals-v1/<model>/<band>/summary.json.
-**DONE 2026-10-09 16:34Z** (all 12, ~22 min per eval per TP-2 engine). 300 q x 32 per row; q4b30b-<band>-sN = 30B student at distill step N:
-
-| band | model | mean@32 | pass@2 | pass@4 | pass@8 | pass@16 | pass@32 | pass^2 | pass^4 | boxed | trunc | mean len |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| medium | Qwen3-4B-Base (teacher) | 20.8 | 34.9 | 52.9 | 70.9 | 84.8 | 92.7 | 6.7 | 1.4 | 80.8% | 2.1% | 1163 |
-| medium | Qwen3-30B-A3B-Base | 27.9 | 45.9 | 67.3 | 85.6 | 95.8 | 99.0 | 9.8 | 2.1 | 82.4% | 0.6% | 874 |
-| medium | 4B->30B s250 | 18.0 | 30.8 | 47.9 | 66.2 | 81.5 | 91.0 | 5.1 | 0.8 | 86.6% | 1.4% | 1029 |
-| medium | 4B->30B s500 | 17.8 | 30.8 | 48.2 | 66.9 | 82.1 | 91.7 | 4.9 | 0.7 | 85.7% | 1.3% | 1012 |
-| medium | 4B->30B s750 | 16.8 | 29.0 | 45.5 | 63.5 | 78.9 | 89.3 | 4.6 | 0.7 | 84.1% | 1.1% | 1000 |
-| medium | 4B->30B s1000 | 18.2 | 31.1 | 48.1 | 66.0 | 80.6 | 90.3 | 5.3 | 0.9 | 84.6% | 1.4% | 1017 |
-| hard | Qwen3-4B-Base (teacher) | 8.6 | 15.7 | 26.7 | 41.5 | 57.7 | 72.0 | 1.5 | 0.1 | 79.7% | 2.3% | 1175 |
-| hard | Qwen3-30B-A3B-Base | 13.0 | 23.2 | 38.1 | 56.2 | 73.1 | 86.0 | 2.8 | 0.3 | 81.8% | 0.6% | 912 |
-| hard | 4B->30B s250 | 7.5 | 13.7 | 23.5 | 37.2 | 53.3 | 69.7 | 1.2 | 0.1 | 85.9% | 1.2% | 1045 |
-| hard | 4B->30B s500 | 7.2 | 13.3 | 23.1 | 37.1 | 53.8 | 70.3 | 1.1 | 0.1 | 84.6% | 1.4% | 1031 |
-| hard | 4B->30B s750 | 7.7 | 14.2 | 24.5 | 39.1 | 56.6 | 73.0 | 1.3 | 0.1 | 85.4% | 1.2% | 1036 |
-| hard | 4B->30B s1000 | 7.9 | 14.5 | 25.0 | 39.6 | 56.8 | 73.7 | 1.3 | 0.1 | 84.5% | 1.4% | 1049 |
-
-Distilling the untrained 4B into the 30B erases the 30B's advantage within 250 steps: the student sits at (hard) or 2-3 pts below
-(medium) the 4B teacher across the whole pass@k curve and stays flat through step 1000. pass^32 = 0 for every model (best question 26/32).
-
----
-
 ## 2026-10-09 — Qwen3-30B-A3B hard RL FINISHED (early stopping @500 = max steps)
 
 `q3-30b-rl-hard` (job_db38lnjmjdjg088cefb0, ckpt-fix relaunch from 195) stopped at step 500, which was both the step cap and the 5th
@@ -792,41 +762,6 @@ the extension; 0.4096 @440, 0.4098 @550); step 600 scored 0.362. best_hf (step 5
 
 ---
 
-## 2026-10-07 — Qwen3-4B-Base -> Qwen3-30B-A3B-Base distillation (step 2): PREPARED, NOT LAUNCHED
-
-Recipe = the E4B-base -> 26B-A4B student runs (DISTILLATION_EXPERIMENTS.md §9): off-policy top-128 forward KL on the q4b-base-<band>
-bundles (3000 q x 16 = 48k train rows, 128 teacher val generations), batch 128, lr 2e-6 (100 warmup, linear -> 2e-7), 1000 steps
-(~2.7 epochs), val KL every 10, 1 seq/micro-batch (4096 padded-token cap), KL chunk 1024, fp32 master + Adam, bf16 param views, grad
-ckpt; S3-only checkpoints (permanent every 250, rolling every 50 with the HF export under hf_exports/), no Hub pushes.
-Layout: **8 GPUs** (FSDP2 DP8, no offload): 30.5B x 16 B = 61 GB/GPU of params/grads/Adam (~67 GB with activations); 4 GPUs would be
-122 GB/GPU -> CPU offload, several x slower. Code: run_gemma4_distill_one.sh STUDENT=q30b (Qwen/Qwen3-30B-A3B-Base@1b75feb7,
-Qwen3MoeDecoderLayer wrap, VERL_FSDP2_LOCAL_LOAD=0 for the untied head) + q4b-base-* trace family; transformer_impl skip_lm_head patch
-extended to Qwen3/Qwen3-MoE (without it the chunked-LM-head distill forward cannot run on Qwen; CPU test
-test_qwen3_distill_skip_lm_head_on_cpu.py); view preflight: q4b directions + Qwen stop strings/ids. No router aux loss
-(output_router_logits=False in the 30B config; same as Gemma 26B-A4B). Launch: `BAND=medium|hard bash
-rl-distill-scripts/scale_train/start_qwen3_4b_to_30b_distill_supervisor.sh` (jobs q3-dist-4b30b-{med,hard}, 8 GPUs, borrowing, high;
-janitor tmux ckpt-janitor-q3-dist-4b30b) -> run_qwen3_4b_to_30b_distill_st.sh; checkpoints
-s3://scale-ml/genai/rl-distill/qwen3-4b-base-distill-ckpts-v1/q4b-base-<band>-to-q30b-bs128-s1000-lr2e-6, W&B project
-qwen3-4b-base-distill-v1. CPU dry run (VALIDATE_ONLY) passed for medium: view 48,000 / 128 rows, tokenizer + identities + direction OK.
-Untested on GPU (first step will confirm memory; fallback FSDP_OFFLOAD=true).
-**2026-10-08 launch issues (fixed):** (1) teacher top-k ids were bounded by tokenizer.vocab_size (Qwen 151,643 excludes
-<|endoftext|>/<|im_end|>) -> first val batch failed; now len(tokenizer) (b3f89482). (2) Both runs then HUNG in the initial validation
-(1 h+, all 8 GPUs 100% util at ~120 W = NCCL spin): the untied 30B lm_head was its own FSDP2 unit, and the loss calls lm_head once per
-1024-token chunk outside the forward, so every call resharded/all-gathered and ranks with different token counts deadlocked (Gemma's
-tied head lives in the root unit). Fix: VERL_FSDP2_WRAP_EMBED_LM_HEAD=0 keeps embed/lm_head in the root unit (set for STUDENT=q30b);
-2-rank CPU repro tests/special_distributed/run_fsdp2_untied_lm_head_chunked.py hangs without it and passes with identical grads with it.
-Relaunched as r4 (hourly retry on failure).
-r4 TRAINING since 03:17Z 10-08 (8 GPUs, no OOM, ~20 s/step -> ~6 h for 1000 steps): initial val KL medium 0.0620 (teacher mass
-0.989), hard 0.0983 (0.913); step-1 loss 0.079 / 0.086. W&B project qwen3-4b-base-distill-v1.
-**Hard band DONE 2026-10-08 21:14Z** (exit 0, receipts verified): 1000 steps, val KL 0.0983 -> 0.0369 (400) -> 0.0355 (500) -> 0.0332 (750)
--> **0.0324 (1000)**; checkpoints 250/500/750/1000 (+HF exports) on S3. It was preempted 7x on borrowed capacity (only step 250 survived)
-and finished on dedicated capacity (ALLOW_BORROWING=false, user 15:20Z); exact resume verified (val KL at 250 identical to 7 digits).
-Medium moved to dedicated too (resumed from 500 at 19:17Z, exact).
-**Medium band DONE 2026-10-08 22:47Z** (receipts verified): val KL 0.0620 -> 0.0419 (250) -> 0.0398 (500) -> 0.0389 (750) -> **0.0387 (1000)**;
-checkpoints 250/500/750/1000 (+HF exports) on S3. Both 4B -> 30B-A3B students are done; evals of the students not yet requested.
-
----
-
 ## 2026-10-07 — Qwen3-30B-A3B RL: checkpoint-overhead fix + relaunch to 500 steps
 
 Measured share of wall-clock spent checkpointing: 30B medium 34%, 30B hard 29%, 4B hard 6%, 4B medium 4% (30B: rolling save at
@@ -839,24 +774,6 @@ overlaps the next steps instead. Expected 30B overhead ~10%. Cutover (`cutover_q
 permanent step 350 (best 0.7575 @320, 1 miss; job_db38bg4f8c4g08flbe70), hard cut over early at the user's request from rolling step 195
 (best 0.5154 @190; job_db38lnjmjdjg088cefb0) -> new supervisors `.scale_train_supervisors/q3-30b-rl-{med,hard}-20261007-ckptfix/`,
 TOTAL_TRAINING_STEPS=500, same S3 prefixes / W&B ids, exact resume (Adam + data cursor + ES state). 4B runs unchanged.
-
----
-
-## 2026-10-07 — Qwen3-4B-Base -> 30B-A3B distillation, step 1: top-128 teacher traces (ScaleTrain, 1 GPU per band)
-
-Same protocol as the E4B-base -> 12B/26B control (DISTILLATION_EXPERIMENTS.md §9): untrained Qwen3-4B-Base@906bfd4b teacher,
-Qwen3-30B medium + hard bands (JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k@be4dcd8b), 3,000 train q x 16 + 300 val
-q x 1, temp 1 / top-p 1 / top-k -1, 8192 response tokens, RL prompt (0-shot ChatML + boxed instruction), token ids + top-128
-logprobs. Specs q4b-base-{medium,hard} in run_gemma4_bestckpt_trace_collection.sh; ScaleTrain jobs q4b-tr-{med,hard}
-(job_db2stgbmjdjg07lcroq0 / job_db2stgcf8c4g08flbdug, 1 GPU, borrowing, supervisor `tr-q4b-tr-*`), bundles
-`s3://scale-ml/genai/rl-distill/qwen3-4b-base-traces-topk128-v1/q4b-base-{medium,hard}/` (S3-mirrored per shard, resumable).
-Found in smoke: the untrained 4B samples Qwen3's LM-head padding ids (151,669-151,935; ~1 per 800k tokens), which fail trace
-validation -> --restrict-to-tokenizer-vocab (-100 logit bias on padding ids + processed_logprobs; vLLM caps allowed_token_ids at
-1024). Throughput is CPU-bound on top-128 processing: ~940 output tok/s per GPU, 32 prompts/shard -> 94 shards x ~11 min ~= 17 h
-and ~21 GB per band. Smoke shard (32 medium q x 16): teacher strict acc 21%, mean response 1,211 tokens, 2.3% hit 8192.
-**DONE 2026-10-07** (relaunched on 4 GPUs per band, GPUS=4): both bundles VALID + COMPLETE.json on S3 -- medium 48,300 rows /
-56.7M response tokens (20.6 GB train, COMPLETE 18:48 UTC), hard 48,300 rows / 60.6M tokens (22.1 GB, 19:17 UTC). The single-process
-final validation alone takes ~80-85 min per bundle (4.3x the E4B bundles' 17 min, proportional to size).
 
 ---
 
@@ -959,19 +876,6 @@ tokens; k/8 = 0: 23.7%, 1: 16.6%, 2: 12.6%, 3: 11.4%, 4: 10.0%, 5: 9.5%, 6: 8.0%
 all samples mean 985 / median 675 / std 1171 / p99 7574, 0.87% hit 8192; medium band (30B k=2-3, 9,315 q) mean 1026 /
 median 725 / std 1128, 0.70% hit 8192 (correct samples 0.13%, incorrect 0.95%), 1.27% exceed 6144 (Gemma 4 RL's
 overlong-penalty onset); ~60% of capped samples end in a low-entropy repetition loop (zlib tail ratio < 0.25).
-
----
-
-## 2026-10-03 — Ouro looped-LM baseline evals (1 vs 4 loops, 12-shot vs 0-shot)
-
-Start of a controlled study with ByteDance Ouro-1.4B / Ouro-2.6B (planned: small model with no loop vs larger model
-with untied per-loop parameters). Baseline: both models × {1, 4 (shipped)} recurrent steps × {12-shot, 0-shot}, on the
-three 300-question DeepScaleR band validation sets, 4 samples/question, temp 1.0, 8192 tokens, boxed-only math_verify.
-Run locally on GPUs 3–7 via `run_ouro_loop_evals.py` (loop count through vLLM `hf_overrides`; HF-vs-vLLM parity
-checked at 1 and 4 steps). **Done, 24/24.** Key results (mean@4, easy/medium/hard): 2.6B 4-step 0-shot
-68.6/55.5/41.0, 1.4B 4-step 0-shot 62.2/51.4/38.2; 12-shot is 20–29 points worse on medium/hard; 1-step ≈ 0–11
-because the 1-step distribution is near-uniform at temperature 1.0 (argmax still coherent). Full table + findings:
-[`OURO_LOOP_STUDY.md`](OURO_LOOP_STUDY.md). Traces/metrics: `/tmp/ouro_eval/results_k4/` (local NVMe only).
 
 ---
 
@@ -1267,7 +1171,7 @@ gated behind a one-step canary because it has not previously trained in this
 repository.
 
 **Entry points.** See `GEMMA4_DIFFICULTY_RL_RUNS.md`,
-`scale_train/launch_gemma4_difficulty_matrix.py`, and
+`scale_train/gemma4/launch_gemma4_difficulty_matrix.py`, and
 `scale_train/run_gemma4_e2b_easy_medium_packed.sh`. The default launcher action
 is dry-run; `--launch` is required for submission. Focused tests pass, and all
 five smoke-job commands resolve against the full-node EKS build configuration.
@@ -1343,7 +1247,7 @@ launching the 750-step run.
 **Scope.** Preparation only for the two Gemma 4 distillation-vs.-RL lines. No 750-step
 distillation, benchmark production, post-distillation RL, or model training run was started. The
 canonical status and ambiguity ledger are in
-[`GEMMA4_DISTILL_VS_RL_EXPERIMENTS.md`](GEMMA4_DISTILL_VS_RL_EXPERIMENTS.md).
+[`docs/GEMMA4_RESULTS.md`](docs/GEMMA4_RESULTS.md) (was GEMMA4_DISTILL_VS_RL_EXPERIMENTS.md).
 
 **Complete local vLLM source bundles.** Both directions contain 48,615 train plus 1,000 validation
 rows (1,216 train and 25 validation shards), five responses per registered question unit, exact
@@ -1742,209 +1646,6 @@ Full forensic detail in memory `gemma4-verl-rl-enablement.md`.
 
 ---
 
-## 2026-07-22 — 1B-PT RL relaunch on the **strict 4/4** split + heavy wandb trace logging
-
-**Goal.** Relaunch the two 1B-PT DeepScaleR-4/4 RL runs on a fresh split cut from the **strict-graded**
-4/4 pool, under the strict boxed-only grader (now the math_verify default), and upload far more traces
-to wandb: 100 random **train** rollouts every train step + 100 random **val** traces every eval.
-
-**Data.** New split from `deepscaler_acc4of4_strict.parquet` (9,923 strict-4/4 questions), shuffle seed 42:
-**train 9,723 / val 200** → `deepscaler_4of4strict_rl_{train,val200_x16}.parquet` (val 200 uids ×16 = 3,200,
-`val_kwargs.n=1` → pass/maj/mean@16). **Local only** (1B reads local files; not pushed to HF).
-
-**Code change (fork).** `dapo/dapo_ray_trainer.py` (symlink → `rl-distill-scripts/dapo_ray_trainer.py`):
-added `RayDAPOTrainer._log_train_generations_to_wandb(batch)` — a **fresh per-step** `train/generations`
-wandb Table (one row per trace: step/input/output/score; no unbounded accumulation), gated on
-`trainer.log_train_generations`, called in `fit()` right after the disk-dump block. Core launcher
-`gemma3_pt_fewshot_math_rl.sh` exposes it via `LOG_TRAIN_GENERATIONS` → `+trainer.log_train_generations`
-(new key, `+`). Val traces use the existing `LOG_VAL_GENERATIONS` (bumped to 100). Strict grading is the
-math_verify default (`VERL_MATH_VERIFY_STRICT_BOXED`), so no extra flag.
-
-**Runs** — same recipe (GRPO n=16, max_response 8192 + 2048 overlong buffer, temp 1.0 train=val, 12-shot
-prompt, SAVE_FREQ=25, HF push /25, wandb, val_before_train), via
-`launch_1b_deepscaler_4of4strict_seed_sweep.sh`: seed 42 → GPUs 2,3 / port 52000; seed 43 → GPUs 4,5 /
-port 53000; isolated Ray `/tmp/ray_1b_ds4of4s_seed{42,43}`; both `LOG_{VAL,TRAIN}_GENERATIONS=100`.
-wandb `DAPO-gemma3-1b-pt-DeepScaleR-4of4strict-seed{42,43}`; HF
-`JWei05/DAPO-Gemma3-1B-PT-DeepScaleR-4of4strict-seed{42,43}`.
-
-**Ray startup timeout — root cause + fix (two parts).** Both seeds repeatedly died with Ray "The current
-node timed out during startup" (even seed 42 alone, first — so NOT the 150s-stagger collision). Real root
-cause: **the shared box is oversubscribed** — `load average ~180` with 83 users vs 192 CPUs (memory was
-fine, 1.4 TB free). `ray/_private/node.py` gives the raylet only a **hardcoded 30s** to register with the
-GCS (`raylet_start_wait_time_s = 30`); under that CPU starvation the raylet can't register in time and the
-driver SIGKILLs it (the raylet.err "crash" trace is just that teardown, not a self-crash → a longer wait
-succeeds). Two-part fix, both in `gemma3_1b_pt_fewshot_math_rl.sh`:
-  1. **Widen the window.** Patched `.venv/.../ray/_private/node.py:411` to read an env var:
-     `raylet_start_wait_time_s = int(os.environ.get("RAY_RAYLET_START_WAIT_TIME_S", "30"))`, and the wrapper
-     exports `RAY_RAYLET_START_WAIT_TIME_S=300`. ⚠️ **This node.py edit is venv-local and is lost on a fresh
-     `setup_env.sh`** — reapply it then (the wrapper's env export is a harmless no-op without it).
-  2. **Cut our own startup churn.** `+ray_kwargs.ray_init.num_cpus=32` — the raylet prestarts one Python
-     worker per CPU, so capping CPUs (a 2-GPU FSDP run needs only ~8: `max_colocate_count=3` →
-     `{CPU:3,GPU:1}` bundles) avoids a 192-way EFS-venv import storm on top of the existing load.
-  3. **Two more startup timeouts, same root cause.** With the driver-wait widened, the raylet then aborted
-     `node_manager.cc:3362 Check failed ... Timed out waiting for file .../metrics_agent_port` — the
-     metrics/dashboard agent (another EFS-venv Python import) was too slow to write its port file. These are
-     real C++ RayConfig fields (env-overridable, confirmed via `strings _raylet.so`), so the wrapper now also
-     exports `RAY_agent_register_timeout_ms=300000` and `RAY_worker_register_timeout_seconds=600`. (Stuck
-     drivers go D-state on EFS I/O, so `kill -9` is pending until the syscall returns — expect slow cleanup.)
-
-  4. **The un-fixable one (why it still won't start right now).** Even solo, the raylet keeps aborting on
-     `Timed out waiting for file .../metrics_agent_port`: the metrics/dashboard agent (yet another EFS-venv
-     Python import) takes ~90–117s to start under load but the raylet's wait for its port file is a **fixed
-     ~86s hardcoded C++ timeout with NO env override** (confirmed `agent_register_timeout_ms` reaches the
-     raylet via `os.environ.copy()` but doesn't govern this wait; can't patch a compiled `.so`). So the only
-     real cure is the **external CPU load dropping** — box was at load ~210 when first flagged and climbed to
-     ~280 (81 users) over the session; GPUs 1–5 are free the whole time, so it's purely CPU/EFS startup
-     starvation, not our config.
-
-All of this is captured in memory `ray-local-startup-timeouts-loaded-box`.
-
-**Status — ARMED, waiting on the box.** Everything is staged and correct; the sole blocker is the overloaded
-shared box. Deployed a **load-gated retry orchestrator** `launch_1b_ds4of4strict_retry.sh` (nohup, deadline
-180min): it polls `/proc/loadavg` and only attempts a launch when 1-min load < `LOAD_GATE=160` (so it never
-piles onto a peak-load box), brings seeds up **one at a time** (seed 42 on GPUs 2,3 then seed 43 on 4,5), and
-stops the instant each is past Ray bringup. A persistent monitor watches its output. It will auto-launch both
-runs the moment the box calms below 160 — nothing further to do on our side until then.
-
----
-
-## 2026-07-22 — Strict boxed-only grading + full strict re-eval of GEMMA3_PT_EVAL_REPLICATION.md
-
-**Change.** `verl/utils/reward_score/math_verify.py` now scores **strict** by default
-(`VERL_MATH_VERIFY_STRICT_BOXED`): exactly one `\boxed{}` (0 or ≥2 → 0), verify only that box — vs the
-old lenient whole-output `parse` + max-over-candidates that credited bare-LaTeX echoes / hedges. Tests:
-`tests/utils/reward_score/test_math_verify_strict_boxed_on_cpu.py` (14 pass).
-
-**Re-eval.** Rescored saved traces (sampled base/RL matrix `~/verl/eval_traces`; 4B-IT DeepScaleR ×4)
-and regenerated the untraced ones on GPUs 2–5 with `--enforce_eager --trace_dir ~/verl/eval_traces_strict`
-(greedy base/RL tables; per-difficulty 4B-PT/1B-PT on the **strict** difficulty buckets; few-shot sweep;
-longest-2-shot; DeepScaleR-250). Scripts in scratch: `strict_rescore_traces.py`, `rescore_itgen_strict.py`,
-`regen_strict.py`, `regen_strict2.py`, `sweep_strict.py`.
-
-**Findings.** Strict ≈ lenient for **greedy** (single clean box); **meaningfully lower for sampled/temp-1.0**
-(degeneration → no-box/echo false positives removed, e.g. DeepScaleR-250 4B temp-1.0 4.0→1.6). 4B-IT barely
-changes (mean@4 38.8→37.9). Base→RL conclusions hold (RL still ~doubles DAPO-val pass@16). The 4B-IT
-difficulty ranking transfers to PT models (4B-PT greedy 0/4→0% … 4/4→27%). Verified: all 2,530
-scored-correct of 25,401 traces have exactly one box (0 violations); no false negatives spotted. All in the
-new "Strict grading" section of `GEMMA3_PT_EVAL_REPLICATION.md`.
-
----
-
-## 2026-07-22 — DeepScaleR **4/4-subset** RL: 1B ×2 seeds (local) + 4B ×1 (ScaleTrain)
-
-**Goal.** Replace the prior full-DeepScaleR RL experiments with RL on the **4/4 subset** — the 10,404
-questions Gemma-3-4B-IT solved 4/4 (from the difficulty filtering below). Clean, verified-solvable
-problems; the 4B-PT only gets ~19% greedy on them, so there's RL headroom.
-
-**Data.** 4/4 split (shuffle seed 42): **train 10,204 / val 200**. Files `deepscaler_4of4_rl_train.parquet`,
-`deepscaler_4of4_rl_val200_x16.parquet` (200×16=3,200, `val_kwargs.n=1` → **pass/mean/maj@16**). Uploaded
-to HF **`JWei05/DeepScaleR-4of4-RL`** (both local + pod pull the identical split).
-
-**Runs** — same recipe as the DeepScaleR runs (GRPO, n=16, **max_response 8192 + 2048 overlong buffer**
-[penalty ramps 6144→8192; changed from 20k/4k on the 2026-07-22 restart], temp 1.0 train=val,
-**12-shot prompt** `gemma3_it_fewshot_math.jinja`, SAVE_FREQ=25, HF push /25, wandb, val_before_train):
-
-- **1B ×2 seeds, local** (`launch_1b_deepscaler_4of4_seed_sweep.sh`): seed 42 → GPUs 2,3 / port 52000;
-  seed 43 → GPUs 4,5 / port 53000; isolated Ray `/tmp/ray_1b_ds4of4_seed{42,43}`. wandb
-  `DAPO-gemma3-1b-pt-DeepScaleR-4of4-seed{42,43}`; HF `JWei05/DAPO-Gemma3-1B-PT-DeepScaleR-4of4-seed{42,43}`.
-- **4B ×1 seed, ScaleTrain** (`scale_train/run_gemma3_4b_pt_deepscaler_4of4_rl.sh` +
-  `data/prepare_deepscaler_4of4_rl_data.sh`): 1×8-GPU H100, **priority high + borrowing**. wandb
-  `DAPO-gemma3-4b-pt-DeepScaleR-4of4`; HF `JWei05/DAPO-Gemma3-4B-PT-DeepScaleR-4of4`.
-
-**Status.** Launched. 1B seed 42 → GPUs 2,3 (fine); seed 43 hit a transient Ray-startup timeout when both
-local Ray clusters started at once under EFS load → relaunched alone on GPUs 4,5 (fix next time: start the
-two local seeds fully sequentially, not 45s-staggered). 4B ScaleTrain job (QUEUED, priority high + borrowing). Data split was cut from `deepscaler_acc4of4.parquet`
-(see entry below).
-
-**Restart (2026-07-22):** all 3 restarted to change **max_response 20480→8192** and **overlong buffer
-4096→2048** (penalty ramps 6144→8192). 1B stagger bumped 45s→150s to avoid the Ray-startup collision.
-Active jobs: 1B seeds 42 (GPUs 2,3) / 43 (GPUs 4,5) local; **4B ScaleTrain `job_d9g2rupq1fp5np2n185g`**
-(QUEUED). (Superseded IDs: canceled `job_d9g1o4hq1fp5np2n1850`.)
-
----
-
-## 2026-07-21/22 — DeepScaleR difficulty filtering (via Gemma-3-4B-IT pass rate) + 4B-PT check
-
-**Goal.** Partition `agentica-org/DeepScaleR-Preview-Dataset` (40,315 competition-math problems) by
-difficulty so we can select learnable-difficulty subsets for RL (drop always-solved / never-solved,
-keep the middle), rather than training on the full, mostly-too-hard set.
-
-**Approach — what we settled on.**
-- First tried bucketing by the dataset's own `solution` length → **abandoned: 81.7% of `solution`
-  fields are empty** (only 7,391 of 40,315 non-empty), so it's not a usable difficulty signal.
-- Switched to a **model-based difficulty measure**: generate with **Gemma-3-4B-IT**, 4 samples per
-  question, and use the per-question pass rate (`n_correct` out of 4) as difficulty.
-
-### Step 1 — Inference: Gemma-3-4B-IT over all of DeepScaleR, 4×
-- Model `google/gemma-3-4b-it`; **every** question (40,315) × **4 samples**.
-- Sampling: **temp 1.0, top_p 1.0, top_k −1**; **8k context (max_prompt 2048 + max_response 6144)**.
-  (Started at 12k/8192, tightened to 8k on request — smaller KV → higher concurrency.)
-- Prompt: **short 2-shot** (`data/gemma3_it_fewshot_math_2shot.jinja`, domain + 15-trees).
-- **DP=4** across GPUs 2,3,4,5 (dataset sharded 4 ways, TP=1 each). ~250–300 concurrent seqs/GPU,
-  ~68–84% util, ~40k output tok/s aggregate, ~1.5 h wall.
-- Script: `data/deepscaler_it_gen.py` (feeds token-id prompts, single BOS; saves per question the 4
-  `response_texts` + `response_lens` + math_verify `scores`/`accs` + `n_correct`/`any_correct`).
-- Output: `~/verl/data/deepscaler_it_gen/shard_{0..3}.parquet` (full traces kept).
-- Note: run each shard's launch **staggered** or with a per-shard compile cache next time — 4 vLLM
-  procs sharing the HF cache on EFS made the weight-load slow (~10 min D-state), and sharing the
-  torch.compile inductor cache later corrupted it (see Step 3 caveat).
-
-**IT-gen results (40,315 q):** overall **mean@4 = 38.8%**, **pass@4 = 53.7%**. Response length is a
-strong difficulty signal — mean@4 by response-length quintile: **79.5 → 45.8 → 28.4 → 22.5 → 17.8%**
-(shortest→longest). Lengths: median 1,264 tok, p95 2,021, max 4,252 (nothing hit the 6,144 cap).
-
-### Step 2 — The 5 accuracy subsets (by `n_correct` of 4)
-Merged (`merge_and_analyze_deepscaler_it_gen.py`) → `deepscaler_it_gen_merged.parquet` (all traces),
-plus 5 **RL-ready** parquets `~/verl/data/deepscaler_it_gen/deepscaler_acc{0..4}of4.parquet`
-(data_source=`math`, `\boxed{}` prompt, ground-truth):
-
-| subset | questions | share | median resp len (IT) |
-|---|---|---|---|
-| 0/4 (never solved) | 18,670 | 46.3% | 1,405 |
-| 1/4 | 4,755 | 11.8% | 1,472 |
-| 2/4 | 3,251 | 8.1% | 1,419 |
-| 3/4 | 3,235 | 8.0% | 1,260 |
-| 4/4 (always solved) | 10,404 | 25.8% | 617 |
-
-Bimodal: ~46% never solved, ~26% always solved, ~28% in the learnable middle (1–3/4).
-
-### Step 3 — Sanity eval: Gemma-3-4B-PT on the subsets (greedy + temp 1.0)
-- `google/gemma-3-4b-pt`, **12-shot** prompt (`data/gemma3_it_fewshot_math.jinja`), **100 random
-  questions/bin** (seed 42), both **greedy (temp 0)** and **temp 1.0**, max_tokens 4096, max_model_len
-  8192, via `eval_math_passk.py --enforce_eager`. Samples: `~/verl/data/deepscaler_acc{0..4}of4_s100.parquet`.
-
-**4B-PT accuracy by IT-difficulty subset (mean@1, %):**
-
-| IT subset | greedy | temp 1.0 |
-|---|---|---|
-| 0/4 | 3.0 | 2.0 |
-| 1/4 | 5.0 | 0.0 |
-| 2/4 | 4.0 | 1.0 |
-| 3/4 | 7.0 | 2.0 |
-| 4/4 | **19.0** | **8.0** |
-
-- **Difficulty transfers across models**: 4B-PT accuracy rises with the 4B-IT pass rate; clearly
-  highest on the 4/4 bin, near-floor on 0/4. Confirms the IT-pass-rate binning is a valid difficulty axis.
-- But **compressed/low**: even the easiest (4/4) bin is only 19% greedy for the PT — DeepScaleR is hard
-  for the 4B-PT, and IT-4/4 (stronger model + its own 2-shot prompt) ≠ easy-for-PT. Middle bins (1–3/4)
-  are ~3–7% and statistically flat at n=100 (±~3–5%); the real signal is the 4/4 jump.
-- **Greedy > temp 1.0** everywhere (base-PT pattern seen throughout, e.g. GEMMA3_PT_EVAL_REPLICATION.md).
-- **Caveat:** needed `--enforce_eager` (flag added to `eval_math_passk.py`) — the DP=4 IT-gen corrupted
-  the shared torch.compile inductor cache (`UnpicklingError: pickle data was truncated`); eager skips
-  compilation and sidesteps it.
-
-**Artifacts.**
-- Scripts: `data/deepscaler_it_gen.py`, `data/merge_and_analyze_deepscaler_it_gen.py`,
-  `eval_math_passk.py` (now supports `--enforce_eager`).
-- Data (local): `~/verl/data/deepscaler_it_gen/` (shards, merged, 5 `acc*of4` subsets),
-  `~/verl/data/deepscaler_acc*of4_s100.parquet`.
-- Related earlier: `data/build_deepscaler_rl_data.py` + `data/prepare_deepscaler_rl_data.sh` built the
-  DeepScaleR RL train/val split, uploaded to HF `JWei05/DeepScaleR-RL`.
-
-**Status.** IT-gen + subset build + 4B-PT sanity eval all complete; nothing running. The earlier
-DeepScaleR RL runs (1B local, 4B ScaleTrain) were stopped/cancelled — superseded by this filtering
-work. Next: decide which subset(s) to train RL on (likely the learnable middle 1–3/4).
-
 ## 2026-09-13 — Hugging Face Hub cleanup (user request)
 
 **Rule:** delete model repos last modified before 2026-07-30 (datasets untouched; repos created before but modified after the cutoff kept); the two Gemma 4 `4of4strict-seed42` RL repos (2026-07-27/28) were explicitly kept. 37 repos deleted (irreversible), 77 model repos remain.
@@ -1992,7 +1693,7 @@ Deleted repos (several are still referenced by legacy Gemma 3 launch/eval script
 - `JWei05/DAPO-Gemma3-1B-PT-DeepScaleR-4of4strict-seed42-local`
 
 ## 2026-09-14 — 12B distilled RL (medium) finished
-- `g4-12b-distill-rl-med` (RL on top of the E4B-base→12B off-policy distilled student, DeepScaleR medium, seed 42, ES patience 5): early stopping at step 240, best val mean@16 **0.497 @ step 190** (from ≈0.08 at step 0). Best HF snapshot + receipt on S3 (`gemma4-12b-from-e4bbase-distill-rl/gemma4-12b-medium-from-e4bbase-distill-es5/best_hf/`). Details: DISTILLATION_EXPERIMENTS.md §9.0.
+- `g4-12b-distill-rl-med` (RL on top of the E4B-base→12B off-policy distilled student, DeepScaleR medium, seed 42, ES patience 5): early stopping at step 240, best val mean@16 **0.497 @ step 190** (from ≈0.08 at step 0). Best HF snapshot + receipt on S3 (`gemma4-12b-from-e4bbase-distill-rl/gemma4-12b-medium-from-e4bbase-distill-es5/best_hf/`). Details: docs/GEMMA4_RESULTS.md (was DISTILLATION_EXPERIMENTS.md §9.0).
 - On-policy distillation take 3 (student-top-128 reverse KL + tail bucket) running: job_dajtd33ns19g0896plog, step 40+, no flattening so far (§9.0f). Plain student-top-k run (take 2) collapsed by step 150 and was cancelled; its step-50 results stand (§9.0e).
 
 ## 2026-09-16 — devbox-008 restart backup
@@ -2003,4 +1704,20 @@ was synced to `s3://scale-ml/genai/rl-distill/devbox-008-backup-20260916/` (≈6
 (`tmax-research.*/paper`, `paper.tar`), two eval jsonl dumps and the local 12B-resume logs. Not uploaded (recoverable elsewhere): 26B checkpoint
 copies (S3), Hub staging dirs (uploads finished), trace bundles (S3), HF/vLLM caches, agent scratch. `local_eval_models` (569 GB of Qwen2.5-3B
 GRPO eval exports) was left for the user to decide. `/dev/shm` held only 238 MB of ours. The local venv `/tmp/.venv-gemma4` is rebuilt by
-`setup_env_gemma4.sh` + `rl-distill-scripts/patches/`. GitHub `main` pushed through `dd6647dc`.
+`setup_env_gemma4.sh` + `rl-distill-scripts/utils/patches/`. GitHub `main` pushed through `dd6647dc`.
+
+---
+
+## Archived entries (out of scope after the 2026-10 repo cleanup)
+
+Entries only about dropped work (Gemma 3 incl. the DeepScaleR 4/4 filtering and 1B/4B RL, the Ouro loop study, Qwen3-30B-A3B as a
+distillation student) were removed from the log above; one line each, newest first.
+
+- 2026-10-09 — pass@32 evals: Qwen3-30B-A3B-Base vs Qwen3-4B-Base vs 4B->30B distilled students — the 4B->30B students fall to the 4B teacher's level within 250 steps and stay flat (s1000 mean@32 medium 18.2 / hard 7.9 vs 4B base 20.8 / 8.6 and 30B base 27.9 / 13.0) — full text in git history (commit 55a95cce)
+- 2026-10-07 — Qwen3-4B-Base -> Qwen3-30B-A3B-Base distillation (step 2): PREPARED, NOT LAUNCHED — later ran on 8 GPUs and finished both bands (val KL medium 0.0620 -> 0.0387, hard 0.0983 -> 0.0324 @1000); the untied-lm_head FSDP2 deadlock was fixed with VERL_FSDP2_WRAP_EMBED_LM_HEAD=0 — full text in git history (commit 55a95cce)
+- 2026-10-07 — Qwen3-4B-Base -> 30B-A3B distillation, step 1: top-128 teacher traces (ScaleTrain, 1 GPU per band) — both bundles VALID (48,300 rows each; 56.7M / 60.6M response tokens medium / hard); the untrained 4B needed --restrict-to-tokenizer-vocab — full text in git history (commit 55a95cce)
+- 2026-10-03 — Ouro looped-LM baseline evals (1 vs 4 loops, 12-shot vs 0-shot) — 24/24 done; 4-step 0-shot best (2.6B 68.6 / 55.5 / 41.0 mean@4 easy / medium / hard), 12-shot 20-29 pts worse, 1-step ~0-11 — full text in git history (commit 55a95cce)
+- 2026-07-22 — 1B-PT RL relaunch on the strict 4/4 split + heavy wandb trace logging — Gemma 3 1B; added per-step `train/generations` W&B tables; launch blocked by Ray startup timeouts on the overloaded box (load-gated retry armed) — full text in git history (commit 55a95cce)
+- 2026-07-22 — Strict boxed-only grading + full strict re-eval of GEMMA3_PT_EVAL_REPLICATION.md — strict boxed-only math_verify became the default; strict ~= lenient for greedy, lower for temp-1.0 sampling (DeepScaleR-250 4B 4.0 -> 1.6) — full text in git history (commit 55a95cce)
+- 2026-07-22 — DeepScaleR 4/4-subset RL: 1B x2 seeds (local) + 4B x1 (ScaleTrain) — Gemma 3 RL on the 10,404-q 4/4 subset (train 10,204 / val 200, HF JWei05/DeepScaleR-4of4-RL); launched, then superseded by the strict 4/4 split — full text in git history (commit 55a95cce)
+- 2026-07-21/22 — DeepScaleR difficulty filtering (via Gemma-3-4B-IT pass rate) + 4B-PT check — Gemma-3-4B-IT x4 over 40,315 q (mean@4 38.8%, pass@4 53.7%; 46.3% 0/4, 25.8% 4/4); Gemma-3-4B-PT greedy only 19% on the 4/4 bin — full text in git history (commit 55a95cce)
