@@ -150,6 +150,15 @@ final OPD stage.
   Sampling, ACL'25 "ghost token"; TA-OPD; TAD). Fix (user): tail bucket p_tail log(p_tail/q_tail) (b9f594c7, TOPK_KL_TAIL_BUCKET,
   default on for the *-all specs). Jobs moved 2 GPUs -> 4 GPUs (user), then restarted on the tail-bucket code during stage 1 (trace
   shards resume from S3): supervisors *-20261026-dp4b, 4 GPUs, borrowing false.
+- 2026-10-26 ~14:00Z: **forward-KL (tail-bucket) pre-distillations DONE** (traces 9000 q x 8, 1000 steps, evals n=32 on each band;
+  figures/qwen3_distill_vs_teacher.md section B). Tail bucket worked: student mass on the teacher top-128 stays at / just below the
+  teacher's (0.961 vs 0.964; 0.952 vs 0.957), unlike the 30B runs without it (0.986 vs 0.970).
+  * 4B' (1.7B base -> 4B base): MATCHES the 1.7B-base teacher in pass@1..32 AND entropy on all bands (e.g. @750 easy 29.4 / pass@32 92.3
+    / NLL 0.986 vs teacher 31.2 / 92.7 / 0.953; medium 8.7 / 63.7 / 1.033 vs 9.3 / 67.3 / 0.988; hard 3.9 / 44.7 / 1.049 vs 3.7 / 44.0
+    / 1.012); fwd KL (incl. tail) 0.079 -> 0.048. Closest overall: step 750 (500 similar).
+  * 1.7B' (4B base -> 1.7B base): copies the style (entropy / length) but NOT the ability -- accuracy stays at (slightly below) the
+    1.7B base on every band (medium mean@32 8.7 vs base 9.3 vs teacher 20.6; hard pass@32 39.7 vs 44.0 vs 70.3); fwd KL only
+    0.088 -> 0.073. Exp 2 therefore cannot separate pre-training from capacity (1.7B' ~ the 1.7B base). GATE: user picks checkpoints.
 - 2026-10-25 grid results: 8B medium @480 -> 1.7B base DONE 19:44Z best 33.5 @230 (4B-teacher student 37.3, 1.7B RL 34.7); 8B medium
   @480 -> 4B base DONE 20:39Z best 61.1 @245 (4B RL medium 65.8) -> on medium the 8B teacher is a worse teacher than the 4B for
   1.7B and distillation from base trails RL for the 4B student (like easy, -0.8). Controls (same-size 1.7B RL -> 1.7B base) reach
