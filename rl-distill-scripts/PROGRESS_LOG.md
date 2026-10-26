@@ -163,6 +163,15 @@ final OPD stage.
   already used the final best teacher (step 480).
   8B hard @310 -> 1.7B base DONE 04:51Z: best 15.3 @225 (4B hard teacher's student 19.5; 1.7B RL hard 14.1) -> the 8B teacher
   is again the WORSE teacher for 1.7B (as on medium: 33.5 vs 37.3). 8B hard -> 4B base at step 210: 34.5 (4B RL hard 41.2).
+  8B hard @310 -> 4B base DONE 07:10Z: best 34.5 @215 (4B RL hard 41.2). **Dense-ladder grid COMPLETE** (best val mean@16;
+  RL diagonal / OPD-from-base below it):
+  | band | RL 1.7B | RL 4B | RL 8B | 4B->1.7B | 8B->1.7B | 8B->4B |
+  |---|---|---|---|---|---|---|
+  | easy | 72.6 | 89.1 | 91.3 | 74.0 | 73.2 | 88.3 |
+  | medium | 34.7 | 65.8 | 68.3 | 37.5 | 33.5 | 61.1 |
+  | hard | 14.1 | 41.2 | 40.8 | 19.5 | 15.3 | 34.5 |
+  4B -> 1.7B beats 1.7B RL everywhere (+1.4 / +2.8 / +5.4); 8B -> 1.7B ~ RL (+0.6 / -1.2 / +1.2); 8B -> 4B below 4B RL (-0.8 /
+  -4.7 / -6.7). The bigger (8B) teacher is the worse teacher for both students.
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
