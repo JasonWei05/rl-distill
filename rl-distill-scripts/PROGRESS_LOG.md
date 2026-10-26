@@ -142,6 +142,14 @@ final OPD stage.
   pass@k for all k <= 32 + own-sample NLL (entropy estimate). Specs q1p7b-base-all -> q4b (4B') and q4b-base-all -> q1p7b (1.7B')
   (eb8b4e12); one 8-GPU borrowing job each (traces -> distill -> evals in one job, every stage resumable), supervisors
   rl-q3-1p7bbase-dist-4b / rl-q3-4bbase-dist-1p7b. USER GATE unchanged: report vs the teacher base, the user picks checkpoints.
+- 2026-10-26: reference = the earlier 4B base -> 30B base top-128 forward-KL students (report figures/qwen3_distill_vs_teacher.md,
+  34c2abd3): pass@1..32 converge to the teacher's (pass@32 90.3 vs 92.7 medium, 73.7 vs 72.0 hard @1000), fwd KL 0.062 -> 0.039 /
+  0.098 -> 0.032, BUT own-sample entropy stays at the 30B base's (0.43-0.46 vs teacher 0.96-0.97). Cause: the loss is the top-128 sum
+  only, minimized by the renormalized teacher head with ZERO tail mass (student top-128 mass 0.986 vs teacher 0.970); 46% of the 4B
+  base's own-sample NLL (0.52 of 1.12 nats/tok) comes from the 5.3% of sampled tokens outside its top-128. Known bias (Sparse Logit
+  Sampling, ACL'25 "ghost token"; TA-OPD; TAD). Fix (user): tail bucket p_tail log(p_tail/q_tail) (b9f594c7, TOPK_KL_TAIL_BUCKET,
+  default on for the *-all specs). Jobs moved 2 GPUs -> 4 GPUs (user), then restarted on the tail-bucket code during stage 1 (trace
+  shards resume from S3): supervisors *-20261026-dp4b, 4 GPUs, borrowing false.
 - 2026-10-25 grid results: 8B medium @480 -> 1.7B base DONE 19:44Z best 33.5 @230 (4B-teacher student 37.3, 1.7B RL 34.7); 8B medium
   @480 -> 4B base DONE 20:39Z best 61.1 @245 (4B RL medium 65.8) -> on medium the 8B teacher is a worse teacher than the 4B for
   1.7B and distillation from base trails RL for the 4B student (like easy, -0.8). Controls (same-size 1.7B RL -> 1.7B base) reach
