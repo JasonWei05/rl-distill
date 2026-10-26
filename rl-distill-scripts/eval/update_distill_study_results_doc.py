@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copy finished evaluation numbers into DISTILLATION_EXPERIMENTS.md (§8) as models complete.
+"""Copy finished evaluation numbers into docs/GEMMA4_RESULTS.md (evaluation matrix) as models complete.
 
 Scans one or more results roots for the per-model files the eval runners write
 (``<root>/<tag>/math/metrics.json`` and ``<root>/<tag>/ood/<benchmark>/**/results_*.json``; the queue

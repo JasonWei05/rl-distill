@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ScaleTrain pod entry (2 GPUs, no borrowing) for the per-checkpoint pass@k evals of the pre-training-control students
-# (§9 of DISTILLATION_EXPERIMENTS.md). Polls the student's Hub repo, evaluates every new step_NNNNNN export on the band's
+# (docs/GEMMA4_RESULTS.md). Polls the student's Hub repo, evaluates every new step_NNNNNN export on the band's
 # 300-question validation set with the x32 protocol and uploads each finished step to S3; the plots are drawn locally
 # from S3 (eval_student_checkpoints_passk.py --plot-from-s3).
 #

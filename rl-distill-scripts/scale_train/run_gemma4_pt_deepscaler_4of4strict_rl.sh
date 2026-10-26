@@ -419,7 +419,8 @@ fi
 # as a supervised loss instead of the DAPO policy loss (use_task_rewards=False zeroes the PG term; the math
 # reward is still computed for the train/val accuracy metrics). Same trainer, rollout, validation, checkpoint
 # and HF-push paths as RL. Pair with N_RESP_PER_PROMPT=1 and TRAIN_PROMPT_BSZ=TRAIN_PROMPT_MINI_BSZ for a pure
-# on-policy update. See DISTILLATION_EXPERIMENTS.md §9.0d and rl-distill-scripts/distill_onpolicy.sh (Gemma 3).
+# on-policy update. The current recipe (PG-k1: LOSS_MODE=k1 + USE_POLICY_GRADIENT=True) is set by
+# scale_train/launch_qwen3_onpolicy_distill.sh; see docs/RECIPES.md §3.
 ONPOLICY_DISTILL_ENABLE="${ONPOLICY_DISTILL_ENABLE:-False}"
 DISTILL_OVERRIDES=()
 case "${ONPOLICY_DISTILL_ENABLE,,}" in
@@ -618,7 +619,7 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       `# GPU; cumem invalid-argument on E4B). VLLM_SLEEP_MODE=True: level-1 sleep parks the bf16 weights in` \
       `# host RAM during the update, freeing ~52 GB/GPU for 26B-A4B; with OFFLOAD=True and no FSDP CPU` \
       `# offload policy that cut update_actor from 1625 s to 110 s (8xH100, 2026-09-03, see` \
-      `# RESUME_GEMMA4_26B_HARD_LOCAL.md).` \
+      `# docs/GEMMA4_RESULTS.md).` \
       actor_rollout_ref.rollout.free_cache_engine="${VLLM_SLEEP_MODE}" \
       ++actor_rollout_ref.rollout.enable_sleep_mode="${VLLM_SLEEP_MODE}" \
       ++trainer.early_stopping.enabled="${EARLY_STOPPING_ENABLED:-False}" \

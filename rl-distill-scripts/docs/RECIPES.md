@@ -185,6 +185,7 @@ Qwen3 ([`launch_qwen3_30b_a3b_medium_rl.sh`](../scale_train/launch_qwen3_30b_a3b
 | Size | GPUs | GEN_TP | KV / engine | MBS / padded cap | OFFLOAD | vLLM sleep | Other |
 |---|---|---|---|---|---|---|---|
 | 30B-A3B | 8 | 2 (4 engines) | 12 GiB | 4 / 8192 | True (phase-level) | on | R3 router replay, `Qwen3MoeDecoderLayer` |
+| 14B | 8 | 2 (4 engines) | 16 GiB per GPU | 4 / 8192 | False | on | weight-sync bucket 4096 MB; added 2026-10-26 (`es10` runs: cap 1000, patience 10) |
 | 8B | 4 | 1 | 16 GiB | 4 / 8192 | False | on | weight-sync bucket 4096 MB |
 | 4B | 4 | 1 | 24 GiB | 4 / 8192 | False | on | (easy runs: `MBS=8 PADDED_TOKENS=16384`) |
 | 1.7B | 2 | 1 | 24 GiB | 4 / 8192 | False | on | (easy runs: 8 / 16384) |

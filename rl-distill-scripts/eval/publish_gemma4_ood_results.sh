@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Publish OOD eval results to the repo as models finish: regenerate the committed OOD summary and §8 of
-# DISTILLATION_EXPERIMENTS.md, commit, rebase onto origin/main (auto-resolving the two auto-generated
+# docs/GEMMA4_RESULTS.md, commit, rebase onto origin/main (auto-resolving the two auto-generated
 # files: the registry takes upstream's version, the doc is regenerated), push.
 #   --once   : publish if any model completed since the last commit, then exit
 #   --watch  : loop, polling every PUBLISH_POLL_SECONDS (default 120) until PUBLISH_UNTIL_MODELS models are

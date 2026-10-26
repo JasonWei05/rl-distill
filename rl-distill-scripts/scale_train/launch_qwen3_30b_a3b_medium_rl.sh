@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # DAPO RL of Qwen3-30B-A3B-Base on the Qwen3-30B-defined DeepScaleR *medium* band
 # (JWei05/DeepScaleR-Easy-Medium-Hard-Qwen3-30B-A3B-Base-10k, 30B k/8 in {2,3}; 3,000 train / 300 validation x16).
-# Recipe = the Gemma 4 26B-A4B RL runs (launch_gemma4_26b_distilled_rl_medium.sh): GRPO n=16, bsz 64 / mini 32, lr 1e-6
+# Recipe = the Gemma 4 RL runs (docs/RECIPES.md §1): GRPO n=16, bsz 64 / mini 32, lr 1e-6
 # (20 warmup), token-mean loss, clip 0.2/0.28, 8k responses + 2k soft overlong buffer, token TIS (threshold 2), temp 1
 # train = val, validation every 10 steps (mean@16), early stopping patience 5 on val-core/math/acc/mean@16, 400 steps max.
 # Qwen deltas: 0-shot native ChatML + boxed instruction (the teacher's sampling prompt), <|im_end|>/<|im_start|> stop ids,

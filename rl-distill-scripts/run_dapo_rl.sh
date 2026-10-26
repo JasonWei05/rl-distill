@@ -68,11 +68,10 @@ WRAP_LAYER_CLS=${WRAP_LAYER_CLS:-Gemma3DecoderLayer}
 # THE UNIFIED FEW-SHOT PROMPT — identical for train + val (see header).
 GEMMA3_CHAT_TEMPLATE_FILE=${GEMMA3_CHAT_TEMPLATE_FILE:-"${PROJECT_ROOT}/rl-distill-scripts/data/gemma3_it_fewshot_math.jinja"}
 
-# Data: plain verl parquets built by data/build_math_rl_data.py
+# Data: plain verl parquets (the run-file prepares the DeepScaleR band parquets and passes TRAIN_FILE / VAL_FILES)
 DATA_DIR=${DATA_DIR:-"${RAY_DATA_HOME}/data"}
 TRAIN_FILE=${TRAIN_FILE:-"${DATA_DIR}/dapo_rl_train.parquet"}
 # Val: only the held-out DAPO val (100 questions x16 -> pass@k / maj@k / mean@k grouped by uid).
-# (The other math benchmarks are built by build_math_rl_data.py and can be added back via VAL_FILES.)
 VAL_FILES=${VAL_FILES:-"['${DATA_DIR}/dapo_rl_val100_x16.parquet']"}
 
 # Algorithm / sampling — validation uses the SAME sampling as training (temp 1.0, top_p 1.0, top_k -1)

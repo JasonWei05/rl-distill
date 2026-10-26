@@ -49,7 +49,7 @@ case "${TRACE_SPEC}" in
   # holds the model at its root (no step_NNNNNN/ subdir); 16 samples per training question by default.
   e4b-base-medium) RUN_KEY=e4b-base; BAND=medium; BEST_STEP=0; DIRECTION=e4b_base_medium_to_12b_26b; TEACHER_HF_REPO=google/gemma-4-E4B; TEACHER_HF_REVISION=411aa17b749aa952df1359d2dcea73917a544d9a; TEACHER_HF_ROOT=1 ;;
   e4b-base-hard)   RUN_KEY=e4b-base; BAND=hard;   BEST_STEP=0; DIRECTION=e4b_base_hard_to_12b_26b;   TEACHER_HF_REPO=google/gemma-4-E4B; TEACHER_HF_REVISION=411aa17b749aa952df1359d2dcea73917a544d9a; TEACHER_HF_ROOT=1 ;;
-  # RL on top of the E4B-base-distilled 12B (DISTILLATION_EXPERIMENTS.md §9.0; best val mean@16 0.497 @ step 190) as the
+  # RL on top of the E4B-base-distilled 12B (docs/GEMMA4_RESULTS.md; best val mean@16 0.497 @ step 190) as the
   # teacher for an E4B-base student under the §9 recipe (16 train samples). RUN_KEY is the S3 run prefix, so TEACHER_SOURCE=s3
   # reads the verified full checkpoint (…-rl-full-checkpoints/<RUN_KEY>/global_step_190/actor/huggingface); the Hub repo
   # (steps 170-240, pinned) is the fallback.

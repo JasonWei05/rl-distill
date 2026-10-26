@@ -21,7 +21,7 @@
 # registry is regenerated (data/build_gemma4_distill_study_eval_registry.py), so distilled students
 # that finish on the nodes are appended and evaluated without restarting. Models whose
 # RUN_COMPLETE.json already exists under the results root are skipped (resume). After each model
-# completes, DISTILLATION_EXPERIMENTS.md §8 is regenerated from the result files and committed.
+# completes, docs/GEMMA4_RESULTS.md's evaluation matrix is regenerated from the result files and committed.
 #
 # Shared assets (math manifest + MMMLU task tree) are prepared once here, not per model.
 
