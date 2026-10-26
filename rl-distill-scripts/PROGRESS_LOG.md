@@ -183,6 +183,16 @@ final OPD stage.
   min_delta 0.005, val every 10), rolling ckpt every 5 + permanent (HF export) every 10, borrowing true, priority high,
   MAX_RELAUNCHES=200 (preemption -> relaunch from the newest S3 checkpoint). 8186d486. NOTE: with min_delta the rule's "best"
   lags the true max -> re-publish best_hf at the best saved checkpoint after the runs finish.
+- 2026-10-26 ~20:20Z: **8B -> 14B switch** (user): stopped + cancelled (by ID) every Qwen3-8B run: the 8B hard RL rerun
+  (job_dbfotj0cdkag08afnh9g, step ~2) and the four 8B-teacher OPD v2 runs (q8be/q8bm -> q1p7b-base / q4b-base; <= step 25). The
+  4B-teacher OPD v2 runs and the 4B' RL runs continue. The 8B results above stay as recorded; new scale point = Qwen3-14B-Base.
+- 2026-10-26: **Qwen3-14B-Base RL LAUNCHED** on easy / medium / hard: the same RL recipe (GRPO n=16, bsz 64 / mini 32, lr 1e-6,
+  clip 0.2/0.28), cap 1000, early stopping patience 10 evals + 1-pt tolerance, RUN_TAG es10 (W&B q3-14b-<band>-es10-s42-v1; S3
+  qwen3-14b-base-rl[-full-checkpoints]). Layout: 8 GPUs (whole p5 node), FSDP2 DP8 no offload (~30 GiB/GPU training state = the 8B
+  on-4-GPU profile), vLLM 4 x TP2 with 16 GiB KV/GPU, 4 GiB sync buckets (0573540a). 8 vs 4 GPUs: at 4 GPUs the resident training state
+  is ~59 GiB/GPU, so rollout would need phase offload + TP>=2 with a small KV cache and the update would run near the 80 GiB limit;
+  8 GPUs costs about the same GPU-hours per step (~2x the GPUs at ~half the step time) with proven memory headroom. Medium on
+  borrowing false (rl-q3-14b-rl-med), easy + hard on borrowing true (rl-q3-14b-rl-{easy,hard}); MAX_RELAUNCHES 200, 1-h failure backoff.
 - 2026-10-25 grid results: 8B medium @480 -> 1.7B base DONE 19:44Z best 33.5 @230 (4B-teacher student 37.3, 1.7B RL 34.7); 8B medium
   @480 -> 4B base DONE 20:39Z best 61.1 @245 (4B RL medium 65.8) -> on medium the 8B teacher is a worse teacher than the 4B for
   1.7B and distillation from base trails RL for the 4B student (like easy, -0.8). Controls (same-size 1.7B RL -> 1.7B base) reach
