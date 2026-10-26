@@ -41,7 +41,14 @@ def download(root, tags):
         run = api.run(f"rl-distill/DAPO/{rid}")
         d = os.path.join(root, tag)
         os.makedirs(d, exist_ok=True)
-        hist = [{k: row.get(k) for k in ["_step", *SCALARS, VAL]} for row in run.scan_history() if row.get("_step") is not None]
+        # one sampled-history query per metric (samples > steps -> every logged row), merged by step: scan_history() drops the
+        # steps logged after a resume on resumed runs
+        by_step = {}
+        for key in [*SCALARS, VAL]:
+            h = run.history(keys=[key], samples=100000, pandas=True)
+            for step, value in zip(h["_step"], h[key]):
+                by_step.setdefault(int(step), {"_step": int(step)})[key] = float(value)
+        hist = [{k: row.get(k) for k in ["_step", *SCALARS, VAL]} for _, row in sorted(by_step.items())]
         json.dump(hist, open(os.path.join(d, "history.json"), "w"))
         files = [f for f in run.files(per_page=1000) if f.name.startswith("media/table/train/generations_")]
         with ThreadPoolExecutor(16) as ex:
