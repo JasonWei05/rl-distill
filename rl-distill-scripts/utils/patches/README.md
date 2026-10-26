@@ -4,8 +4,8 @@ Apply after `setup_env_gemma4.sh` (the venv lives on local disk and is erased by
 
 ```bash
 R=/tmp/.venv-gemma4/lib/python3.12/site-packages/ray/_private
-patch "$R/node.py"     < rl-distill-scripts/patches/ray-2.58-node-raylet-start-wait-env.patch
-patch "$R/services.py" < rl-distill-scripts/patches/ray-2.58-services-forward-dashboard-agent-listen-port.patch
+patch "$R/node.py"     < rl-distill-scripts/utils/patches/ray-2.58-node-raylet-start-wait-env.patch
+patch "$R/services.py" < rl-distill-scripts/utils/patches/ray-2.58-services-forward-dashboard-agent-listen-port.patch
 ```
 
 - `node.py`: the driver's wait for the raylet (`raylet_start_wait_time_s`) was hardcoded to 30 s; read `RAY_RAYLET_START_WAIT_TIME_S`.
