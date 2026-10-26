@@ -161,6 +161,8 @@ final OPD stage.
   Hard extension: no new best on the step-10 evals (19.1 @250; stop 350; best on any eval stays 19.5 @215) -> 250 steps was enough.
   8B medium RL 500 -> 800 continuation EARLY-STOPPED @610 with no new best (68.3 @480 stands) -> saturated; its two OPD students
   already used the final best teacher (step 480).
+  8B hard @310 -> 1.7B base DONE 04:51Z: best 15.3 @225 (4B hard teacher's student 19.5; 1.7B RL hard 14.1) -> the 8B teacher
+  is again the WORSE teacher for 1.7B (as on medium: 33.5 vs 37.3). 8B hard -> 4B base at step 210: 34.5 (4B RL hard 41.2).
 
 ## 2026-10-23 — Qwen3-8B RL (easy / medium / hard) + 4B / 1.7B RL on easy LAUNCHED (borrowing on, priority high)
 
