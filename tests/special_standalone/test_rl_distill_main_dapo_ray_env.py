@@ -143,7 +143,7 @@ def test_transfer_queue_enable_is_preserved_when_dapo_initializes_ray(monkeypatc
 
 
 def test_fewshot_launcher_does_not_put_credentials_in_hydra_overrides():
-    launcher = (PROJECT_ROOT / "rl-distill-scripts" / "gemma3_pt_fewshot_math_rl.sh").read_text()
+    launcher = (PROJECT_ROOT / "rl-distill-scripts" / "run_dapo_rl.sh").read_text()
 
     assert "runtime_env.env_vars.WANDB_API_KEY" not in launcher
     assert "runtime_env.env_vars.HF_TOKEN" not in launcher

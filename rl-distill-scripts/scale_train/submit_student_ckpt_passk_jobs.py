@@ -29,7 +29,7 @@ from huggingface_hub import HfApi
 from huggingface_hub.utils import RepositoryNotFoundError
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(HERE.parent / "eval"))
 from eval_student_checkpoints_passk import REPO_NAME, step_tag  # noqa: E402
 
 DEFAULT_ST_PYTHON = os.path.expanduser("~/.local/pipx/venvs/scaletrain-cli/bin/python")

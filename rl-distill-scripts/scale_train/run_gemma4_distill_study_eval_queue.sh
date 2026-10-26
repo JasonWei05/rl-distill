@@ -130,10 +130,10 @@ compute_free_slots() {  # all slots minus one per running child (PID_GPU) minus 
 
 update_doc() {
   # --summary: OOD cells produced on another box live in the committed summary JSON; without it a local update would blank them.
-  "${PY}" rl-distill-scripts/update_distill_study_results_doc.py --results-base "${RESULTS_BASE}" --registry "${REGISTRY}" \
+  "${PY}" rl-distill-scripts/eval/update_distill_study_results_doc.py --results-base "${RESULTS_BASE}" --registry "${REGISTRY}" \
     ${OOD_SUMMARY_JSON:+--summary "${OOD_SUMMARY_JSON}"} \
     && if [[ ${COMMIT_DOC} == true ]]; then
-         git add rl-distill-scripts/DISTILLATION_EXPERIMENTS.md "${REGISTRY}" \
+         git add rl-distill-scripts/docs/GEMMA4_RESULTS.md "${REGISTRY}" \
            && git commit --no-verify -q -m "Distill study evals: results update ($1 complete)" \
            && { git fetch -q origin main; git merge-base --is-ancestor origin/main HEAD && git push -q origin HEAD:main || echo "EVAL_QUEUE note: doc committed locally, push deferred (origin moved)"; }
        fi

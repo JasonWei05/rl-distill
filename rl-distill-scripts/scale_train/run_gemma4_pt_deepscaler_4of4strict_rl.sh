@@ -564,7 +564,7 @@ ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.65}" \
 N_GPUS_PER_NODE="${n_gpus}" NNODES=1 OFFLOAD="${OFFLOAD:-False}" SAVE_FREQ="${SAVE_FREQ:-25}" \
 RAY_ADDRESS="${RUN_RAY_ADDRESS:-local}" VERL_VLLM_PORT_BASE="${VERL_VLLM_PORT_BASE:-52000}" \
 DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
-    bash rl-distill-scripts/gemma3_pt_fewshot_math_rl.sh \
+    bash rl-distill-scripts/run_dapo_rl.sh \
       +ray_kwargs.ray_init._temp_dir="${RAY_TEMP_DIR}" \
       +ray_kwargs.ray_init.include_dashboard=False \
       +ray_kwargs.ray_init.runtime_env.env_vars.HF_HOME="${HF_HOME}" \

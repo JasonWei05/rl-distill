@@ -82,7 +82,7 @@ else
   MODE_ARGS=(--poll-minutes "${POLL_MINUTES}" --final-step "${FINAL_STEP}" --max-idle-hours "${MAX_IDLE_HOURS}")
 fi
 # Every eval is exactly the RL reward grader (strict last-\boxed{}, 30 s verify, 5 s SymPy); the controller pins these too.
-python rl-distill-scripts/eval_student_checkpoints_passk.py "${REPO_ARGS[@]}" \
+python rl-distill-scripts/eval/eval_student_checkpoints_passk.py "${REPO_ARGS[@]}" \
   --gpus "${GPUS}" --parallelism "${PARALLELISM}" "${MODE_ARGS[@]}" \
   --manifest "${DATA_ROOT}/math_eval_manifest.json" --out-root "${OUT_ROOT}" --s3-root "${PASSK_S3_ROOT}" --no-plot
 status=$?

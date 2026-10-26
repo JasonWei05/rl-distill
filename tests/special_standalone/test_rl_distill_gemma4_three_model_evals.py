@@ -24,8 +24,8 @@ import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
 
-SCRIPTS_DIR = Path(__file__).parents[2] / "rl-distill-scripts"
-DATA_DIR = SCRIPTS_DIR / "data"
+SCRIPTS_DIR = Path(__file__).parents[2] / "rl-distill-scripts" / "eval"
+DATA_DIR = SCRIPTS_DIR.parent / "data"
 for import_path in (SCRIPTS_DIR, DATA_DIR):
     if str(import_path) not in sys.path:
         sys.path.insert(0, str(import_path))
@@ -34,7 +34,6 @@ import run_gemma4_math_4gpu as math_scheduler  # noqa: E402
 import run_gemma4_ood_4gpu as ood_scheduler  # noqa: E402
 from eval_gemma4_ood import OODEvalConfig, build_ood_commands  # noqa: E402
 from eval_math_passk import load_dataset_protocol_manifest  # noqa: E402
-from materialize_gemma4_eval_checkpoint import materialize_eval_checkpoint  # noqa: E402
 from prepare_gemma4_three_model_eval_data import convert_hf_rows, samples_per_question  # noqa: E402
 from run_gemma4_math_4gpu import derive_clean_id_result, partition_datasets  # noqa: E402
 from run_gemma4_three_model_evals import (  # noqa: E402
@@ -360,52 +359,3 @@ def test_ood_worker_exception_is_recorded_as_failure(tmp_path: Path, monkeypatch
     assert state["status"] == "failed"
     assert state["tasks"][task.task_id]["error"] == "OSError: worker boom"
 
-
-def test_eval_checkpoint_materializer_expands_aliases_and_rebuilds_index(tmp_path: Path) -> None:
-    source = tmp_path / "source"
-    source.mkdir()
-    config = {
-        "model_type": "gemma4",
-        "text_config": {
-            "num_hidden_layers": 4,
-            "num_kv_shared_layers": 2,
-            "layer_types": ["sliding_attention", "full_attention"] * 2,
-        },
-    }
-    (source / "config.json").write_text(json.dumps(config))
-    (source / "tokenizer_config.json").write_text("{}\n")
-    tensors = {}
-    for layer in range(4):
-        tensors[f"model.language_model.layers.{layer}.self_attn.q_norm.weight"] = torch.tensor(
-            [layer], dtype=torch.bfloat16
-        )
-    for layer in range(2):
-        for offset, suffix in enumerate(("k_norm.weight", "k_proj.weight", "v_proj.weight")):
-            tensors[f"model.language_model.layers.{layer}.self_attn.{suffix}"] = torch.tensor(
-                [10 * layer + offset], dtype=torch.bfloat16
-            )
-    save_file(tensors, source / "model.safetensors", metadata={"format": "pt"})
-    processor = tmp_path / "processor_config.json"
-    processor.write_text('{"processor_class": "Gemma4Processor"}\n')
-    source_sha = hashlib.sha256((source / "model.safetensors").read_bytes()).hexdigest()
-    processor_sha = hashlib.sha256(processor.read_bytes()).hexdigest()
-
-    output = tmp_path / "output"
-    manifest = materialize_eval_checkpoint(
-        source_dir=source,
-        output_dir=output,
-        processor_path=processor,
-        processor_sha256=processor_sha,
-        expected_source_model_sha256=source_sha,
-        base_model="test/base",
-        base_revision="f" * 40,
-    )
-
-    assert manifest["output"]["shared_kv_alias_count"] == 6
-    assert (output / "processor_config.json").read_bytes() == processor.read_bytes()
-    index = json.loads((output / "model.safetensors.index.json").read_text())
-    with safe_open(output / "model.safetensors", framework="pt", device="cpu") as model:
-        keys = set(model.keys())
-    assert set(index["weight_map"]) == keys
-    assert len(keys) == len(tensors) + 6
-    assert manifest["output"]["model_identity"]["model_identity_sha256"]

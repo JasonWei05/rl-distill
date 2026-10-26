@@ -25,7 +25,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-SCRIPTS_DIR = Path(__file__).parents[2] / "rl-distill-scripts"
+SCRIPTS_DIR = Path(__file__).parents[2] / "rl-distill-scripts" / "eval"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import eval_gemma4_ood as ood_eval  # noqa: E402

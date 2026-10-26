@@ -107,7 +107,7 @@ def main() -> None:
     )
     parser.add_argument("--team", default="egp")
     parser.add_argument("--product", default="train.enterprise_rlvr")
-    parser.add_argument("--job-name", default="gemma3-12b-topk128")
+    parser.add_argument("--job-name", default="rl-distill")
     parser.add_argument("--priority", choices=["normal", "high"], default="high")
     parser.add_argument("--allow-borrowing", action="store_true")
     parser.add_argument("--active-deadline-hours", type=int, default=240)
@@ -119,7 +119,7 @@ def main() -> None:
     )
     parser.add_argument("--build-manifest-path", default="st_config/build_manifest.yaml")
     parser.add_argument("--env-build-values-path", default="st_config/.env.build.values")
-    parser.add_argument("--run-file", default="run_gemma3_12b_pt_topk128_distill.sh")
+    parser.add_argument("--run-file", default="run_gemma4_pt_deepscaler_4of4strict_rl.sh")
     parser.add_argument("--container-project-root", default="/workspace/rl-distill")
     parser.add_argument("--env-vars", default=None)
     parser.add_argument(

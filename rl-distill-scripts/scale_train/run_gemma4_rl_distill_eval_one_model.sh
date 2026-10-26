@@ -95,7 +95,7 @@ fi
 RESOLVED_REGISTRY="${MODEL_ROOT}/resolved_model_registry.json"
 
 if run_phase math; then
-"${PYTHON_BIN}" rl-distill-scripts/run_gemma4_math_4gpu.py \
+"${PYTHON_BIN}" rl-distill-scripts/eval/run_gemma4_math_4gpu.py \
   --gpus "${GPU_ARGS[@]}" \
   --models "${MODEL_TAG}" \
   --resolved-model-registry "${RESOLVED_REGISTRY}" \
@@ -113,7 +113,7 @@ fi
 if run_phase ood; then
 # Without the math phase on this machine the OOD runner must not wait for the math completion marker.
 OOD_MATH_FLAG=(); if ! run_phase math; then OOD_MATH_FLAG=(--math-optional); fi
-"${PYTHON_BIN}" rl-distill-scripts/run_gemma4_ood_4gpu.py "${OOD_MATH_FLAG[@]}" \
+"${PYTHON_BIN}" rl-distill-scripts/eval/run_gemma4_ood_4gpu.py "${OOD_MATH_FLAG[@]}" \
   --gpus "${GPU_ARGS[@]}" \
   --models "${MODEL_TAG}" \
   --resolved-model-registry "${RESOLVED_REGISTRY}" \
