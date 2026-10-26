@@ -28,7 +28,7 @@ tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scrip
   OPD_LR=${OPD_LR:-2e-6} OPD_LR_WARMUP_STEPS=${OPD_LR_WARMUP_STEPS:-20} \
   bash rl-distill-scripts/scale_train/launch_qwen3_onpolicy_distill.sh --image ${IMG} 2>&1 | tee -a ${sup}/supervisor.out"
 tmux kill-session -t "=ckpt-janitor-${name}" 2>/dev/null || true
-tmux new-session -d -s "ckpt-janitor-${name}" "while [ ! -e ${sup}/STOP ] && tmux has-session -t =rl-${name} 2>/dev/null; do \
+tmux new-session -d -s "ckpt-janitor-${name}" "while [ ! -e ${sup}/STOP ] && tmux has-session -t \"=rl-${name}\" 2>/dev/null; do \
   AWS_PROFILE=ml-worker AWS_REGION=us-west-2 .venv/bin/python rl-distill-scripts/full_checkpoint_s3.py cleanup-rolling --s3-uri ${CKPT_URI} 2>&1 \
   | grep -v -E 'deleted=0|no completed remote checkpoint|NoSuchKey' | sed \"s/^/\$(date -u +%FT%TZ) /\" >> ${sup}/rolling-janitor.log; sleep 60; done"
 echo "started supervisor rl-${name} + ckpt-janitor-${name} (state ${sup}, checkpoints ${CKPT_URI}, code ${CODE_REF})"

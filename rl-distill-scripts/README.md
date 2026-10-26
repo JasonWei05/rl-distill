@@ -183,7 +183,7 @@ What happens after launch ([OPERATIONS §3–§5](docs/OPERATIONS.md)):
 
 - **Supervisor** (`supervise_borrowing_job.py`, one tmux session `rl-<name>` per run, state in `.scale_train_supervisors/<name>-<date>/`):
   relaunches after preemption / failure / cancel until the S3 completion receipt (and `best_hf`) exists. Every relaunch ships the
-  `CODE_REF` the run started on (pinned at supervisor start). Stop: `touch <state>/STOP`, then `tmux kill-session -t =rl-<name>`
+  `CODE_REF` the run started on (pinned at supervisor start). Stop: `touch <state>/STOP`, then `tmux kill-session -t "=rl-<name>"`
   (note the `=`: exact-match target).
 - **Borrowing.** RL and OPD v2 launch with borrowing true (preemptible); dedicated (`ALLOW_BORROWING=false`) jobs queued > 60 min are
   switched to borrowing by `borrowing_fallback_watcher.sh`.

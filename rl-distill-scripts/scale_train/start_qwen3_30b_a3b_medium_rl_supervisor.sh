@@ -38,7 +38,7 @@ tmux new-session -d -s "rl-${name}" "env -u AWS_PROFILE python3 rl-distill-scrip
   -- env CODE_REF=${CODE_REF} QWEN_SIZE=${QWEN_SIZE} BAND=${BAND} RUN_TAG=${RUN_TAG} S3_BASE=${S3_BASE} TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS} ROLLING_CHECKPOINT_ENABLED=${ROLLING_CHECKPOINT_ENABLED:-True} ASYNC_CHECKPOINT_UPLOAD=${ASYNC_CHECKPOINT_UPLOAD:-False} ALLOW_BORROWING=${ALLOW_BORROWING:-true} MBS=${MBS:-4} PADDED_TOKENS=${PADDED_TOKENS:-8192} EARLY_STOPPING_RESET_PATIENCE_AT_STEP=${EARLY_STOPPING_RESET_PATIENCE_AT_STEP:-} EARLY_STOPPING_PATIENCE=${EARLY_STOPPING_PATIENCE:-5} INIT_MODEL_S3_URI=${INIT_MODEL_S3_URI:-} bash rl-distill-scripts/scale_train/launch_qwen3_30b_a3b_medium_rl.sh --image ${IMG}${ST_CLUSTER:+ --cluster ${ST_CLUSTER}} 2>&1 | tee -a ${sup}/supervisor.out"
 # cleanup-rolling never deletes the committed rolling step (or anything newer); it only removes superseded ones.
 tmux kill-session -t "=ckpt-janitor-${name}" 2>/dev/null || true
-tmux new-session -d -s "ckpt-janitor-${name}" "while [ ! -e ${sup}/STOP ] && tmux has-session -t =rl-${name} 2>/dev/null; do \
+tmux new-session -d -s "ckpt-janitor-${name}" "while [ ! -e ${sup}/STOP ] && tmux has-session -t \"=rl-${name}\" 2>/dev/null; do \
   AWS_PROFILE=ml-worker AWS_REGION=us-west-2 .venv/bin/python rl-distill-scripts/full_checkpoint_s3.py cleanup-rolling --s3-uri ${CKPT_URI} 2>&1 \
   | grep -v -E 'deleted=0|no completed remote checkpoint|NoSuchKey' | sed \"s/^/\$(date -u +%FT%TZ) /\" >> ${sup}/rolling-janitor.log; sleep 60; done"
 echo "started supervisor rl-${name} + ckpt-janitor-${name} (state ${sup}, checkpoints ${CKPT_URI}, code ${CODE_REF})"
