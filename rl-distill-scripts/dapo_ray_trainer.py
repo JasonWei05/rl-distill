@@ -127,7 +127,9 @@ class RayDAPOTrainer(RayPPOTrainer):
         return frequency > 0 and self.global_steps % frequency == 0
 
     def _rollout_sleep_mode(self) -> bool:
-        return bool(self.config.actor_rollout_ref.rollout.get("enable_sleep_mode", False))
+        # The engines sleep iff free_cache_engine (vllm_async_server gates sleep() on it); enable_sleep_mode is not part of the
+        # composed trainer config, so gating on it made the pre-save park a silent no-op for launchers that do not set it.
+        return bool(self.config.actor_rollout_ref.rollout.get("free_cache_engine", False))   # composed configs always set it (yaml default True)
 
     @staticmethod
     def _async_checkpoint_upload() -> bool:
@@ -146,7 +148,7 @@ class RayDAPOTrainer(RayPPOTrainer):
         self._pending_checkpoint_upload = None
         future.result()
 
-    def _save_checkpoint(self, *, permanent: bool = True):
+    def _save_checkpoint(self, *, permanent: bool = True, replicas_asleep: bool = False, sync_upload: bool = False):
         """Save locally, then publish a permanent or rolling resumable checkpoint."""
         # Every save runs with the vLLM engines awake (weight sync after the update, validation). With sleep mode they
         # hold weights + KV beside the trainer while the save onloads the model and gathers the HF export: Qwen3-30B-A3B
@@ -155,7 +157,9 @@ class RayDAPOTrainer(RayPPOTrainer):
         # The previous step's background upload must commit before this save can rotate local checkpoints
         # (MAX_ACTOR_CKPT_TO_KEEP) or publish a newer step; a failed upload stops the run here.
         self._wait_for_checkpoint_upload()
-        if self._rollout_sleep_mode():
+        # replicas_asleep: the caller knows the engines are already parked (e.g. finalizing a restored early stop right after
+        # init_workers); vLLM has no is-asleep guard, so a second sleep() would re-release freed allocations.
+        if self._rollout_sleep_mode() and not replicas_asleep:
             self.checkpoint_manager.sleep_replicas()
         early_stopping = getattr(self, "_validation_early_stopping", None)
         if early_stopping is not None:
@@ -188,7 +192,7 @@ class RayDAPOTrainer(RayPPOTrainer):
             else:
                 helper.upload_rolling_checkpoint(checkpoint_root, step, s3_uri)
 
-        if not self._async_checkpoint_upload():
+        if sync_upload or not self._async_checkpoint_upload():
             upload()
             return
         # The local step directory is immutable once written, so the upload (~5 min for a 366 GB Qwen3-30B-A3B checkpoint)
@@ -354,7 +358,8 @@ class RayDAPOTrainer(RayPPOTrainer):
             f"misses={early_stopping.non_improving_rounds} metric={early_stopping.metric}",
             flush=True,
         )
-        self._save_checkpoint(permanent=True)
+        # init_workers parked the replicas and nothing has woken them yet on this path
+        self._save_checkpoint(permanent=True, replicas_asleep=True)
         self._write_run_outcome(early_stopping=early_stopping, stop_reason="early_stopping")
         return True
 
@@ -776,6 +781,7 @@ class RayDAPOTrainer(RayPPOTrainer):
 
                 is_last_step = self.global_steps >= self.total_training_steps
                 permanent_checkpoint_requested = False
+                esi_close_to_expiration = False   # set by the actor-update block; stays False on critic-warmup steps
 
                 with marked_timer("step", timing_raw):
                     # generate a batch
@@ -1039,7 +1045,8 @@ class RayDAPOTrainer(RayPPOTrainer):
                 rolling_checkpoint_requested = self._should_save_rolling_checkpoint()
                 if permanent_checkpoint_requested or rolling_checkpoint_requested:
                     with marked_timer("save_checkpoint", timing_raw, "green"):
-                        self._save_checkpoint(permanent=permanent_checkpoint_requested)
+                        # the pod is about to expire: upload synchronously so the commit marker lands before it dies
+                        self._save_checkpoint(permanent=permanent_checkpoint_requested, sync_upload=esi_close_to_expiration)
                     if self._rollout_sleep_mode():  # _save_checkpoint parked the engines; wake + resync for next step
                         with marked_timer("update_weights_after_save", timing_raw, "red"):
                             self.checkpoint_manager.update_weights()

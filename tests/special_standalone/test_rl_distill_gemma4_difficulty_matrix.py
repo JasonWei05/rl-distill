@@ -384,7 +384,7 @@ def test_legacy_early_stopping_migration_is_identity_bound_and_persisted(tmp_pat
 
 def test_trainer_checkpoints_the_observed_validation_state_before_upload():
     source = (ROOT / "rl-distill-scripts/dapo_ray_trainer.py").read_text()
-    save_method = source.index("    def _save_checkpoint(self, *, permanent: bool = True):")
+    save_method = source.index("    def _save_checkpoint(self, *, permanent: bool = True")
     state_save = source.index("early_stopping.save(checkpoint_dir)", save_method)
     base_save = source.index("super()._save_checkpoint(save_hf_model=permanent)", state_save)
     remote_upload = source.index("helper.upload_checkpoint", base_save)
@@ -396,7 +396,7 @@ def test_trainer_checkpoints_the_observed_validation_state_before_upload():
     assert validation < observation < deferred_save
 
     assert "rolling_checkpoint_requested = self._should_save_rolling_checkpoint()" in source
-    assert "self._save_checkpoint(permanent=permanent_checkpoint_requested)" in source
+    assert "self._save_checkpoint(permanent=permanent_checkpoint_requested, sync_upload=esi_close_to_expiration)" in source
 
 
 def test_runtime_launcher_supports_26b_r3_id_only_validation_and_early_stopping():
