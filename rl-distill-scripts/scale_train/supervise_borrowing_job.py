@@ -587,6 +587,20 @@ def main() -> None:
         "submissions, mass cancellation); consecutive quick cancels back off and eventually stop the supervisor.",
     )
     parser.add_argument(
+        "--quick-completion-seconds",
+        type=int,
+        default=1800,
+        help="A job that reports COMPLETED without durable completion within this many seconds of first running counts "
+        "as a quick missing completion (the run-file finishes but never writes the receipt / best_hf marker).",
+    )
+    parser.add_argument(
+        "--max-quick-missing-completions",
+        type=int,
+        default=3,
+        help="Stop relaunching after this many consecutive quick missing completions instead of relaunching the same "
+        "no-op resume until the relaunch budget runs out.",
+    )
+    parser.add_argument(
         "--max-quick-cancels",
         type=int,
         default=3,
@@ -645,6 +659,7 @@ def main() -> None:
     attempt = 0
     consecutive_failures = 0
     consecutive_quick_cancels = 0
+    consecutive_quick_missing_completions = 0
     initial_job_id = args.initial_job_id
     image_uri = _command_image(command)
     while not args.stop_file.exists():
@@ -690,6 +705,7 @@ def main() -> None:
         _write_state(args.state_file, state)
         _log(args.monitor_log, f"name={args.name} attempt={attempt} job_id={job_id} submitted")
         submitted_monotonic = time.monotonic()
+        running_monotonic: float | None = None
 
         last_status = None
         missing_status_polls = 0
@@ -741,6 +757,8 @@ def main() -> None:
                 time.sleep(args.poll_seconds)
                 continue
             missing_status_polls = 0
+            if status == "IN_PROGRESS" and running_monotonic is None:
+                running_monotonic = time.monotonic()
             if status != last_status:
                 if status == "IN_PROGRESS" and last_status is not None:
                     consecutive_failures = 0
@@ -769,6 +787,21 @@ def main() -> None:
                         _write_state(args.state_file, state)
                         time.sleep(args.poll_seconds)
                         continue
+                    ran = 0.0 if running_monotonic is None else time.monotonic() - running_monotonic
+                    quick = ran < args.quick_completion_seconds
+                    consecutive_quick_missing_completions = consecutive_quick_missing_completions + 1 if quick else 0
+                    if consecutive_quick_missing_completions >= args.max_quick_missing_completions:
+                        _log(
+                            args.monitor_log,
+                            f"name={args.name} job_id={job_id} terminal=COMPLETED after {ran:.0f}s running but durable "
+                            f"completion is incomplete: {completion_detail}; {consecutive_quick_missing_completions} "
+                            f"consecutive quick missing completions (< {args.quick_completion_seconds}s) -- the run "
+                            "finishes without writing its completion marker; supervisor stopping for diagnosis",
+                        )
+                        state.update(status="STOPPED_MISSING_COMPLETION", updated_at=_utc_now())
+                        _write_state(args.state_file, state)
+                        _stop_pod_log_capture(pod_log_capture)
+                        return
                     _log(
                         args.monitor_log,
                         f"name={args.name} job_id={job_id} terminal=COMPLETED but durable "
