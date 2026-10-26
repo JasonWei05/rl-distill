@@ -65,8 +65,8 @@ def main():
         seq_nll.append(-float(np.sum(lps))); seq_len.append(len(lps))
     seq_nll, seq_len = np.array(seq_nll), np.array(seq_len)
     summary = {"model": a.model, "samples": a.samples, "sequences": int(len(seq_len)), "tokens": int(seq_len.sum()),
-               "nll_per_token": float(seq_nll.sum() / seq_len.sum()),                     # token-weighted (= training_log_ppl)
-               "nll_per_token_seq_mean": float(np.mean(seq_nll / seq_len)),               # sequence-averaged variant
+               "nll_per_token": float(seq_nll.sum() / seq_len.sum()),                     # token-weighted (the entropy estimate reported)
+               "nll_per_token_seq_mean": float(np.mean(seq_nll / seq_len)),               # sequence-averaged (= verl training_log_ppl)
                "mean_response_tokens": float(seq_len.mean())}
     json.dump(summary, open(a.output, "w"), indent=1)
     print("OWN_NLL", json.dumps(summary))
