@@ -131,6 +131,17 @@ final OPD stage.
   S3 checkpoint, MAX_RELAUNCHES=200): qb1p7b{e,m,h}-to-q4b-base (job_dbf49p8cdkag08afncug / job_dbf49pdegg5g07kc3kfg /
   job_dbf49p8cdkag08afncv0) and controls q1p7bm-s680 / q1p7bh-s910 (job_dbf49qocdkag08afncvg / job_dbf4a1ocdkag08afnd00) -- all
   IN_PROGRESS within minutes. qb4b{e,m,h}-to-q1p7b-base stay queued on borrowing false.
+- 2026-10-26: **on-policy pre-distillation abandoned** (user): reverse KL to a high-entropy base teacher collapses the student's entropy
+  (own-sample NLL/token ~0.9 -> ~0.5 in both directions within 50 steps, k1 plateau 0.05-0.07, best@16 well below the source base; on
+  medium/hard 4B' and 1.7B' converge to the SAME mid-level accuracy ~14 / ~5.5) -> not a copy of the source base. Report:
+  figures/qwen3_predistill_inspection.{md,png} (584619d2). The 2 unfinished runs were cancelled by ID; supervisors stopped.
+- 2026-10-26: **off-policy forward-KL pre-distillation instead** (user): ONE run per direction over the union of the easy + medium + hard
+  train splits (9000 q x 8 teacher traces = 72k, top-128, temp 1, 8192 tok; val 900 q x 1), batch 128, lr 2e-6 -> 2e-7 (100 warmup),
+  1000 steps (= 1.78 epochs; the per-band runs were 3000 x 16 = 2.7 epochs), val KL on 300 teacher val generations every 10, permanent
+  checkpoint + HF export every 250. Evals (stage 3): steps 0 (= student base) / 250 / 500 / 750 / 1000 on each band's 300-q val at n=32,
+  pass@k for all k <= 32 + own-sample NLL (entropy estimate). Specs q1p7b-base-all -> q4b (4B') and q4b-base-all -> q1p7b (1.7B')
+  (eb8b4e12); one 8-GPU borrowing job each (traces -> distill -> evals in one job, every stage resumable), supervisors
+  rl-q3-1p7bbase-dist-4b / rl-q3-4bbase-dist-1p7b. USER GATE unchanged: report vs the teacher base, the user picks checkpoints.
 - 2026-10-25 grid results: 8B medium @480 -> 1.7B base DONE 19:44Z best 33.5 @230 (4B-teacher student 37.3, 1.7B RL 34.7); 8B medium
   @480 -> 4B base DONE 20:39Z best 61.1 @245 (4B RL medium 65.8) -> on medium the 8B teacher is a worse teacher than the 4B for
   1.7B and distillation from base trails RL for the 4B student (like easy, -0.8). Controls (same-size 1.7B RL -> 1.7B base) reach
