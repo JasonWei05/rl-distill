@@ -16,7 +16,7 @@ set -uo pipefail
 # a completed train split.
 main() {
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "${PROJECT_ROOT}"
 
 COLLECTION="rl-distill-scripts/scale_train/run_gemma4_bestckpt_trace_collection.sh"

@@ -7,7 +7,7 @@
 # Preemption: both stages resume (shards on S3; the trainer restores the newest complete S3 checkpoint). Launched by
 # launch_gemma4_12br_trace_distill_st.sh (4 GPUs, borrowing, priority high) via launch_st_with_code.sh (git archive HEAD).
 set -euo pipefail
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "${PROJECT_ROOT}"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"; cd "${PROJECT_ROOT}"
 export PATH="${PROJECT_ROOT}/.venv/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 echo "ST_12BR_START $(date -u +%FT%TZ) host=$(hostname) commit=$(git rev-parse --short HEAD 2>/dev/null || echo baked)"
 if [ -n "${CODE_S3_URI:-}" ]; then

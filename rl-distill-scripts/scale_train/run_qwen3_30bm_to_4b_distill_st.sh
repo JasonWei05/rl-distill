@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ScaleTrain pod entry (4 GPUs): best Qwen3-30B-A3B medium RL checkpoint (es5 run, val mean@16 0.7575 @ step 320) -> Qwen3-4B-Base,
-# the RL-teacher distillation protocol of the Gemma study (run_gemma4_12br_trace_and_distill_st.sh / DISTILLATION_EXPERIMENTS.md §9):
+# the RL-teacher distillation protocol of the Gemma study (gemma4/run_gemma4_12br_trace_and_distill_st.sh / docs/GEMMA4_RESULTS.md):
 #   stage 1  top-128 traces (spec q30bm-medium: 3000 train q x 16 + 300 val q x 1, temp 1, 8192 tokens, Qwen 0-shot ChatML + boxed
 #            instruction), 2 vLLM engines x TP 2, every finished shard mirrored to S3; skipped once the S3 bundle has COMPLETE.json
 #   stage 2  off-policy top-128 forward-KL distillation into Qwen3-4B-Base on all 4 GPUs (FSDP2): batch 128, lr 2e-6 (100 warmup,

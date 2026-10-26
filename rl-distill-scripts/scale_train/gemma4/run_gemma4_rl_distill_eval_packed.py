@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "eval"
+SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "eval"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 

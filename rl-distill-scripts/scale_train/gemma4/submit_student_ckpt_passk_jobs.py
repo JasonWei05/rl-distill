@@ -9,7 +9,7 @@ tarball). Job names: ``g4e4b-pk-<band[:3]>-<student>-s<step>`` (+ ``-<user>``, 3
 are tracked in ``--state-file``; a job that ends FAILED/CANCELLED without a result is resubmitted up to ``--max-attempts``.
 Plots come from ``eval_student_checkpoints_passk.py --plot-from-s3`` (separate loop, same S3 root).
 
-    python rl-distill-scripts/scale_train/submit_student_ckpt_passk_jobs.py --poll-minutes 10 \\
+    python rl-distill-scripts/scale_train/gemma4/submit_student_ckpt_passk_jobs.py --poll-minutes 10 \\
         --repo JWei05/Distill-gemma4-e4b-base-medium-to-12b-base --repo JWei05/Distill-gemma4-e4b-base-medium-to-26b-base
 """
 
@@ -29,7 +29,7 @@ from huggingface_hub import HfApi
 from huggingface_hub.utils import RepositoryNotFoundError
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent / "eval"))
+sys.path.insert(0, str(HERE.parents[1] / "eval"))
 from eval_student_checkpoints_passk import REPO_NAME, step_tag  # noqa: E402
 
 DEFAULT_ST_PYTHON = os.path.expanduser("~/.local/pipx/venvs/scaletrain-cli/bin/python")
@@ -109,8 +109,8 @@ def job_name(band: str, student: str, step: str) -> str:
 
 def submit(args, band: str, student: str, step: str) -> bool:
     name = job_name(band, student, step)
-    cmd = ["bash", str(HERE / "launch_st_with_code.sh"), "--gpus-per-instance", str(args.gpus_per_instance), "--priority", args.priority,
-           "--active-deadline-hours", str(args.deadline_hours), "--run-file", "run_gemma4_student_ckpt_passk_st.sh",
+    cmd = ["bash", str(HERE.parent / "launch_st_with_code.sh"), "--gpus-per-instance", str(args.gpus_per_instance), "--priority", args.priority,
+           "--active-deadline-hours", str(args.deadline_hours), "--run-file", "gemma4/run_gemma4_student_ckpt_passk_st.sh",
            "--job-name", name, "--env-vars", f"STUDENT={student},STEP={step},BANDS={band}"]
     if args.allow_borrowing:
         cmd.append("--allow-borrowing")

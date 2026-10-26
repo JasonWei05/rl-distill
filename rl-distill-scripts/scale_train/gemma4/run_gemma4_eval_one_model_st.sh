@@ -3,10 +3,10 @@
 # GPU_COUNT = all visible GPUs, i.e. 2 for the 2-GPU eval jobs). Wraps run_gemma4_rl_distill_eval_one_model.sh, which
 # materializes the model from its registry source (s3_hf_export), runs run_gemma4_math_4gpu.py with one shard per GPU,
 # mirrors results to RESULT_S3_ROOT/<tag>/, and writes RUN_COMPLETE.json. Env: MODEL_TAG (required), EVAL_PHASES (default math).
-#   bash launch_st_with_code.sh --gpus-per-instance 2 --priority high --run-file run_gemma4_eval_one_model_st.sh \
+#   bash launch_st_with_code.sh --gpus-per-instance 2 --priority high --run-file gemma4/run_gemma4_eval_one_model_st.sh \
 #     --job-name g4ev-<tag> --env-vars "MODEL_TAG=<registry tag>"
 set -euo pipefail
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "${PROJECT_ROOT}"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"; cd "${PROJECT_ROOT}"
 export PATH="${PROJECT_ROOT}/.venv/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 echo "ST_EVAL_START $(date -u +%FT%TZ) host=$(hostname) tag=${MODEL_TAG:?MODEL_TAG required}"
 if [ -n "${CODE_S3_URI:-}" ]; then
@@ -34,5 +34,5 @@ env -u CUDA_VISIBLE_DEVICES MODEL_TAG="${MODEL_TAG}" EVAL_PHASES="${EVAL_PHASES:
   MODEL_WORK_ROOT="/tmp/gemma4_eval/${MODEL_TAG}" RESULT_ROOT_OVERRIDE="/tmp/gemma4_eval/${MODEL_TAG}/results" \
   EVAL_KV_CACHE_GIB=16 EVAL_GPU_MEMORY_UTILIZATION=0.40 EVAL_PREDICTIVE_TOPK_WIDTH=0 \
   MATH_QUESTIONS_PER_BATCH=64 MATH_REQUEST_BATCH_SIZE=1024 MATH_RESUME_TRACES=1 EVAL_S3_ENABLE=true \
-  bash rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_one_model.sh
+  bash rl-distill-scripts/scale_train/gemma4/run_gemma4_rl_distill_eval_one_model.sh
 echo "ST_EVAL_DONE tag=${MODEL_TAG} $(date -u +%FT%TZ)"

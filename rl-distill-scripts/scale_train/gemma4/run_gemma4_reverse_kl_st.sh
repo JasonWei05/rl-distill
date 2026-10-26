@@ -3,7 +3,7 @@
 # teacher on 128 medium-train + 128 medium-validation questions, student top-128 tokens. See reverse_kl_topk.py.
 #   --env-vars "STUDENT_SIZE=12b|26b,MODELS=distilled,base"   (defaults: 12b, both)   STUDENT_REPO/REVISION/SUBFOLDER override the pin.
 set -euo pipefail
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "${PROJECT_ROOT}"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"; cd "${PROJECT_ROOT}"
 export PATH="${PROJECT_ROOT}/.venv/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 echo "ST_RKL_START $(date -u +%FT%TZ) host=$(hostname)"
 if [ -n "${CODE_S3_URI:-}" ]; then

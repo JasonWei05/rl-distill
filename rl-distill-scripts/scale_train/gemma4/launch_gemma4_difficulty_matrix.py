@@ -228,7 +228,7 @@ def build_job_specs(*, seed: int, total_steps: int, phase: str) -> list[JobSpec]
         JobSpec(
             key=f"26b-a4b-{band}",
             job_name=f"g4-26b-{band}-s{seed}-{phase}",
-            run_file="run_gemma4_difficulty_sequential.sh",
+            run_file="gemma4/run_gemma4_difficulty_sequential.sh",
             logical_runs=(f"26b-a4b-{band}",),
             env={
                 **moe_common,
@@ -271,14 +271,14 @@ def build_job_specs(*, seed: int, total_steps: int, phase: str) -> list[JobSpec]
             JobSpec(
                 key="12b-sequential",
                 job_name=f"g4-ds26b-12b-dp8-s{seed}-{phase}",
-                run_file="run_gemma4_difficulty_sequential.sh",
+                run_file="gemma4/run_gemma4_difficulty_sequential.sh",
                 logical_runs=tuple(f"12b-{band}" for band in BANDS),
                 env=twelve_env,
             ),
             JobSpec(
                 key="e4b-hard",
                 job_name=f"g4-e4b-hard-s{seed}-{phase}",
-                run_file="run_gemma4_difficulty_sequential.sh",
+                run_file="gemma4/run_gemma4_difficulty_sequential.sh",
                 logical_runs=("e4b-hard",),
                 env=e4b_hard_env,
             ),
@@ -289,7 +289,7 @@ def build_job_specs(*, seed: int, total_steps: int, phase: str) -> list[JobSpec]
             JobSpec(
                 key=f"e2b-{band}",
                 job_name=f"g4-e2b-{band}-s{seed}-{phase}",
-                run_file="run_gemma4_difficulty_sequential.sh",
+                run_file="gemma4/run_gemma4_difficulty_sequential.sh",
                 logical_runs=(f"e2b-{band}",),
                 env={**e2b_common, "DIFFICULTY_SEQUENCE": band},
                 gpus=4,
@@ -309,7 +309,7 @@ def launch_command(
     priority: str = "high",
     image: str | None = None,
 ) -> list[str]:
-    launcher = Path(__file__).with_name("launch_st_job.py")
+    launcher = Path(__file__).resolve().parents[1] / "launch_st_job.py"
     env_vars = ",".join(f"{key}={value}" for key, value in sorted(spec.env.items()))
     command = [
         sys.executable,

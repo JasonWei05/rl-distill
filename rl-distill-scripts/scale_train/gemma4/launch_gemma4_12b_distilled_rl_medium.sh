@@ -30,5 +30,5 @@ ENV_VARS+=",FSDP_CPU_OFFLOAD_POLICY=True,MAX_PADDED_TOKENS_PER_MICROBATCH=4096,M
 ENV_VARS+=",ROLLING_CHECKPOINT_ENABLED=True,ROLLING_CHECKPOINT_FREQ=5,FULL_CHECKPOINT_S3_URI=${S3_BASE}-full-checkpoints/12b-medium-${RUN_TAG},RUN_ARTIFACT_S3_URI=${S3_BASE}/gemma4-12b-medium-${RUN_TAG}"
 ENV_VARS+=",WANDB_RUN_ID=g4ds26b-12b-medium-${RUN_TAG}-s42-v1,WANDB_RESUME=allow"
 echo "LAUNCH_ENV ${ENV_VARS}"
-exec bash launch_st_with_code.sh --gpus-per-instance 8 --priority high --allow-borrowing --active-deadline-hours 240 \
+exec bash ../launch_st_with_code.sh --gpus-per-instance 8 --priority high --allow-borrowing --active-deadline-hours 240 \
   --run-file run_gemma4_pt_deepscaler_4of4strict_rl.sh --job-name "g4-12b-distill-rl-med" --env-vars "${ENV_VARS}" "$@"

@@ -14,7 +14,7 @@ questions, then merges the shard traces and re-aggregates them with ``--resume_t
 exact: sampling seeds derive from (dataset name, question id, sample index), not from row order, and the
 shard manifests keep the protocol's fixed 32 samples/question.
 
-ScaleTrain pod (``scale_train/run_gemma4_student_ckpt_passk_st.sh``): with ``--s3-root`` every finished
+ScaleTrain pod (``scale_train/gemma4/run_gemma4_student_ckpt_passk_st.sh``): with ``--s3-root`` every finished
 step is uploaded (metrics, traces, log -- not the materialized weights, which are deleted after the eval);
 the process exits once ``--final-step`` is evaluated for every repo, or after ``--max-idle-hours`` without
 a new checkpoint. Plots need the E4B-base reference traces, so they are drawn on the box that holds them:

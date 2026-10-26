@@ -40,5 +40,5 @@ ENV_VARS+=",WANDB_RUN_ID=g4ds26b-${KEY}-s${SEED}-${WANDB_TAG:-v1},WANDB_RESUME=a
 # the end; set HF_PUSH_ENABLE=True to also push step_* exports to the Hub as the seed-42 runs did.
 ENV_VARS+=",HF_PUSH_ENABLE=${HF_PUSH_ENABLE:-False},HF_PUSH_REQUIRED=False"
 echo "LAUNCH_ENV ${ENV_VARS}"
-exec bash launch_st_with_code.sh --gpus-per-instance "${GPUS}" --priority high --allow-borrowing --active-deadline-hours 240 \
+exec bash ../launch_st_with_code.sh --gpus-per-instance "${GPUS}" --priority high --allow-borrowing --active-deadline-hours 240 \
   --run-file run_gemma4_pt_deepscaler_4of4strict_rl.sh --job-name "g4-${SIZE}-s${SEED}-${BAND:0:4}" --env-vars "${ENV_VARS}" "$@"

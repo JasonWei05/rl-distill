@@ -37,10 +37,10 @@ COPY . /workspace/rl-distill
 RUN test -f verl/third_party/vllm/__init__.py \
     && test -f rl-distill-scripts/data/generate_gemma4_distill_traces.py \
     && test -f rl-distill-scripts/scale_train/run_gemma4_offpolicy_trace_collection.sh \
-    && test -f rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_packed_node.sh \
-    && test -f rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_one_model.sh \
+    && test -f rl-distill-scripts/scale_train/gemma4/run_gemma4_rl_distill_eval_packed_node.sh \
+    && test -f rl-distill-scripts/scale_train/gemma4/run_gemma4_rl_distill_eval_one_model.sh \
     && bash -n rl-distill-scripts/scale_train/run_gemma4_offpolicy_trace_collection.sh \
-    && bash -n rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_packed_node.sh \
-    && bash -n rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_one_model.sh
+    && bash -n rl-distill-scripts/scale_train/gemma4/run_gemma4_rl_distill_eval_packed_node.sh \
+    && bash -n rl-distill-scripts/scale_train/gemma4/run_gemma4_rl_distill_eval_one_model.sh
 
 ENV PYTHONPATH="/workspace/rl-distill"

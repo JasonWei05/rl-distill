@@ -3,7 +3,7 @@
 # high) and relaunches it after FAILED/ERROR until the durable completion markers exist. One tmux session per run.
 #   SEED=43 SIZES="e2b e4b" BANDS="easy medium hard" bash start_gemma4_rl_seed_supervisors.sh
 set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
 SEED="${SEED:?}"; SIZES="${SIZES:-e2b e4b}"; BANDS="${BANDS:-easy medium hard}"; GPUS="${GPUS:-4}"
 TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-400}"
 # Passed verbatim into the launcher environment (TRAIN_PROMPT_BSZ, TRAIN_PROMPT_MINI_BSZ, E4B_MEM, EXTRA_ENV_VARS, WANDB_TAG, RUN_NAME_SUFFIX ...).
@@ -21,6 +21,6 @@ for size in ${SIZES}; do for band in ${BANDS}; do
     --launch-log ${sup}/launch.log --monitor-log ${sup}/monitor.log --state-file ${sup}/state.json --stop-file ${sup}/STOP --pod-log-dir ${sup}/pod-logs \
     --completion-s3-uri ${S3_BASE}-full-checkpoints/${key} --max-completion-step ${TOTAL_TRAINING_STEPS} --expected-completion-world-size ${GPUS} \
     --completion-best-hf-s3-uri ${S3_BASE}/gemma4-${key} \
-    -- env SIZE=${size} BAND=${band} SEED=${SEED} GPUS=${GPUS} S3_BASE=${S3_BASE} TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS} ${LAUNCH_ENV} bash rl-distill-scripts/scale_train/launch_gemma4_rl_band_seed.sh --image ${IMG} 2>&1 | tee -a ${sup}/supervisor.out"
+    -- env SIZE=${size} BAND=${band} SEED=${SEED} GPUS=${GPUS} S3_BASE=${S3_BASE} TOTAL_TRAINING_STEPS=${TOTAL_TRAINING_STEPS} ${LAUNCH_ENV} bash rl-distill-scripts/scale_train/gemma4/launch_gemma4_rl_band_seed.sh --image ${IMG} 2>&1 | tee -a ${sup}/supervisor.out"
   echo "started supervisor rl-${name} (state ${sup})"; sleep 20   # stagger the launches (each uploads/reuses the code tarball)
 done; done

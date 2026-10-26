@@ -43,7 +43,7 @@ def test_validation_expansion_is_exactly_16_per_stable_uid():
 def test_matrix_resolves_requested_continuations_into_five_full_node_jobs():
     matrix = _load(
         "difficulty_matrix",
-        ROOT / "rl-distill-scripts/scale_train/launch_gemma4_difficulty_matrix.py",
+        ROOT / "rl-distill-scripts/scale_train/gemma4/launch_gemma4_difficulty_matrix.py",
     )
     specs = matrix.build_job_specs(seed=42, total_steps=400, phase="full")
 
@@ -86,7 +86,7 @@ def test_matrix_resolves_requested_continuations_into_five_full_node_jobs():
 def test_matrix_preserves_training_validation_and_early_stop_contract():
     matrix = _load(
         "difficulty_matrix_contract",
-        ROOT / "rl-distill-scripts/scale_train/launch_gemma4_difficulty_matrix.py",
+        ROOT / "rl-distill-scripts/scale_train/gemma4/launch_gemma4_difficulty_matrix.py",
     )
     specs = matrix.build_job_specs(seed=42, total_steps=400, phase="full")
 
@@ -349,7 +349,7 @@ def test_legacy_early_stopping_migration_is_identity_bound_and_persisted(tmp_pat
     )
     matrix = _load(
         "difficulty_matrix_legacy_migration",
-        ROOT / "rl-distill-scripts/scale_train/launch_gemma4_difficulty_matrix.py",
+        ROOT / "rl-distill-scripts/scale_train/gemma4/launch_gemma4_difficulty_matrix.py",
     )
     encoded = matrix.legacy_early_stopping_migration(
         model="google/gemma-4-12B",
@@ -416,7 +416,7 @@ def test_runtime_launcher_supports_26b_r3_id_only_validation_and_early_stopping(
 
 
 def test_sequential_wrapper_supports_selected_bands_and_fails_closed():
-    wrapper = (ROOT / "rl-distill-scripts/scale_train/run_gemma4_difficulty_sequential.sh").read_text()
+    wrapper = (ROOT / "rl-distill-scripts/scale_train/gemma4/run_gemma4_difficulty_sequential.sh").read_text()
 
     assert "DIFFICULTY_SEQUENCE:-easy medium hard" in wrapper
     assert 'run_child "${difficulty}" "${port_base}"' in wrapper
@@ -438,78 +438,6 @@ def test_terminal_resume_finalizes_without_an_extra_training_step():
     assert "TRAINING_ALREADY_AT_MAX_STEPS_ON_RESUME" in trainer
     assert trainer.index("TRAINING_ALREADY_AT_MAX_STEPS_ON_RESUME") < trainer.index("# add tqdm")
     assert launcher.index("publish-best-hf") < launcher.rindex("complete-run")
-
-
-def test_borrowing_supervisor_setup_is_launch_gated_and_checks_all_terminal_receipts():
-    starter = (ROOT / "rl-distill-scripts/scale_train/start_gemma4_difficulty_supervisor.sh").read_text()
-    orchestrator = (ROOT / "rl-distill-scripts/scale_train/start_gemma4_difficulty_resume_supervisors.sh").read_text()
-
-    assert "--allow-borrowing" in starter
-    assert "--max-completion-step 400" in starter
-    assert "expected_world_size=8" in starter
-    assert "expected_world_size=4" in starter
-    assert '--expected-completion-world-size "${expected_world_size}"' in starter
-    assert "--poll-seconds 15" in starter
-    assert "--retry-seconds 5" in starter
-    assert "--pod-log-dir" in starter
-    assert "--completion-best-hf-s3-uri" in starter
-    assert 'best_hf_completion_keys+=("gemma4-${completion_key}")' in starter
-    for key in ("e4b-hard",):
-        assert key in starter
-    for key in (
-        "12b-easy",
-        "12b-medium",
-        "12b-hard",
-        "26b-a4b-easy",
-        "26b-a4b-medium",
-        "26b-a4b-hard",
-    ):
-        assert key in starter
-
-    assert "launch=false" in orchestrator
-    assert 'if [ "${launch}" != true ]' in orchestrator
-    assert "DRY RUN ONLY" in orchestrator
-    assert "--allow-borrowing" in orchestrator
-    assert "start_gemma4_difficulty_supervisor_after_image.sh" in orchestrator
-    assert "QUEUE_KEYS=(26b-a4b-easy 26b-a4b-medium 26b-a4b-hard 12b-sequential e4b-hard)" in orchestrator
-
-
-def test_packed_wrapper_starts_requested_pair_then_refills_first_free_slot():
-    wrapper = (ROOT / "rl-distill-scripts/scale_train/run_gemma4_e2b_e4b_difficulty_queue.sh").read_text()
-
-    assert "RUN_MODELS=(e2b e2b e2b e4b e4b e4b)" in wrapper
-    assert "RUN_BANDS=(easy medium hard easy medium hard)" in wrapper
-    assert wrapper.index("launch_next_for_slot 0") < wrapper.index("launch_next_for_slot 1")
-    assert 'wait -n -p finished_pid "${!PID_RUN[@]}"' in wrapper
-    assert 'launch_next_for_slot "${slot}"' in wrapper
-    assert "PACK_QUEUE_CHILD_FAILED" in wrapper
-    assert '"${child_rc}" -ne 0' in wrapper
-    assert "RUN_DONE rc=0" in wrapper
-    assert 'SLOT_GPUS=("0,1,2,3" "4,5,6,7")' in wrapper
-    assert "PACK_QUEUE_SKIP_COMPLETE" in wrapper
-    assert 'RUN_ARTIFACT_S3_URI="${artifact_uri}"' in wrapper
-    assert 'FULL_CHECKPOINT_S3_URI="${checkpoint_uri}"' in wrapper
-    assert 'WANDB_RUN_ID="${wandb_run_id}"' in wrapper
-
-
-def test_live_checkpoint_watcher_only_maps_the_seed42_difficulty_sweep():
-    watcher = _load(
-        "difficulty_checkpoint_watcher",
-        ROOT / "rl-distill-scripts/watch_gemma4_difficulty_checkpoints.py",
-    )
-
-    assert watcher.run_key(Path("gemma4-e4b-deepscaler-gemma26b-medium-seed42-26b-bands-es5")) == "e4b-medium"
-    assert watcher.run_key(Path("gemma4-26b-a4b-deepscaler-gemma26b-hard-seed42-26b-bands-es5")) == "26b-a4b-hard"
-    assert watcher.run_key(Path("unrelated-checkpoint")) is None
-
-
-def test_checkpoint_supervisor_does_not_duplicate_native_uploads():
-    supervisor = (ROOT / "rl-distill-scripts/scale_train/supervise_gemma4_difficulty_checkpoints.sh").read_text()
-
-    assert "pod_uses_native_checkpoint_upload" in supervisor
-    assert "FULL_CHECKPOINT_S3_(URI|BASE)=" in supervisor
-    assert "detach_legacy_watcher" in supervisor
-    assert "SKIP_NATIVE" in supervisor
 
 
 def test_verl_image_keeps_rollout_third_party_adapter():

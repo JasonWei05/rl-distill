@@ -33,7 +33,7 @@ class TraceJob:
 # scheduler (2-GPU runs first, then 1-GPU, refilling as each finishes). The per-spec
 # jobs remain available for launching a single collection standalone.
 TRACE_JOBS = (
-    TraceJob("queue", "g4tr-queue", "", 8, run_file="run_gemma4_bestckpt_trace_queue.sh"),
+    TraceJob("queue", "g4tr-queue", "", 8, run_file="gemma4/run_gemma4_bestckpt_trace_queue.sh"),
     TraceJob("e4b-easy", "g4tr-e4b-easy", "e4b-easy", 1),
     TraceJob("e4b-medium", "g4tr-e4b-med", "e4b-medium", 1),
     TraceJob("e4b-hard", "g4tr-e4b-hard", "e4b-hard", 1),
@@ -59,7 +59,7 @@ def launch_command(
     image: str | None = None,
     build_env: str = "remote",
 ) -> list[str]:
-    launcher = Path(__file__).with_name("launch_st_job.py")
+    launcher = Path(__file__).resolve().parents[1] / "launch_st_job.py"
     command = [
         sys.executable,
         str(launcher),

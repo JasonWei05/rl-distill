@@ -20,9 +20,6 @@ import sys
 from pathlib import Path
 
 import pytest
-import torch
-from safetensors import safe_open
-from safetensors.torch import save_file
 
 SCRIPTS_DIR = Path(__file__).parents[2] / "rl-distill-scripts" / "eval"
 DATA_DIR = SCRIPTS_DIR.parent / "data"

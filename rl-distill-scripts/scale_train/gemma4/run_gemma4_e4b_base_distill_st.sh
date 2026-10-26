@@ -12,7 +12,7 @@
 #
 #   --env-vars "TEACHER_SPEC=e4b-base-medium,STUDENT=12b"   (4 GPUs)   /   "...,STUDENT=26b"   (8 GPUs)
 set -euo pipefail
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "${PROJECT_ROOT}"
 # The pod's login shell drops the image PATH: put the baked FSDP2 venv back (it holds the aws CLI the distill
 # runner needs for the S3 trace bundle) plus the usual system dirs; the gemma-4 venv is prepended below.

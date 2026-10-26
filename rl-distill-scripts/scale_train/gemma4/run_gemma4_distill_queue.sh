@@ -20,7 +20,7 @@
 
 set -uo pipefail
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "${PROJECT_ROOT}"
 
 RUNNER="rl-distill-scripts/scale_train/run_gemma4_distill_one.sh"

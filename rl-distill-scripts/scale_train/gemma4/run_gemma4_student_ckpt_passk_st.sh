@@ -10,7 +10,7 @@
 #   Without STEP the pod polls the repo itself (BANDS=medium|medium,hard ; FINAL_STEP=1000 ; MAX_IDLE_HOURS=12) -- the
 #   normal path is one job per checkpoint, submitted by submit_student_ckpt_passk_jobs.py polling the Hub from a CPU box.
 set -euo pipefail
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "${PROJECT_ROOT}"
 # The pod's login shell drops the image PATH: put the baked FSDP2 venv (aws CLI) and the system dirs back first.
 export PATH="${PROJECT_ROOT}/.venv/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 export PATH="${HOME}/.local/bin:/root/.local/bin:${PATH}"
 if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -60,7 +60,7 @@ test -s "${SHARED_MMMLU_ROOT}/manifest.json"
 echo "PACKED_PREPARE_SHARED_ASSETS done=$(date -u +%FT%TZ)"
 
 export SHARED_DATA_ROOT SHARED_MMMLU_ROOT RESULT_S3_ROOT
-exec "${PYTHON_BIN}" rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_packed.py \
+exec "${PYTHON_BIN}" rl-distill-scripts/scale_train/gemma4/run_gemma4_rl_distill_eval_packed.py \
   --gpu-ids 0 1 2 3 4 5 6 7 \
   --work-root "${PACKED_WORK_ROOT}" \
   --result-s3-root "${RESULT_S3_ROOT}" \

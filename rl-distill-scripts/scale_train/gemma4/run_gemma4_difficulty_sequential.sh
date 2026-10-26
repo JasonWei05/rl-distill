@@ -2,7 +2,7 @@
 # Run a configurable difficulty sequence back to back on one node.
 set -euo pipefail
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "${PROJECT_ROOT}"
 
 GEMMA4_MODEL="${GEMMA4_MODEL:?GEMMA4_MODEL must be set}"

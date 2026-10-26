@@ -15,7 +15,7 @@
 # gpu_memory_utilization only gates vLLM's startup free-memory check here (the KV budget is fixed); 0.80/slots
 # leaves headroom for a co-located instance's profiling peak (0.45 tripped it: 34.2 GiB free < 35.75 required).
 #
-#   EVAL_QUEUE_GPUS=4,5,6,7 bash rl-distill-scripts/scale_train/run_gemma4_distill_study_eval_queue.sh
+#   EVAL_QUEUE_GPUS=4,5,6,7 bash rl-distill-scripts/scale_train/gemma4/run_gemma4_distill_study_eval_queue.sh
 #
 # The roster is the study registry (config/gemma4_distill_study_eval_sources.json). Every cycle the
 # registry is regenerated (data/build_gemma4_distill_study_eval_registry.py), so distilled students
@@ -31,13 +31,13 @@ set -uo pipefail
 # must not be affected by later edits to this file).
 main() {
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "${PROJECT_ROOT}"
 if [[ -f .env ]]; then set -a; source .env; set +a; fi
 
 export VENV="${VENV:-/tmp/.venv-gemma4}"
 PY="${VENV}/bin/python"
-RUNNER="rl-distill-scripts/scale_train/run_gemma4_rl_distill_eval_one_model.sh"
+RUNNER="rl-distill-scripts/scale_train/gemma4/run_gemma4_rl_distill_eval_one_model.sh"
 REGISTRY="${SOURCE_REGISTRY:-rl-distill-scripts/config/gemma4_distill_study_eval_sources.json}"
 STUDY_ROOT="${STUDY_ROOT:-/tmp/gemma4_distill_study_eval}"
 export SHARED_DATA_ROOT="${SHARED_DATA_ROOT:-${STUDY_ROOT}/data}"

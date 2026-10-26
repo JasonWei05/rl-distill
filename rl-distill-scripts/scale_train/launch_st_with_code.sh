@@ -5,7 +5,7 @@
 # Uncommitted changes are NOT shipped -- commit first.
 #
 #   bash launch_st_with_code.sh --gpus-per-instance 2 --priority high --active-deadline-hours 72 \
-#     --run-file run_gemma4_student_ckpt_passk_st.sh --job-name gemma4-e4bbase-passk-12b --env-vars "STUDENT=12b"
+#     --run-file gemma4/run_gemma4_student_ckpt_passk_st.sh --job-name gemma4-e4bbase-passk-12b --env-vars "STUDENT=12b"
 #   (add --allow-borrowing for preemptible capacity; every other flag is passed through to launch_st_job.py)
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
