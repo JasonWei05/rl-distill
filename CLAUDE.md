@@ -70,7 +70,7 @@ A repo-root `.env` (untracked) holds `HF_TOKEN` / `WANDB_API_KEY`; `launch_st_jo
   `CODE_REF` to the commit the run started on. Rolling checkpoints are pruned from the devbox by `ckpt-janitor-<name>` sessions
   (`full_checkpoint_s3.py cleanup-rolling`; pods can't delete S3 objects). `borrowing_fallback_watcher.sh` switches dedicated jobs
   queued > 60 min to borrowing.
-- Stop a supervised run: `touch <state>/STOP`, then `tmux kill-session -t =rl-<name>` — **always use the `=` exact-match target**
+- Stop a supervised run: `touch <state>/STOP`, then `tmux kill-session -t "=rl-<name>"` — **always use the `=` exact-match target, quoted (zsh expands a bare `=word`)**
   (a bare name prefix-matches other sessions).
 - Live supervisors relaunch by running these paths from the main checkout, so **don't move, rename or change the CLI/env interface** of:
   `rl-distill-scripts/full_checkpoint_s3.py` and `rl-distill-scripts/scale_train/{supervise_borrowing_job.py, launch_st_with_code.sh,
