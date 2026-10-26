@@ -178,6 +178,11 @@ final OPD stage.
   rerun): 4B -> 1.7B {e,m,h}; 8B -> 1.7B / 4B {e,m}; [30B dropped:]
   1.7B / 4B {m,h} (from-base counterpart of the two-stage 30B runs); 1.7B RL -> 1.7B control {e,m,h}. 36 GPUs (1.7B students 2,
   4B students 4; 28 GPUs after the trim). Start with `bash scale_train/launch_qwen3_opd_recipe_v2_batch.sh --launch` (no flag = dry run).
+- 2026-10-26: **OPD recipe v2 LAUNCHED** (user): the 7 ladder runs only (same-size controls dropped): 4B -> 1.7B {e,m,h}, 8B -> 1.7B
+  {e,m}, 8B -> 4B {e,m}; lr 1e-6 constant after 50 warmup, cap 400, early stopping = no +0.5 gain in 100 steps (patience 10,
+  min_delta 0.005, val every 10), rolling ckpt every 5 + permanent (HF export) every 10, borrowing true, priority high,
+  MAX_RELAUNCHES=200 (preemption -> relaunch from the newest S3 checkpoint). 8186d486. NOTE: with min_delta the rule's "best"
+  lags the true max -> re-publish best_hf at the best saved checkpoint after the runs finish.
 - 2026-10-25 grid results: 8B medium @480 -> 1.7B base DONE 19:44Z best 33.5 @230 (4B-teacher student 37.3, 1.7B RL 34.7); 8B medium
   @480 -> 4B base DONE 20:39Z best 61.1 @245 (4B RL medium 65.8) -> on medium the 8B teacher is a worse teacher than the 4B for
   1.7B and distillation from base trails RL for the 4B student (like easy, -0.8). Controls (same-size 1.7B RL -> 1.7B base) reach
