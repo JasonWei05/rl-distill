@@ -50,6 +50,46 @@ ALLOWED_DIRECTIONS = {
     "e4b_base_hard_to_12b_26b",
     # RL-on-distilled 12B teacher (§9.0 best step 190) -> E4B base student
     "12bd_medium_to_e4b",
+    # Untrained-12B medium RL after the patience-4 resume (best step 140, §9.0h) -> E4B base student, 16 samples.
+    "12b_medium_r140_to_e4b",
+    "12bo_medium_r100_to_e4b",
+    # RL'd 26B-A4B teachers stopped at the 5-h mark (§9.0o): distilled-init (26bd) and warm-started untrained (26bw) -> E4B base, 16 samples.
+    "26bd_medium_to_e4b",
+    "26bw_medium_to_e4b",
+    # Untrained Qwen3-4B-Base teacher -> Qwen3-30B-A3B-Base student, 16 samples.
+    "q4b_base_medium_to_30b",
+    "q4b_base_hard_to_30b",
+    # Qwen3-30B-A3B medium RL teacher (best step 320) -> Qwen3-4B-Base student, 16 samples.
+    "q30bm_medium_r320_to_4b",
+    # Qwen3-30B-A3B hard RL teacher (best step 410 at 2026-10-09) -> Qwen3-4B-Base student, 16 samples.
+    "q30bh_hard_r410_to_4b",
+    # Qwen3-4B-Base medium / hard RL teachers (best steps 510 / 560) -> Qwen3-1.7B-Base student, 16 samples.
+    "q4bm_medium_r510_to_1p7b",
+    "q4bh_hard_r560_to_1p7b",
+    # Untrained Gemma 4 12B base teacher on the easy + medium + hard band union -> E4B base student, 8 train samples.
+    "12b_base_all_to_e4b",
+    "q1p7b_base_all_to_4b",
+    "q4b_base_all_to_1p7b",
+    # very_hard band RL teachers: 30B (best step 460) -> 4B / 1.7B and 4B (best step 620) -> 1.7B, 16 samples.
+    "q30bvh_very_hard_r460_to_4b",
+    "q4bvh_very_hard_r620_to_1p7b",
+}
+
+
+# Qwen3 teachers use the Gemma contract except for the stop rules (run_gemma4_bestckpt_trace_collection.sh q4b-base-*):
+# ChatML <|im_end|>/<|endoftext|>/<|im_start|> ids plus the plain-text turn starts a base model drifts into.
+QWEN3_SAMPLING_OVERRIDES = {"stop": ["\nHuman:", "\nuser\n"], "stop_token_ids": [151645, 151643, 151644]}
+SAMPLING_OVERRIDES_BY_DIRECTION = {
+    "q4b_base_medium_to_30b": QWEN3_SAMPLING_OVERRIDES,
+    "q4b_base_hard_to_30b": QWEN3_SAMPLING_OVERRIDES,
+    "q30bm_medium_r320_to_4b": QWEN3_SAMPLING_OVERRIDES,
+    "q30bh_hard_r410_to_4b": QWEN3_SAMPLING_OVERRIDES,
+    "q4bm_medium_r510_to_1p7b": QWEN3_SAMPLING_OVERRIDES,
+    "q4bh_hard_r560_to_1p7b": QWEN3_SAMPLING_OVERRIDES,
+    "q1p7b_base_all_to_4b": QWEN3_SAMPLING_OVERRIDES,
+    "q4b_base_all_to_1p7b": QWEN3_SAMPLING_OVERRIDES,
+    "q30bvh_very_hard_r460_to_4b": QWEN3_SAMPLING_OVERRIDES,
+    "q4bvh_very_hard_r620_to_1p7b": QWEN3_SAMPLING_OVERRIDES,
 }
 
 
@@ -121,7 +161,7 @@ def _verify_generation(index: Mapping[str, Any], expected_direction: str) -> dic
         if index.get(field) != semantic.get(field):
             raise TrainingViewPreflightError(f"view {field} does not match source generation provenance")
     sampling = semantic.get("sampling")
-    expected_sampling = source_preflight.EXPECTED_SAMPLING
+    expected_sampling = {**source_preflight.EXPECTED_SAMPLING, **SAMPLING_OVERRIDES_BY_DIRECTION.get(direction, {})}
     if not isinstance(sampling, Mapping):
         raise TrainingViewPreflightError("source sampling contract is missing")
     for key, expected in expected_sampling.items():

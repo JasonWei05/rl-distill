@@ -25,6 +25,7 @@ import argparse
 import fcntl
 import importlib.metadata
 import json
+import time
 import math
 import os
 import platform
@@ -84,8 +85,32 @@ DIRECTIONS = (
     # E4B *base* (untrained) teacher -> larger students (12b, 26b); pre-training control for the distillation study.
     "e4b_base_medium_to_12b_26b",
     "e4b_base_hard_to_12b_26b",
-    # RL on top of the E4B-base-distilled 12B (DISTILLATION_EXPERIMENTS.md §9.0, best step 190) -> E4B base student.
+    # RL on top of the E4B-base-distilled 12B (docs/GEMMA4_RESULTS.md, best step 190) -> E4B base student.
     "12bd_medium_to_e4b",
+    # Untrained-12B medium RL after the patience-4 resume (best step 140, §9.0h) -> E4B base student, 16 samples.
+    "12b_medium_r140_to_e4b",
+    # RL on the tail-bucket on-policy-distilled 12B (§9.0i, best step 100) -> E4B base student, 16 samples.
+    "12bo_medium_r100_to_e4b",
+    # RL'd 26B-A4B teachers stopped at the 5-h mark (§9.0o): distilled-init (26bd) and warm-started untrained (26bw) -> E4B base, 16 samples.
+    "26bd_medium_to_e4b",
+    "26bw_medium_to_e4b",
+    # Untrained Qwen3-4B-Base teacher -> Qwen3-30B-A3B-Base student on the Qwen3-30B-defined bands (0-shot ChatML +
+    # boxed instruction, stops on <|im_end|>/<|endoftext|>/<|im_start|> ids and "\nHuman:"/"\nuser\n"), 16 train samples.
+    "q4b_base_medium_to_30b",
+    "q4b_base_hard_to_30b",
+    # Qwen3-30B-A3B medium RL teacher (best val step 320) -> Qwen3-4B-Base student, same Qwen prompt/stop contract, 16 train samples.
+    "q30bm_medium_r320_to_4b",
+    "q30bh_hard_r410_to_4b",
+    # Qwen3-4B-Base medium / hard RL teachers (best val steps 510 / 560) -> Qwen3-1.7B-Base student, same Qwen contract, 16 train samples.
+    "q4bm_medium_r510_to_1p7b",
+    "q4bh_hard_r560_to_1p7b",
+    # Untrained Gemma 4 12B base teacher on the easy + medium + hard band union -> E4B base student, 8 train samples.
+    "12b_base_all_to_e4b",
+    "q1p7b_base_all_to_4b",
+    "q4b_base_all_to_1p7b",
+    # very_hard band RL teachers: 30B (best val step 460) -> 4B / 1.7B and 4B (best val step 620) -> 1.7B, same Qwen contract.
+    "q30bvh_very_hard_r460_to_4b",
+    "q4bvh_very_hard_r620_to_1p7b",
 )
 SPLITS = ("train", "validation")
 
@@ -488,6 +513,43 @@ def file_lock(path: Path):
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def _pin_engine_identity(
+    run_config: dict[str, Any], reference_path: Path, output_dir: Path, worker_id: int, mirror: Any
+) -> dict[str, Any]:
+    """Keep an in-flight bundle's identity across an engine-only change (e.g. TP 2 -> TP 1 to add vLLM engines).
+
+    The engine block (TP size, batching limits, memory fraction) and the generator source hash only change speed and
+    floating-point batching noise -- sampling is already not bitwise reproducible across batch compositions -- but both
+    are hashed into the generation identity, so changing them would orphan every completed shard. With
+    --pin-engine-identity the recorded ``engine``/``generator`` blocks are copied from the reference run config (the
+    train split's, so the validation split matches it too); everything else must already be identical. The actual
+    engine and source hash are kept outside the hash (``runtime``) and appended to ``engine_changes.jsonl``.
+    """
+    if not reference_path.is_file():
+        print(f"[pin-engine] reference {reference_path} absent; using this worker's own engine identity", flush=True)
+        return run_config
+    reference = json.loads(reference_path.read_text(encoding="utf-8"))["semantic_config"]
+    semantic = dict(run_config["semantic_config"])
+    actual = {"engine": semantic["engine"], "generator": semantic["generator"]}
+    pinned = {"engine": reference["engine"], "generator": reference["generator"]}
+    if actual == pinned:
+        return run_config
+    semantic.update(pinned)
+    pinned_config = dict(run_config)
+    pinned_config["semantic_config"] = semantic
+    pinned_config["generation_config_sha256"] = hash_json(semantic)
+    pinned_config["runtime"] = {**run_config["runtime"], "actual_engine": actual["engine"], "actual_generator": actual["generator"]}
+    change = {"at": utc_now(), "worker_id": worker_id, "pinned_from": str(reference_path), **pinned_config["runtime"]}
+    change.pop("llm_kwargs", None)
+    with file_lock(output_dir / ".engine_changes.lock"):
+        with (output_dir / "engine_changes.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(change, sort_keys=True) + "\n")
+    if mirror is not None:
+        mirror.upload_file(output_dir / "engine_changes.jsonl", root=output_dir)
+    print(f"[pin-engine] recorded identity pinned to {reference_path}; actual engine {actual['engine']}", flush=True)
+    return pinned_config
+
+
 def ensure_run_config(output_dir: Path, run_config: Mapping[str, Any]) -> None:
     config_path = output_dir / "run_config.json"
     with file_lock(output_dir / ".run_config.lock"):
@@ -524,6 +586,7 @@ def _build_run_config(
     tokenizer_sha256: str,
     tokenizer_vocab_size: int,
     chat_template_sha256: str,
+    model_vocab_size: int = 0,
     generator_commit: str,
     repository_dirty: bool,
     source_hash: str,
@@ -539,11 +602,24 @@ def _build_run_config(
         "max_prompt_tokens": args.max_prompt_tokens,
         "max_response_tokens": args.max_response_tokens,
         "max_model_len": args.max_model_len,
-        "stop": list(DEFAULT_STOP_STRINGS),
+        "stop": list(args.stop_strings),
         "include_stop_str_in_output": False,
         "skip_special_tokens": False,
         "logprobs": TOPK_WIDTH,
     }
+    if args.stop_token_ids:  # recorded only when set, so the Gemma configs (and their hashes) are unchanged
+        sampling["stop_token_ids"] = list(args.stop_token_ids)
+    if args.restrict_to_tokenizer_vocab:
+        # Qwen3 pads its LM head past the tokenizer (151,936 rows vs 151,669 ids); at temperature 1 the untrained 4B
+        # occasionally samples a padding row (1 in ~800k tokens), which no tokenizer can decode. The padding ids get
+        # vLLM's strongest logit bias (-100; allowed_token_ids is capped at 1024 ids) and the top-k is taken from the
+        # same biased ("processed") distribution, so sampled and recorded logprobs stay consistent; the
+        # renormalization is negligible.
+        if model_vocab_size <= tokenizer_vocab_size:
+            raise ValueError(f"--restrict-to-tokenizer-vocab: model vocab {model_vocab_size} has no padding rows")
+        sampling["suppressed_token_ids"] = [tokenizer_vocab_size, model_vocab_size]
+        sampling["suppressed_token_logit_bias"] = -100.0
+        sampling["logprobs_mode"] = "processed_logprobs"
     engine = {
         "tensor_parallel_size": args.tensor_parallel_size,
         "dtype": args.dtype,
@@ -652,6 +728,8 @@ def _make_llm(args: argparse.Namespace) -> tuple[Any, Any, Any, str]:
         "max_num_batched_tokens": args.max_num_batched_tokens,
         "seed": args.global_seed,
     }
+    if args.restrict_to_tokenizer_vocab:
+        llm_kwargs["logprobs_mode"] = "processed_logprobs"
     if revision and not Path(args.teacher_model).exists():
         llm_kwargs["revision"] = revision
     if tokenizer_revision and not Path(args.tokenizer_model or args.teacher_model).exists():
@@ -664,13 +742,20 @@ def _make_llm(args: argparse.Namespace) -> tuple[Any, Any, Any, str]:
 
 
 def _sampling_params(SamplingParams: Any, sampling: Mapping[str, Any], seed: int) -> Any:
+    suppressed = sampling.get("suppressed_token_ids")
+    logit_bias = None
+    if suppressed:
+        bias = float(sampling["suppressed_token_logit_bias"])
+        logit_bias = {token_id: bias for token_id in range(int(suppressed[0]), int(suppressed[1]))}
     return SamplingParams(
+        logit_bias=logit_bias,
         n=1,
         temperature=float(sampling["temperature"]),
         top_p=float(sampling["top_p"]),
         top_k=int(sampling["sampling_top_k"]),
         max_tokens=int(sampling["max_response_tokens"]),
         stop=list(sampling["stop"]),
+        stop_token_ids=list(sampling.get("stop_token_ids") or []) or None,
         include_stop_str_in_output=bool(sampling["include_stop_str_in_output"]),
         skip_special_tokens=bool(sampling["skip_special_tokens"]),
         logprobs=int(sampling["logprobs"]),
@@ -808,6 +893,7 @@ def run_generation(args: argparse.Namespace) -> None:
         tokenizer_sha256=tokenizer_sha256,
         tokenizer_vocab_size=tokenizer_vocab_size,
         chat_template_sha256=template_sha256,
+        model_vocab_size=int(llm.llm_engine.model_config.get_vocab_size()),
         generator_commit=generator_commit,
         repository_dirty=repository_dirty,
         source_hash=generator_source_hash(),
@@ -815,6 +901,8 @@ def run_generation(args: argparse.Namespace) -> None:
         teacher_identity=teacher_identity,
     )
     run_config["runtime"] = {"llm_kwargs": llm_kwargs, "creator_worker_id": args.worker_id}
+    if args.pin_engine_identity:
+        run_config = _pin_engine_identity(run_config, Path(args.pin_engine_identity), output_dir, args.worker_id, mirror)
     ensure_run_config(output_dir, run_config)
     if mirror is not None:
         mirror.upload_file(output_dir / "run_config.json", root=output_dir)
@@ -862,7 +950,9 @@ def run_generation(args: argparse.Namespace) -> None:
                     f"requests={len(prompt_requests)}",
                     flush=True,
                 )
+                generate_started = time.monotonic()
                 outputs = llm.generate(prompt_requests, sampling_params, use_tqdm=True)
+                generate_seconds = time.monotonic() - generate_started
                 if len(outputs) != len(prepared):
                     raise RuntimeError(f"vLLM returned {len(outputs)} outputs for {len(prepared)} requests")
                 timestamp = utc_now()
@@ -898,6 +988,13 @@ def run_generation(args: argparse.Namespace) -> None:
                 )
                 generated_shards += 1
                 print(f"[saved] {parquet_path} ({len(records)} rows)", flush=True)
+                response_tokens = sum(len(output.outputs[0].token_ids) for output in outputs)
+                print(
+                    f"TRACE_SHARD_DONE split={args.split} shard={shard_id} worker={args.worker_id} rows={len(records)} "
+                    f"response_tokens={response_tokens} generate_s={generate_seconds:.0f} "
+                    f"tok_s={response_tokens / max(generate_seconds, 1e-9):.0f}",
+                    flush=True,
+                )
                 if mirror is not None and upload_executor is not None:
                     pending_uploads.append(upload_executor.submit(mirror.upload_shard, parquet_path, root=output_dir))
                     if len(pending_uploads) >= 2:
@@ -922,6 +1019,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--direction", choices=DIRECTIONS, required=True)
     parser.add_argument("--split", choices=SPLITS, required=True)
     parser.add_argument("--chat-template", default=str(DEFAULT_CHAT_TEMPLATE))
+    # Comma-separated; a literal "\n" in an entry is a newline (plain-text turn starts such as "\nHuman:").
+    parser.add_argument(
+        "--stop-strings",
+        type=lambda v: tuple(x.replace("\\n", "\n") for x in v.split(",") if x),
+        default=DEFAULT_STOP_STRINGS,
+    )
+    # Comma-separated token ids; special tokens never match a stop *string* (e.g. Qwen3 base needs <|im_end|> here).
+    parser.add_argument("--stop-token-ids", type=lambda v: tuple(int(x) for x in v.split(",") if x.strip()), default=())
+    parser.add_argument("--restrict-to-tokenizer-vocab", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--samples-per-question", type=int, default=5)
     parser.add_argument("--global-seed", type=int, default=42)
     parser.add_argument("--temperature", type=float, default=1.0)
@@ -948,6 +1054,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--distributed-executor-backend", default=None)
     parser.add_argument("--mm-encoder-attn-backend", default=None)
     parser.add_argument("--s3-mirror-uri", default=None)
+    # Path to a run_config.json whose engine/generator identity this worker records (see _pin_engine_identity).
+    parser.add_argument("--pin-engine-identity", default=None)
     return parser.parse_args(argv)
 
 

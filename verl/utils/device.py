@@ -14,6 +14,17 @@ import platform
 import subprocess
 
 import torch
+
+# rl-distill: TORCH_CUDNN_SDPA_ENABLED=0 (forwarded into Ray workers by the Gemma 4 run-file) disables PyTorch's cuDNN fused-attention
+# SDPA backend in every worker process that imports verl.utils.device (both the legacy fsdp_workers and the engine_workers/transformer_impl
+# path). torch 2.11 no longer reads this env var itself. The E4B fast-layout RL runs died with `RuntimeError: Expected
+# mha_graph.execute(...).is_good() to be true` in update_actor (2026-09-17, seeds 43/44); a hook placed only in fsdp_workers.py did not
+# run for the engine path. Default (unset / 1) leaves PyTorch's behaviour unchanged.
+if __import__("os").environ.get("TORCH_CUDNN_SDPA_ENABLED", "1") == "0":
+    # No torch.cuda.is_available() gate: the flag is process-global C++ state and must be set even when the module is imported
+    # before the worker's CUDA context exists. Logged once per process so pod logs show it took effect.
+    torch.backends.cuda.enable_cudnn_sdp(False)
+    print(f"RL_DISTILL_CUDNN_SDPA_DISABLED pid={__import__('os').getpid()} cudnn_sdp_enabled={torch.backends.cuda.cudnn_sdp_enabled()}", flush=True)
 from packaging import version
 
 logger = logging.getLogger(__name__)

@@ -11,7 +11,13 @@
 #     that overflows the default 2GB FSDP->vLLM weight-sync bucket).
 #
 # Which model via GEMMA4_MODEL env (google/gemma-4-E2B | google/gemma-4-E4B |
-# google/gemma-4-12B | google/gemma-4-26B-A4B). Per-seed via DATA_SEED.
+# google/gemma-4-12B | google/gemma-4-26B-A4B | Qwen/Qwen3-30B-A3B-Base | Qwen/Qwen3-8B-Base |
+# Qwen/Qwen3-14B-Base | Qwen/Qwen3-4B-Base | Qwen/Qwen3-1.7B-Base). Per-seed via DATA_SEED.
+# Qwen3-30B-A3B-Base runs on the same stack and recipe with its own prompt contract: 0-shot native ChatML
+# (data/qwen3_base_native_chat.jinja, instruction appended to each problem by the data prep), stops on the
+# <|im_end|>/<|im_start|> token ids and the plain-text turn starts "\nHuman:" / "\nuser\n", Qwen3MoeDecoderLayer wrap,
+# optional R3 router replay (ROUTER_REPLAY_MODE=R3, verl/models/transformers/qwen3_moe_router_replay.py). Launcher:
+# launch_qwen3_30b_a3b_medium_rl.sh.
 #
 # Launch (E2B, one node, borrowing OFF):
 #   python rl-distill-scripts/scale_train/launch_st_job.py --cluster eks --n-instances 1 \
@@ -34,6 +40,11 @@ case "${GEMMA4_MODEL}" in
   *E4B*) MODEL_TAG=gemma4-e4b; WRAP_LAYER_CLS_DEFAULT=Gemma4TextDecoderLayer ;;
   *12B*) MODEL_TAG=gemma4-12b; WRAP_LAYER_CLS_DEFAULT=Gemma4UnifiedTextDecoderLayer ;;
   *26B-A4B*) MODEL_TAG=gemma4-26b-a4b; WRAP_LAYER_CLS_DEFAULT=Gemma4TextDecoderLayer ;;
+  Qwen/Qwen3-30B-A3B-Base) MODEL_TAG=qwen3-30b-a3b-base; WRAP_LAYER_CLS_DEFAULT=Qwen3MoeDecoderLayer ;;
+  Qwen/Qwen3-4B-Base) MODEL_TAG=qwen3-4b-base; WRAP_LAYER_CLS_DEFAULT=Qwen3DecoderLayer ;;
+  Qwen/Qwen3-1.7B-Base) MODEL_TAG=qwen3-1.7b-base; WRAP_LAYER_CLS_DEFAULT=Qwen3DecoderLayer ;;
+  Qwen/Qwen3-8B-Base) MODEL_TAG=qwen3-8b-base; WRAP_LAYER_CLS_DEFAULT=Qwen3DecoderLayer ;;
+  Qwen/Qwen3-14B-Base) MODEL_TAG=qwen3-14b-base; WRAP_LAYER_CLS_DEFAULT=Qwen3DecoderLayer ;;
   *)
     MODEL_TAG="$(echo "${GEMMA4_MODEL}" | tr '/A-Z' '-a-z')"
     echo "FATAL: unsupported GEMMA4_MODEL=${GEMMA4_MODEL}" >&2
@@ -42,10 +53,34 @@ case "${GEMMA4_MODEL}" in
 esac
 
 WRAP_LAYER_CLS="${WRAP_LAYER_CLS:-${WRAP_LAYER_CLS_DEFAULT}}"
+# Prompt contract per model family: chat template, extra stop strings (literal "\n" = newline) and stop token ids.
+if [[ "${MODEL_TAG}" == qwen3-* ]]; then   # Qwen3 base family (30B-A3B, 4B, 1.7B): same prompt contract
+  CHAT_TEMPLATE_DEFAULT="${PROJECT_ROOT}/rl-distill-scripts/data/qwen3_base_native_chat.jinja"
+  ROLLOUT_EXTRA_STOP_DEFAULT='\nHuman:,\nuser\n'
+  ROLLOUT_EXTRA_STOP_TOKEN_IDS_DEFAULT=151645,151643,151644   # <|im_end|>, <|endoftext|> (= eos), <|im_start|>
+  FSDP2_LOCAL_LOAD_DEFAULT=0   # per-rank local load requires tied embeddings; Qwen3-30B-A3B is untied -> rank-0 broadcast load (4B too)
+else
+  CHAT_TEMPLATE_DEFAULT="${PROJECT_ROOT}/rl-distill-scripts/data/gemma3_it_fewshot_math.jinja"
+  ROLLOUT_EXTRA_STOP_DEFAULT='<end_of_turn>,<start_of_turn>'
+  ROLLOUT_EXTRA_STOP_TOKEN_IDS_DEFAULT=
+  FSDP2_LOCAL_LOAD_DEFAULT=1
+fi
 
 DIFFICULTY_DATASET_SOURCE="${DIFFICULTY_DATASET_SOURCE:-legacy}"
 DIFFICULTY_DATASET="${DIFFICULTY_DATASET:-strict4of4}"
-if [ "${DIFFICULTY_DATASET_SOURCE}" = gemma4_26b_bands ]; then
+if [ "${DIFFICULTY_DATASET_SOURCE}" = qwen3_30b_bands ]; then
+  case "${DIFFICULTY_DATASET}" in
+    easy|medium|hard|very_hard)
+      DATASET_TAG="qwen30b-${DIFFICULTY_DATASET}"
+      TRAIN_BASENAME="deepscaler_qwen3_30b_${DIFFICULTY_DATASET}_train.parquet"
+      IN_DIST_VAL_BASENAME="deepscaler_qwen3_30b_${DIFFICULTY_DATASET}_val300_x16.parquet"
+      ;;
+    *)
+      echo "FATAL: qwen3_30b_bands requires DIFFICULTY_DATASET=easy, medium, hard, or very_hard; got ${DIFFICULTY_DATASET}" >&2
+      exit 2
+      ;;
+  esac
+elif [ "${DIFFICULTY_DATASET_SOURCE}" = gemma4_26b_bands ]; then
   case "${DIFFICULTY_DATASET}" in
     easy|medium|hard)
       DATASET_TAG="gemma26b-${DIFFICULTY_DATASET}"
@@ -139,7 +174,8 @@ export WANDB_DIR="${WANDB_DIR:-/tmp/wandb}"; export VLLM_CACHE_ROOT="${VLLM_CACH
 export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/triton_cache}"
 # ScaleTrain pods on ml-gpu-batch are IPv6-only (pod IP 2602:fb33:...), interface eth0.
 export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${NETWORK_INTERFACE_NAME:-eth0}}"
-export NCCL_SOCKET_FAMILY="${NCCL_SOCKET_FAMILY:-AF_INET6}"
+# EKS (ml-gpu-batch) pods are IPv6-only; GKE (a3-mega) pods are IPv4 (launch_st_job.py exports SCALE_CLUSTER)
+if [ "${SCALE_CLUSTER:-eks}" = gke ]; then export NCCL_SOCKET_FAMILY="${NCCL_SOCKET_FAMILY:-AF_INET}"; else export NCCL_SOCKET_FAMILY="${NCCL_SOCKET_FAMILY:-AF_INET6}"; fi
 export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${NETWORK_INTERFACE_NAME:-eth0}}"
 
 if [ -n "${CUDA_VISIBLE_DEVICES:-}" ]; then
@@ -159,6 +195,10 @@ MICRO_BATCH_SIZE_PER_GPU="${MICRO_BATCH_SIZE_PER_GPU:-1}"
 # sequence into an OOM-sized logits tensor.  A nonzero ceiling keeps the
 # configured microbatch for short samples but emits long samples as singletons.
 MAX_PADDED_TOKENS_PER_MICROBATCH="${MAX_PADDED_TOKENS_PER_MICROBATCH:-0}"
+# The old-logprob / ref passes have no backward, so they can take a much larger micro-batch than the update
+# (E4B sweep 2026-09-18: forward-only 24 seqs / 49k tokens = 39 GiB, 2.7x faster; the update OOMs above 8 / 16k).
+INFER_MICRO_BATCH_SIZE_PER_GPU="${INFER_MICRO_BATCH_SIZE_PER_GPU:-${MICRO_BATCH_SIZE_PER_GPU}}"
+INFER_MAX_PADDED_TOKENS_PER_MICROBATCH="${INFER_MAX_PADDED_TOKENS_PER_MICROBATCH:-${MAX_PADDED_TOKENS_PER_MICROBATCH}}"
 # FSDP2's native CPU offload policy keeps parameter shards, gradients, and Adam
 # state on CPU between layer computations.  Unlike manual optimizer offload, it
 # also avoids the first-step GPU allocation spike when Adam moments are created.
@@ -192,10 +232,12 @@ if [ "${MODEL_TAG}" = gemma4-26b-a4b ]; then
     exit 2
   fi
   ENABLE_ROLLOUT_ROUTING_REPLAY=True
+elif [ "${MODEL_TAG}" = qwen3-30b-a3b-base ] && [ "${ROUTER_REPLAY_MODE}" = R3 ]; then
+  ENABLE_ROLLOUT_ROUTING_REPLAY=True   # verl/models/transformers/qwen3_moe_router_replay.py
 elif [ "${ROUTER_REPLAY_MODE}" = disabled ]; then
   ENABLE_ROLLOUT_ROUTING_REPLAY=False
 else
-  echo "FATAL: router replay is enabled only for Gemma 4 26B-A4B; got ${GEMMA4_MODEL}" >&2
+  echo "FATAL: router replay (R3) is supported only for Gemma 4 26B-A4B and Qwen3-30B-A3B; got ${GEMMA4_MODEL} mode=${ROUTER_REPLAY_MODE}" >&2
   exit 2
 fi
 # verl defaults VLLM_DISABLE_COMPILE_CACHE=1 in its Ray runtime environment.
@@ -208,7 +250,8 @@ if [ "${ROLLOUT_ENFORCE_EAGER,,}" = "false" ]; then
 fi
 # Use `${name-default}` (not `:-`) so an explicitly empty value can force a
 # max-length rollout in memory canaries. Production keeps both stop strings.
-VERL_ROLLOUT_EXTRA_STOP="${VERL_ROLLOUT_EXTRA_STOP-<end_of_turn>,<start_of_turn>}"
+VERL_ROLLOUT_EXTRA_STOP="${VERL_ROLLOUT_EXTRA_STOP-${ROLLOUT_EXTRA_STOP_DEFAULT}}"
+VERL_ROLLOUT_EXTRA_STOP_TOKEN_IDS="${VERL_ROLLOUT_EXTRA_STOP_TOKEN_IDS-${ROLLOUT_EXTRA_STOP_TOKEN_IDS_DEFAULT}}"
 
 DEFAULT_CKPTS_DIR="${RAY_DATA_HOME}/ckpts/${MODEL_TAG}-deepscaler-${DATASET_TAG}-seed${SEED}${NORMALIZED_RUN_SUFFIX}"
 RAY_TEMP_DIR="${RAY_TEMP_DIR:-/tmp/ray_${MODEL_TAG}_${DATASET_TAG}_seed${SEED}_${RUN_SLOT}}"
@@ -227,6 +270,7 @@ source "${PROJECT_ROOT}/rl-distill-scripts/assert_local_fs.sh"
 assert_local_fs CKPTS_DIR="${CKPTS_DIR}" RAY_DATA_HOME="${RAY_DATA_HOME}" DATA_DIR="${DATA_DIR}" HF_HOME="${HF_HOME:-}"
 export ROLLING_CHECKPOINT_ENABLED="${ROLLING_CHECKPOINT_ENABLED:-False}"
 export ROLLING_CHECKPOINT_FREQ="${ROLLING_CHECKPOINT_FREQ:-1}"
+export ASYNC_CHECKPOINT_UPLOAD="${ASYNC_CHECKPOINT_UPLOAD:-False}"   # dapo_ray_trainer: background S3 upload of each checkpoint
 case "${ROLLING_CHECKPOINT_ENABLED,,}" in
   1|true|yes|on)
     if [ -z "${FULL_CHECKPOINT_S3_URI:-}" ]; then
@@ -294,7 +338,41 @@ fi
 export GEMMA4_INIT_MODEL_REPO="${GEMMA4_INIT_MODEL_REPO:-${GEMMA4_MODEL}}"
 export GEMMA4_INIT_MODEL_REVISION="${GEMMA4_INIT_MODEL_REVISION:-${GEMMA4_MODEL_REVISION:-}}"
 export GEMMA4_INIT_MODEL_SUBFOLDER="${GEMMA4_INIT_MODEL_SUBFOLDER:-}"
-if [ -n "${GEMMA4_INIT_MODEL_SUBFOLDER}" ] && [ "${GEMMA4_INIT_MODEL_REPO}" != "${GEMMA4_MODEL}" ]; then
+if [ -n "${GEMMA4_INIT_MODEL_S3_URI:-}" ] && [ -z "${GEMMA4_INIT_MODEL_PATH:-}" ]; then
+  # Initialize from an HF export on S3 (e.g. another run's global_step_N/actor/huggingface/). Downloaded once per pod; for
+  # Gemma 4 the base model's processor_config.json is added when the export lacks it (unified Gemma 4 load; Qwen3 has none).
+  GEMMA4_INIT_MODEL_PATH="/tmp/gemma4_init_model/s3_$(echo "${GEMMA4_INIT_MODEL_S3_URI}" | md5sum | cut -c1-12)"
+  NEEDS_PROCESSOR_CONFIG="$([[ "${MODEL_TAG}" == qwen3-* ]] && echo 0 || echo 1)" \
+  "${VENV}/bin/python" - "${GEMMA4_INIT_MODEL_S3_URI}" "${GEMMA4_INIT_MODEL_PATH}" "${GEMMA4_MODEL}" "${GEMMA4_MODEL_REVISION:-}" <<'PY'
+import os, sys
+from pathlib import Path
+import boto3
+from huggingface_hub import hf_hub_download
+uri, out, base, rev = sys.argv[1], Path(sys.argv[2]), sys.argv[3], sys.argv[4] or None
+bucket, prefix = uri[5:].split("/", 1); prefix = prefix.rstrip("/") + "/"
+s3 = boto3.client("s3"); out.mkdir(parents=True, exist_ok=True); n = 0
+for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+    for obj in page.get("Contents", []):
+        rel = obj["Key"][len(prefix):]
+        if not rel or rel.endswith("/"): continue
+        dst = out / rel; dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists() and dst.stat().st_size == obj["Size"]: continue
+        s3.download_file(bucket, obj["Key"], str(dst)); n += 1
+if os.environ["NEEDS_PROCESSOR_CONFIG"] == "1" and not (out / "processor_config.json").exists():
+    src = hf_hub_download(base, "processor_config.json", revision=rev); (out / "processor_config.json").write_bytes(Path(src).read_bytes())
+assert (out / "config.json").is_file() and any(out.glob("*.safetensors")), f"incomplete init export at {out}"
+print(f"INIT_MODEL_S3 downloaded={n} files -> {out}")
+PY
+  export GEMMA4_INIT_MODEL_PATH
+fi
+if [ -n "${GEMMA4_INIT_MODEL_PATH:-}" ]; then
+  # Initialize from a LOCAL HF export directory (e.g. an S3-restored actor/huggingface/ of another run). It must already
+  # carry the base model's processor_config.json for Gemma 4 (unified Gemma 4 load; see the Hub branch below).
+  test -s "${GEMMA4_INIT_MODEL_PATH}/config.json" && { [[ "${MODEL_TAG}" == qwen3-* ]] || test -s "${GEMMA4_INIT_MODEL_PATH}/processor_config.json"; } \
+    && ls "${GEMMA4_INIT_MODEL_PATH}"/*.safetensors >/dev/null || { echo "FATAL: GEMMA4_INIT_MODEL_PATH=${GEMMA4_INIT_MODEL_PATH} lacks config.json / processor_config.json / *.safetensors" >&2; exit 2; }
+  echo "INIT_MODEL local_path=${GEMMA4_INIT_MODEL_PATH} files=$(ls "${GEMMA4_INIT_MODEL_PATH}" | tr '\n' ' ')"
+  MODEL_LOCAL_PATH="${GEMMA4_INIT_MODEL_PATH}"
+elif [ -n "${GEMMA4_INIT_MODEL_SUBFOLDER}" ] && [ "${GEMMA4_INIT_MODEL_REPO}" != "${GEMMA4_MODEL}" ]; then
   # Initialize from a pushed HF export (e.g. a distilled student's step_NNNNNN/). Those exports hold only
   # config/weights/tokenizer; the Gemma 4 unified (VLM-class) rollout also needs the base model's processor
   # config, so materialize the subfolder the way the eval pipeline does: download + patch the missing metadata
@@ -341,13 +419,15 @@ fi
 # as a supervised loss instead of the DAPO policy loss (use_task_rewards=False zeroes the PG term; the math
 # reward is still computed for the train/val accuracy metrics). Same trainer, rollout, validation, checkpoint
 # and HF-push paths as RL. Pair with N_RESP_PER_PROMPT=1 and TRAIN_PROMPT_BSZ=TRAIN_PROMPT_MINI_BSZ for a pure
-# on-policy update. See DISTILLATION_EXPERIMENTS.md §9.0d and rl-distill-scripts/distill_onpolicy.sh (Gemma 3).
+# on-policy update. The current recipe (PG-k1: LOSS_MODE=k1 + USE_POLICY_GRADIENT=True) is set by
+# scale_train/launch_qwen3_onpolicy_distill.sh; see docs/RECIPES.md §3.
 ONPOLICY_DISTILL_ENABLE="${ONPOLICY_DISTILL_ENABLE:-False}"
 DISTILL_OVERRIDES=()
 case "${ONPOLICY_DISTILL_ENABLE,,}" in
   1|true|yes|on)
-    : "${ONPOLICY_DISTILL_TEACHER_REPO:?ONPOLICY_DISTILL_TEACHER_REPO is required when ONPOLICY_DISTILL_ENABLE=True}"
-    export ONPOLICY_DISTILL_TEACHER_REPO
+    # Teacher source: ONPOLICY_DISTILL_TEACHER_S3_URI (an HF export on S3, e.g. an RL run's best_hf/) or a pinned Hub repo.
+    [ -n "${ONPOLICY_DISTILL_TEACHER_S3_URI:-}" ] || : "${ONPOLICY_DISTILL_TEACHER_REPO:?ONPOLICY_DISTILL_TEACHER_REPO or ONPOLICY_DISTILL_TEACHER_S3_URI is required when ONPOLICY_DISTILL_ENABLE=True}"
+    export ONPOLICY_DISTILL_TEACHER_REPO="${ONPOLICY_DISTILL_TEACHER_REPO:-}" ONPOLICY_DISTILL_TEACHER_S3_URI="${ONPOLICY_DISTILL_TEACHER_S3_URI:-}"
     export ONPOLICY_DISTILL_TEACHER_REVISION="${ONPOLICY_DISTILL_TEACHER_REVISION:-}"
     ONPOLICY_DISTILL_LOSS_MODE="${ONPOLICY_DISTILL_LOSS_MODE:-reverse_kl_topk}"
     ONPOLICY_DISTILL_TOPK="${ONPOLICY_DISTILL_TOPK:-128}"
@@ -367,16 +447,34 @@ case "${ONPOLICY_DISTILL_ENABLE,,}" in
       exit 2
     fi
     # Pin and materialise the teacher. The Gemma 4 teacher must load through the unified (VLM-class) vLLM
-    # path, which needs the repo's processor config next to the weights (never a bare causal-LM override).
-    TEACHER_LOCAL_PATH="$(${VENV}/bin/python - <<'PY'
+    # path, which needs the repo's processor config next to the weights (never a bare causal-LM override);
+    # Qwen3 teachers have no processor config.
+    TEACHER_LOCAL_PATH="$(NEEDS_PROCESSOR_CONFIG="$([[ "${MODEL_TAG}" == qwen3-* ]] && echo 0 || echo 1)" ${VENV}/bin/python - <<'PY'
 import os
 from pathlib import Path
 from huggingface_hub import snapshot_download
-kwargs = {"repo_id": os.environ["ONPOLICY_DISTILL_TEACHER_REPO"]}
-if os.environ.get("ONPOLICY_DISTILL_TEACHER_REVISION"):
-    kwargs["revision"] = os.environ["ONPOLICY_DISTILL_TEACHER_REVISION"]
-path = Path(snapshot_download(**kwargs))
-for required in ("config.json", "processor_config.json", "tokenizer_config.json"):
+if os.environ["ONPOLICY_DISTILL_TEACHER_S3_URI"]:
+    import hashlib
+    import boto3
+    uri = os.environ["ONPOLICY_DISTILL_TEACHER_S3_URI"]
+    bucket, prefix = uri[5:].split("/", 1); prefix = prefix.rstrip("/") + "/"
+    path = Path("/tmp/onpolicy_teacher") / ("s3_" + hashlib.md5(uri.encode()).hexdigest()[:12])
+    s3 = boto3.client("s3"); path.mkdir(parents=True, exist_ok=True)
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            rel = obj["Key"][len(prefix):]
+            if not rel or rel.endswith("/"): continue
+            dst = path / rel; dst.parent.mkdir(parents=True, exist_ok=True)
+            if not (dst.exists() and dst.stat().st_size == obj["Size"]):
+                s3.download_file(bucket, obj["Key"], str(dst))
+else:
+    kwargs = {"repo_id": os.environ["ONPOLICY_DISTILL_TEACHER_REPO"]}
+    if os.environ.get("ONPOLICY_DISTILL_TEACHER_REVISION"):
+        kwargs["revision"] = os.environ["ONPOLICY_DISTILL_TEACHER_REVISION"]
+    path = Path(snapshot_download(**kwargs))
+required_files = ("config.json", "processor_config.json", "tokenizer_config.json") if os.environ["NEEDS_PROCESSOR_CONFIG"] == "1" \
+    else ("config.json", "tokenizer_config.json")
+for required in required_files:
     if not (path / required).is_file():
         raise FileNotFoundError(f"teacher snapshot {path} lacks {required}")
 if not any(path.glob("*.safetensors")):
@@ -409,10 +507,14 @@ PY
       ++distillation.teacher_model.inference.enable_sleep_mode="${ONPOLICY_DISTILL_TEACHER_SLEEP}"
       ++distillation.teacher_model.inference.engine_kwargs.vllm.max_logprobs="${ONPOLICY_DISTILL_TOPK}"
     )
-    echo "ONPOLICY_DISTILL teacher=${ONPOLICY_DISTILL_TEACHER_REPO}@${ONPOLICY_DISTILL_TEACHER_REVISION:-main} path=${TEACHER_LOCAL_PATH} loss=${ONPOLICY_DISTILL_LOSS_MODE} topk=${ONPOLICY_DISTILL_TOPK} teacher_tp=${ONPOLICY_DISTILL_TEACHER_TP} teacher_util=${ONPOLICY_DISTILL_TEACHER_GPU_MEM_UTIL} sleep=${ONPOLICY_DISTILL_TEACHER_SLEEP} task_rewards=${ONPOLICY_DISTILL_USE_TASK_REWARDS} policy_gradient=${ONPOLICY_DISTILL_USE_POLICY_GRADIENT}"
+    echo "ONPOLICY_DISTILL teacher=${ONPOLICY_DISTILL_TEACHER_S3_URI:-${ONPOLICY_DISTILL_TEACHER_REPO}@${ONPOLICY_DISTILL_TEACHER_REVISION:-main}} path=${TEACHER_LOCAL_PATH} loss=${ONPOLICY_DISTILL_LOSS_MODE} topk=${ONPOLICY_DISTILL_TOPK} teacher_tp=${ONPOLICY_DISTILL_TEACHER_TP} teacher_util=${ONPOLICY_DISTILL_TEACHER_GPU_MEM_UTIL} sleep=${ONPOLICY_DISTILL_TEACHER_SLEEP} task_rewards=${ONPOLICY_DISTILL_USE_TASK_REWARDS} policy_gradient=${ONPOLICY_DISTILL_USE_POLICY_GRADIENT}"
     ;;
 esac
-if [ "${DIFFICULTY_DATASET_SOURCE}" = gemma4_26b_bands ]; then
+if [ "${DIFFICULTY_DATASET_SOURCE}" = qwen3_30b_bands ]; then
+  "${VENV}/bin/python" rl-distill-scripts/data/prepare_deepscaler_qwen3_30b_difficulty_rl_data.py \
+    --data-dir "${DATA_DIR}" --band "${DIFFICULTY_DATASET}" --validation-repeats 16
+  DEFAULT_VAL_FILES="['${DATA_DIR}/${IN_DIST_VAL_BASENAME}']"
+elif [ "${DIFFICULTY_DATASET_SOURCE}" = gemma4_26b_bands ]; then
   "${VENV}/bin/python" rl-distill-scripts/data/prepare_deepscaler_gemma4_26b_difficulty_rl_data.py \
     --data-dir "${DATA_DIR}" --band "${DIFFICULTY_DATASET}" --validation-repeats 16
   DEFAULT_VAL_FILES="['${DATA_DIR}/${IN_DIST_VAL_BASENAME}']"
@@ -442,6 +544,9 @@ if [ -n "${FULL_CHECKPOINT_S3_URI:-}" ]; then
   fi
 fi
 
+# TORCH_CUDNN_SDPA_ENABLED=0 disables PyTorch's cuDNN fused-attention SDPA backend in the workers (falls back to flash/efficient/math).
+# The E4B fast-layout runs hit `RuntimeError: Expected mha_graph.execute(...).is_good()` inside update_actor (2026-09-17 02:51Z,
+# seed 44 step 79) -- a cuDNN graph failure on some padded micro-batch shape, deterministic on that batch. Default 1 = unchanged.
 # RUN_RAY_ADDRESS (optional): connect to a head node the caller started with fixed agent ports instead of ray.init(address=local).
 # Needed on the overloaded shared devbox: with unassigned ports the raylet waits only 15 s (hardcoded, Ray 2.58
 # port_persistence.h) for the Python dashboard/runtime-env agents to publish their port files and aborts otherwise.
@@ -453,14 +558,14 @@ EXP_NAME="${EXP_NAME:-${DEFAULT_EXP_NAME}}" \
 DATA_SEED="${SEED}" \
 TRAIN_FILE="${TRAIN_FILE}" \
 VAL_FILES="${VAL_FILES}" \
-GEMMA3_CHAT_TEMPLATE_FILE="${GEMMA3_CHAT_TEMPLATE_FILE:-${PWD}/rl-distill-scripts/data/gemma3_it_fewshot_math.jinja}" \
+GEMMA3_CHAT_TEMPLATE_FILE="${GEMMA3_CHAT_TEMPLATE_FILE:-${CHAT_TEMPLATE_DEFAULT}}" \
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH}" MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH}" OVERLONG_BUFFER_LEN="${OVERLONG_BUFFER_LEN:-4096}" \
 LOG_VAL_GENERATIONS="${LOG_VAL_GENERATIONS:-100}" LOG_TRAIN_GENERATIONS="${LOG_TRAIN_GENERATIONS:-100}" \
 ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.65}" \
 N_GPUS_PER_NODE="${n_gpus}" NNODES=1 OFFLOAD="${OFFLOAD:-False}" SAVE_FREQ="${SAVE_FREQ:-25}" \
 RAY_ADDRESS="${RUN_RAY_ADDRESS:-local}" VERL_VLLM_PORT_BASE="${VERL_VLLM_PORT_BASE:-52000}" \
 DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
-    bash rl-distill-scripts/gemma3_pt_fewshot_math_rl.sh \
+    bash rl-distill-scripts/run_dapo_rl.sh \
       +ray_kwargs.ray_init._temp_dir="${RAY_TEMP_DIR}" \
       +ray_kwargs.ray_init.include_dashboard=False \
       +ray_kwargs.ray_init.runtime_env.env_vars.HF_HOME="${HF_HOME}" \
@@ -470,9 +575,15 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       +ray_kwargs.ray_init.runtime_env.env_vars.PYTORCH_CUDA_ALLOC_CONF="'${PYTORCH_CUDA_ALLOC_CONF:-}'" \
       +ray_kwargs.ray_init.runtime_env.env_vars.VLLM_ATTENTION_BACKEND="TRITON_ATTN" \
       +ray_kwargs.ray_init.runtime_env.env_vars.VLLM_USE_FLASHINFER_SAMPLER="'0'" \
-      +ray_kwargs.ray_init.runtime_env.env_vars.VERL_FSDP2_LOCAL_LOAD="'1'" \
+      +ray_kwargs.ray_init.runtime_env.env_vars.VERL_FSDP2_LOCAL_LOAD="'${VERL_FSDP2_LOCAL_LOAD:-${FSDP2_LOCAL_LOAD_DEFAULT}}'" \
+      +ray_kwargs.ray_init.runtime_env.env_vars.TORCH_CUDNN_SDPA_ENABLED="'${TORCH_CUDNN_SDPA_ENABLED:-1}'" \
+      `# VERL_GEMMA4_CUDNN_SDPA / VERL_GEMMA4_EVAL_CUDNN_SDPA: the FSDP engine (_set_gemma4_cudnn_sdpa) forces cuDNN SDPA ON for every` \
+      `# Gemma 4 train forward unless VERL_GEMMA4_CUDNN_SDPA=0 -- TORCH_CUDNN_SDPA_ENABLED alone never reaches update_actor.` \
+      +ray_kwargs.ray_init.runtime_env.env_vars.VERL_GEMMA4_CUDNN_SDPA="'${VERL_GEMMA4_CUDNN_SDPA:-1}'" \
+      +ray_kwargs.ray_init.runtime_env.env_vars.VERL_GEMMA4_EVAL_CUDNN_SDPA="'${VERL_GEMMA4_EVAL_CUDNN_SDPA:-${VERL_GEMMA4_CUDNN_SDPA:-1}}'" \
       +ray_kwargs.ray_init.runtime_env.env_vars.VERL_SKIP_VLLM_MM_WEIGHT_RELOAD="'${VERL_SKIP_VLLM_MM_WEIGHT_RELOAD}'" \
       "+ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROLLOUT_EXTRA_STOP='${VERL_ROLLOUT_EXTRA_STOP}'" \
+      "+ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROLLOUT_EXTRA_STOP_TOKEN_IDS='${VERL_ROLLOUT_EXTRA_STOP_TOKEN_IDS}'" \
       actor_rollout_ref.model.use_remove_padding=False \
       +actor_rollout_ref.model.override_config.attn_implementation=sdpa \
       ++actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes="${UPDATE_WEIGHTS_BUCKET_MB:-8192}" \
@@ -485,8 +596,8 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       ++actor_rollout_ref.actor.fsdp_config.entropy_checkpointing=True \
       ++actor_rollout_ref.actor.fsdp_config.offload_policy="${FSDP_CPU_OFFLOAD_POLICY}" \
       ++actor_rollout_ref.actor.fsdp_config.max_padded_tokens_per_microbatch="${MAX_PADDED_TOKENS_PER_MICROBATCH}" \
-      ++actor_rollout_ref.actor.fsdp_config.infer_max_padded_tokens_per_microbatch="${MAX_PADDED_TOKENS_PER_MICROBATCH}" \
-      ++actor_rollout_ref.ref.fsdp_config.infer_max_padded_tokens_per_microbatch="${MAX_PADDED_TOKENS_PER_MICROBATCH}" \
+      ++actor_rollout_ref.actor.fsdp_config.infer_max_padded_tokens_per_microbatch="${INFER_MAX_PADDED_TOKENS_PER_MICROBATCH}" \
+      ++actor_rollout_ref.ref.fsdp_config.infer_max_padded_tokens_per_microbatch="${INFER_MAX_PADDED_TOKENS_PER_MICROBATCH}" \
       actor_rollout_ref.actor.router_replay.mode="${ROUTER_REPLAY_MODE}" \
       actor_rollout_ref.actor.fsdp_config.router_replay.mode="${ROUTER_REPLAY_MODE}" \
       actor_rollout_ref.rollout.enable_rollout_routing_replay="${ENABLE_ROLLOUT_ROUTING_REPLAY}" \
@@ -501,14 +612,14 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       actor_rollout_ref.ref.log_prob_use_dynamic_bsz=False \
       actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=False \
       actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu="${MICRO_BATCH_SIZE_PER_GPU}" \
-      actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu="${MICRO_BATCH_SIZE_PER_GPU}" \
-      actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu="${MICRO_BATCH_SIZE_PER_GPU}" \
+      actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu="${INFER_MICRO_BATCH_SIZE_PER_GPU}" \
+      actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu="${INFER_MICRO_BATCH_SIZE_PER_GPU}" \
       `# vLLM sleep mode. VLLM_SLEEP_MODE=False (default): engine stays resident and weight-sync loads into` \
       `# the live engine -- chosen when cumem sleep/wake was fragile (wake_up OOM once Adam states lived on` \
       `# GPU; cumem invalid-argument on E4B). VLLM_SLEEP_MODE=True: level-1 sleep parks the bf16 weights in` \
       `# host RAM during the update, freeing ~52 GB/GPU for 26B-A4B; with OFFLOAD=True and no FSDP CPU` \
       `# offload policy that cut update_actor from 1625 s to 110 s (8xH100, 2026-09-03, see` \
-      `# RESUME_GEMMA4_26B_HARD_LOCAL.md).` \
+      `# docs/GEMMA4_RESULTS.md).` \
       actor_rollout_ref.rollout.free_cache_engine="${VLLM_SLEEP_MODE}" \
       ++actor_rollout_ref.rollout.enable_sleep_mode="${VLLM_SLEEP_MODE}" \
       ++trainer.early_stopping.enabled="${EARLY_STOPPING_ENABLED:-False}" \
@@ -516,6 +627,7 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       ++trainer.early_stopping.mode="${EARLY_STOPPING_MODE:-max}" \
       ++trainer.early_stopping.patience="${EARLY_STOPPING_PATIENCE:-5}" \
       ++trainer.early_stopping.min_delta="${EARLY_STOPPING_MIN_DELTA:-0.0}" \
+      ++trainer.early_stopping.miss_tolerance="${EARLY_STOPPING_MISS_TOLERANCE:-0.0}" \
       ++trainer.early_stopping.include_initial_validation="${EARLY_STOPPING_INCLUDE_INITIAL_VALIDATION:-True}" \
       `# Forward ordinary experiment overrides first. The rollout-correction settings below are` \
       `# deliberately last so every Gemma 4 run uses the same always-on token TIS contract.` \
@@ -523,7 +635,8 @@ DATA_DIR="${DATA_DIR}" CKPTS_DIR="${CKPTS_DIR}" \
       "$@" \
       actor_rollout_ref.rollout.calculate_log_probs=True \
       algorithm.rollout_correction.rollout_is=token \
-      algorithm.rollout_correction.rollout_is_threshold=2.0 \
+      `# ROLLOUT_IS_THRESHOLD: 2.0 = token TIS (clamp max 2); "0.5_2.0" = IcePop token mask (weights zeroed outside [0.5, 2])` \
+      algorithm.rollout_correction.rollout_is_threshold="${ROLLOUT_IS_THRESHOLD:-2.0}" \
       algorithm.rollout_correction.rollout_is_batch_normalize=False \
       algorithm.rollout_correction.rollout_rs=null \
       algorithm.rollout_correction.rollout_rs_threshold=null \

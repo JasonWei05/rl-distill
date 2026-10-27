@@ -33,6 +33,11 @@ from torch.distributed.fsdp.api import FullStateDictConfig, ShardedStateDictConf
 from torch.distributed.tensor import DTensor
 
 import verl.utils.torch_functional as verl_F
+from verl.models.transformers.qwen3_moe_router_replay import (
+    ROUTER_STATS,
+    patch_qwen3_moe_router_replay,
+    qwen3_moe_router_replay_installed,
+)
 from verl.models.transformers.gemma4_router_replay import (
     patch_gemma4_router_replay,
     routed_experts_to_model_input,
@@ -45,6 +50,7 @@ from verl.utils.activation_offload import enable_activation_offloading
 from verl.utils.checkpoint.fsdp_checkpoint_manager import FSDPCheckpointManager
 from verl.utils.dataset.dataset_utils import DatasetPadMode
 from verl.utils.debug import log_gpu_memory_usage
+from verl.utils.metric import AggregationType, Metric
 from verl.utils.device import get_device_id, get_device_name
 from verl.utils.fsdp_utils import (
     CPUOffloadPolicy,
@@ -303,37 +309,13 @@ def _patch_gemma3_skip_lm_head():
 _patch_gemma3_skip_lm_head()
 
 
-def _patch_gemma4_skip_lm_head():
-    """Allow Gemma 4 to return selected hidden states without projecting the LM head.
+def _install_skip_lm_head(targets):
+    """Patch ``(causal_lm_cls, output_cls)`` pairs to return selected hidden states when ``skip_lm_head=True``.
 
-    The off-policy distillation path projects response-token hidden states through the
-    vocabulary head in small chunks. Gemma 4's native ``logits_to_keep`` still applies
-    the complete LM head in one call, which defeats that memory bound for long traces.
-    Both Gemma 4 causal-LM classes are patched: ``Gemma4ForConditionalGeneration`` (E2B/E4B/26B-A4B)
-    and ``Gemma4UnifiedForConditionalGeneration`` (12B); they share the forward structure
-    (``self.model(...)`` -> ``last_hidden_state`` -> ``lm_head`` -> softcap).
+    Each class must follow ``self.model(...)`` -> ``last_hidden_state`` -> ``lm_head``; the output's ``logits`` field
+    then carries the selected hidden states and the distillation loss applies the LM head (and any softcap) in chunks.
     """
     from dataclasses import fields
-
-    targets = []
-    try:
-        from transformers.models.gemma4.modeling_gemma4 import (
-            Gemma4CausalLMOutputWithPast,
-            Gemma4ForConditionalGeneration,
-        )
-
-        targets.append((Gemma4ForConditionalGeneration, Gemma4CausalLMOutputWithPast))
-    except Exception:
-        pass
-    try:
-        from transformers.models.gemma4_unified.modeling_gemma4_unified import (
-            Gemma4UnifiedCausalLMOutputWithPast,
-            Gemma4UnifiedForConditionalGeneration,
-        )
-
-        targets.append((Gemma4UnifiedForConditionalGeneration, Gemma4UnifiedCausalLMOutputWithPast))
-    except Exception:
-        pass
 
     for model_cls, output_cls in targets:
         if getattr(model_cls, "_verl_skip_lm_head_patched", False):
@@ -350,7 +332,7 @@ def _patch_gemma4_skip_lm_head():
                 logits_to_keep_batch_indices = kwargs.pop("logits_to_keep_batch_indices", None)
                 return_dict = kwargs.pop("return_dict", True)
                 if return_dict is False:
-                    raise ValueError("Gemma 4 skip_lm_head requires return_dict=True")
+                    raise ValueError(f"{type(self).__name__} skip_lm_head requires return_dict=True")
 
                 outputs = self.model(*args, return_dict=True, **kwargs)
                 hidden_states = outputs.last_hidden_state
@@ -376,8 +358,66 @@ def _patch_gemma4_skip_lm_head():
         model_cls._verl_skip_lm_head_patched = True
 
 
+def _patch_gemma4_skip_lm_head():
+    """Allow Gemma 4 to return selected hidden states without projecting the LM head.
+
+    The off-policy distillation path projects response-token hidden states through the
+    vocabulary head in small chunks. Gemma 4's native ``logits_to_keep`` still applies
+    the complete LM head in one call, which defeats that memory bound for long traces.
+    Both Gemma 4 causal-LM classes are patched: ``Gemma4ForConditionalGeneration`` (E2B/E4B/26B-A4B)
+    and ``Gemma4UnifiedForConditionalGeneration`` (12B); they share the forward structure
+    (``self.model(...)`` -> ``last_hidden_state`` -> ``lm_head`` -> softcap).
+    """
+    targets = []
+    try:
+        from transformers.models.gemma4.modeling_gemma4 import (
+            Gemma4CausalLMOutputWithPast,
+            Gemma4ForConditionalGeneration,
+        )
+
+        targets.append((Gemma4ForConditionalGeneration, Gemma4CausalLMOutputWithPast))
+    except Exception:
+        pass
+    try:
+        from transformers.models.gemma4_unified.modeling_gemma4_unified import (
+            Gemma4UnifiedCausalLMOutputWithPast,
+            Gemma4UnifiedForConditionalGeneration,
+        )
+
+        targets.append((Gemma4UnifiedForConditionalGeneration, Gemma4UnifiedCausalLMOutputWithPast))
+    except Exception:
+        pass
+    _install_skip_lm_head(targets)
+
+
+def _patch_qwen3_skip_lm_head():
+    """The same chunked-LM-head contract for Qwen3 dense and Qwen3-MoE students (Qwen3-4B -> 30B-A3B distillation).
+
+    The MoE output's ``aux_loss`` is left None: the HF forward adds the load-balancing loss only with
+    ``output_router_logits=True`` (off in the Qwen3-30B-A3B config), so the distillation objective is unchanged.
+    """
+    targets = []
+    try:
+        from transformers.modeling_outputs import CausalLMOutputWithPast
+        from transformers.models.qwen3.modeling_qwen3 import Qwen3ForCausalLM
+
+        targets.append((Qwen3ForCausalLM, CausalLMOutputWithPast))
+    except Exception:
+        pass
+    try:
+        from transformers.modeling_outputs import MoeCausalLMOutputWithPast
+        from transformers.models.qwen3_moe.modeling_qwen3_moe import Qwen3MoeForCausalLM
+
+        targets.append((Qwen3MoeForCausalLM, MoeCausalLMOutputWithPast))
+    except Exception:
+        pass
+    _install_skip_lm_head(targets)
+
+
 _patch_gemma4_skip_lm_head()
+_patch_qwen3_skip_lm_head()
 patch_gemma4_router_replay()
+patch_qwen3_moe_router_replay()
 
 
 class FSDPEngine(BaseEngine):
@@ -1363,11 +1403,13 @@ class FSDPEngineWithLMHead(FSDPEngine):
                     "in the batch"
                 )
             text_config = getattr(module_config, "text_config", module_config)
-            if getattr(text_config, "model_type", None) != "gemma4_text":
-                raise NotImplementedError("FSDP2 R3 is currently implemented only for Hugging Face Gemma 4")
+            if getattr(text_config, "model_type", None) not in ("gemma4_text", "qwen3_moe"):
+                raise NotImplementedError("FSDP2 R3 is currently implemented only for Hugging Face Gemma 4 and Qwen3-MoE")
+            if text_config.model_type == "qwen3_moe" and not qwen3_moe_router_replay_installed():
+                raise NotImplementedError("Qwen3-MoE FSDP2 R3 needs the transformers 5 router (Qwen3MoeTopKRouter)")
             if self.use_ulysses_sp:
                 raise NotImplementedError(
-                    "Gemma 4 FSDP2 R3 with Ulysses sequence parallelism is not yet supported; use actor DP only"
+                    "FSDP2 R3 with Ulysses sequence parallelism is not yet supported; use actor DP only"
                 )
 
         if not isinstance(temperature, torch.Tensor):
@@ -1884,10 +1926,16 @@ class FSDPEngineWithLMHead(FSDPEngine):
                 return loss, output
 
         with torch.autocast(device_type=device_name, dtype=torch.bfloat16):
-            raw_output = self.module(
-                **model_inputs,
-                use_cache=False,
-            )  # prevent model thinks we are generating
+            # MoE router statistics (Qwen3-MoE router patch) for the actor-update forwards only; padding is masked out.
+            if not forward_only:
+                ROUTER_STATS.start(model_inputs.get("attention_mask"))
+            try:
+                raw_output = self.module(
+                    **model_inputs,
+                    use_cache=False,
+                )  # prevent model thinks we are generating
+            finally:
+                router_metrics = ROUTER_STATS.stop() if not forward_only else {}
 
             model_output = self.prepare_model_outputs(
                 output=raw_output, output_args=output_args, micro_batch=micro_batch, logits_processor_func=loss_function
@@ -1901,6 +1949,8 @@ class FSDPEngineWithLMHead(FSDPEngine):
                 assert forward_only, "forward_only must be True when loss_function is None"
                 loss = torch.tensor(1.0, device=device_name)
                 metrics = {}
+            for key, value in router_metrics.items():
+                metrics[key] = Metric(value=value, aggregation=AggregationType.MAX if key.endswith("worst_layer") else "mean")
 
             # rl-distill fork: detach the returned tensors. The caller accumulates these metas
             # across micro-batches; a graph-attached tensor here (e.g. entropy, which the loss

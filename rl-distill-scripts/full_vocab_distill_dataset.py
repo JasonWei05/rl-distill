@@ -451,7 +451,9 @@ class FullVocabDistillDataset(Dataset):
             ):
                 raise ValueError(f"teacher top-k probability mass exceeds 1 at row {item}")
             if teacher_ids_array.size:
-                vocab_size = int(self.tokenizer.vocab_size)
+                # len() counts added special tokens: Qwen3's vocab_size (151,643) excludes <|endoftext|>/<|im_end|>/...,
+                # which a teacher legitimately ranks in its top-k (the traces are restricted to ids < len(tokenizer)).
+                vocab_size = len(self.tokenizer)
                 if teacher_ids_array.min() < 0 or teacher_ids_array.max() >= vocab_size:
                     raise ValueError(f"teacher top-k token id outside [0, {vocab_size}) at row {item}")
                 sorted_ids = np.sort(teacher_ids_array, axis=1)

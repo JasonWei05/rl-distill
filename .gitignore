@@ -142,8 +142,7 @@ rl-distill-scripts/wandb/
 rl-distill-scripts/data/random_entry_samples/
 dapo/wandb/
 eval_results/
-# Ignore dev-time checkouts at the repo root only; the intentional vendored
-# copy under third_party/Megatron-Bridge is tracked.
+# Ignore dev-time checkouts at the repo root (Megatron is no longer used by this fork).
 /Megatron-Bridge/
 /Megatron-LM/
 modelchef/
@@ -151,7 +150,6 @@ nohup.out
 
 # rl-distill local analysis artifacts (wandb table exports, investigation dumps, pod logs)
 artifacts/
-# generated figures (make_plots.py regenerates them from wandb)
 plots/*.png
 
 # rl-distill: local runtime state and artifacts (not code; may contain raw job output)

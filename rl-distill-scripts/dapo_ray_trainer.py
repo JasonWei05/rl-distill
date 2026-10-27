@@ -23,6 +23,7 @@ import random
 import traceback
 import uuid
 from collections import defaultdict
+from concurrent.futures import Future, ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
 from pprint import pprint
@@ -125,8 +126,41 @@ class RayDAPOTrainer(RayPPOTrainer):
         frequency = self._rolling_checkpoint_frequency()
         return frequency > 0 and self.global_steps % frequency == 0
 
-    def _save_checkpoint(self, *, permanent: bool = True):
+    def _rollout_sleep_mode(self) -> bool:
+        # The engines sleep iff free_cache_engine (vllm_async_server gates sleep() on it); enable_sleep_mode is not part of the
+        # composed trainer config, so gating on it made the pre-save park a silent no-op for launchers that do not set it.
+        return bool(self.config.actor_rollout_ref.rollout.get("free_cache_engine", False))   # composed configs always set it (yaml default True)
+
+    @staticmethod
+    def _async_checkpoint_upload() -> bool:
+        enabled = os.environ.get("ASYNC_CHECKPOINT_UPLOAD", "False").strip().lower()
+        if enabled in {"", "0", "false", "no", "off"}:
+            return False
+        if enabled not in {"1", "true", "yes", "on"}:
+            raise ValueError(f"invalid ASYNC_CHECKPOINT_UPLOAD value: {enabled!r}")
+        return True
+
+    def _wait_for_checkpoint_upload(self) -> None:
+        """Join the in-flight background S3 upload (if any); re-raises its failure."""
+        future = getattr(self, "_pending_checkpoint_upload", None)
+        if future is None:
+            return
+        self._pending_checkpoint_upload = None
+        future.result()
+
+    def _save_checkpoint(self, *, permanent: bool = True, replicas_asleep: bool = False, sync_upload: bool = False):
         """Save locally, then publish a permanent or rolling resumable checkpoint."""
+        # Every save runs with the vLLM engines awake (weight sync after the update, validation). With sleep mode they
+        # hold weights + KV beside the trainer while the save onloads the model and gathers the HF export: Qwen3-30B-A3B
+        # OOMed at its first permanent save (vLLM 63.75 of 79 GiB on GPU 0). Park them first; a caller that keeps
+        # training afterwards must call checkpoint_manager.update_weights() (wake + resync, as after an actor update).
+        # The previous step's background upload must commit before this save can rotate local checkpoints
+        # (MAX_ACTOR_CKPT_TO_KEEP) or publish a newer step; a failed upload stops the run here.
+        self._wait_for_checkpoint_upload()
+        # replicas_asleep: the caller knows the engines are already parked (e.g. finalizing a restored early stop right after
+        # init_workers); vLLM has no is-asleep guard, so a second sleep() would re-release freed allocations.
+        if self._rollout_sleep_mode() and not replicas_asleep:
+            self.checkpoint_manager.sleep_replicas()
         early_stopping = getattr(self, "_validation_early_stopping", None)
         if early_stopping is not None:
             checkpoint_dir = Path(self.config.trainer.default_local_dir) / f"global_step_{self.global_steps}"
@@ -147,12 +181,33 @@ class RayDAPOTrainer(RayPPOTrainer):
             return
         helper = self._full_checkpoint_helper()
         checkpoint_root = Path(self.config.trainer.default_local_dir)
-        if permanent:
-            helper.upload_checkpoint(checkpoint_root, self.global_steps, s3_uri)
-            if self._rolling_checkpoint_frequency() > 0:
-                helper.retire_rolling_checkpoint(s3_uri, self.global_steps)
-        else:
-            helper.upload_rolling_checkpoint(checkpoint_root, self.global_steps, s3_uri)
+        step = self.global_steps
+        rolling_enabled = self._rolling_checkpoint_frequency() > 0
+
+        def upload() -> None:
+            if permanent:
+                helper.upload_checkpoint(checkpoint_root, step, s3_uri)
+                if rolling_enabled:
+                    helper.retire_rolling_checkpoint(s3_uri, step)
+            else:
+                helper.upload_rolling_checkpoint(checkpoint_root, step, s3_uri)
+
+        if sync_upload or not self._async_checkpoint_upload():
+            upload()
+            return
+        # The local step directory is immutable once written, so the upload (~5 min for a 366 GB Qwen3-30B-A3B checkpoint)
+        # overlaps the following training steps. A preemption mid-upload loses nothing: the S3 commit marker is written
+        # last, so restore falls back to the previous complete checkpoint.
+        if getattr(self, "_checkpoint_upload_executor", None) is None:
+            self._checkpoint_upload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ckpt-s3-upload")
+        print(f"FULL_CHECKPOINT_ASYNC_UPLOAD_STARTED step={step} permanent={permanent}", flush=True)
+        future: Future = self._checkpoint_upload_executor.submit(upload)
+        future.add_done_callback(
+            lambda f: print(
+                f"FULL_CHECKPOINT_ASYNC_UPLOAD_{'FAILED' if f.exception() else 'DONE'} step={step}", flush=True
+            )
+        )
+        self._pending_checkpoint_upload = future
 
     def _resume_checkpoint_dir(self) -> Path:
         if self.global_steps <= 0:
@@ -172,6 +227,16 @@ class RayDAPOTrainer(RayPPOTrainer):
         value = int(raw_value)
         if value < 1:
             raise ValueError(f"EARLY_STOPPING_MIGRATE_PATIENCE_FROM must be a positive integer, got {raw_value!r}")
+        return value
+
+    @staticmethod
+    def _early_stopping_reset_patience_at_step() -> int | None:
+        raw_value = os.environ.get("EARLY_STOPPING_RESET_PATIENCE_AT_STEP", "").strip()
+        if not raw_value:
+            return None
+        value = int(raw_value)
+        if value < 1:
+            raise ValueError(f"EARLY_STOPPING_RESET_PATIENCE_AT_STEP must be a positive integer, got {raw_value!r}")
         return value
 
     def _restore_early_stopping_state(self, early_stopping: ValidationEarlyStopping | None) -> bool:
@@ -240,6 +305,7 @@ class RayDAPOTrainer(RayPPOTrainer):
                 mode=early_stopping.mode,
                 min_delta=early_stopping.min_delta,
                 include_initial_validation=early_stopping.include_initial_validation,
+                miss_tolerance=early_stopping.miss_tolerance,
             )
             source_step = historical.load_legacy_history(
                 encoded_payload=encoded_migration,
@@ -256,6 +322,17 @@ class RayDAPOTrainer(RayPPOTrainer):
                     f"misses={early_stopping.non_improving_rounds} path={state_path}",
                     flush=True,
                 )
+        # Extending a run that already early-stopped: clear the miss streak once, only when resuming from exactly the
+        # named checkpoint, so later preemption resumes keep counting misses normally.
+        if self._early_stopping_reset_patience_at_step() == self.global_steps:
+            early_stopping.reset_patience()
+            early_stopping.save(checkpoint_dir)
+            print(
+                "EARLY_STOPPING_PATIENCE_RESET "
+                f"checkpoint_step={self.global_steps} best={early_stopping.best_score} "
+                f"best_step={early_stopping.best_step} path={state_path}",
+                flush=True,
+            )
         if early_stopping.last_observed_step is not None and early_stopping.last_observed_step > self.global_steps:
             raise ValueError(
                 "early-stopping state is newer than the restored trainer checkpoint: "
@@ -281,7 +358,8 @@ class RayDAPOTrainer(RayPPOTrainer):
             f"misses={early_stopping.non_improving_rounds} metric={early_stopping.metric}",
             flush=True,
         )
-        self._save_checkpoint(permanent=True)
+        # init_workers parked the replicas and nothing has woken them yet on this path
+        self._save_checkpoint(permanent=True, replicas_asleep=True)
         self._write_run_outcome(early_stopping=early_stopping, stop_reason="early_stopping")
         return True
 
@@ -331,6 +409,9 @@ class RayDAPOTrainer(RayPPOTrainer):
         recover an older all-time-best HF export from the full-checkpoint S3
         prefix before writing the final outcome when necessary.
         """
+
+        # The terminal checkpoint must be on S3 before the outcome (and the completion receipt built from it) exists.
+        self._wait_for_checkpoint_upload()
 
         if early_stopping is None or early_stopping.best_step is None:
             best_step = int(self.global_steps)
@@ -700,6 +781,7 @@ class RayDAPOTrainer(RayPPOTrainer):
 
                 is_last_step = self.global_steps >= self.total_training_steps
                 permanent_checkpoint_requested = False
+                esi_close_to_expiration = False   # set by the actor-update block; stays False on critic-warmup steps
 
                 with marked_timer("step", timing_raw):
                     # generate a batch
@@ -963,7 +1045,11 @@ class RayDAPOTrainer(RayPPOTrainer):
                 rolling_checkpoint_requested = self._should_save_rolling_checkpoint()
                 if permanent_checkpoint_requested or rolling_checkpoint_requested:
                     with marked_timer("save_checkpoint", timing_raw, "green"):
-                        self._save_checkpoint(permanent=permanent_checkpoint_requested)
+                        # the pod is about to expire: upload synchronously so the commit marker lands before it dies
+                        self._save_checkpoint(permanent=permanent_checkpoint_requested, sync_upload=esi_close_to_expiration)
+                    if self._rollout_sleep_mode():  # _save_checkpoint parked the engines; wake + resync for next step
+                        with marked_timer("update_weights_after_save", timing_raw, "red"):
+                            self.checkpoint_manager.update_weights()
                     if permanent_checkpoint_requested:
                         self._maybe_push_to_hf(self.global_steps)
 

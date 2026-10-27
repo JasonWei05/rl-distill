@@ -676,7 +676,7 @@
     },
     {
       "tag": "distill_12bd_medium_to_e4b_step300",
-      "display_name": "Distilled E4B base <- RL'd distilled 12B medium teacher (\u00a79.0 step 190), off-policy \u00a79 recipe, step_000300 of 1000",
+      "display_name": "Distilled E4B base <- RL'd distilled 12B medium teacher (§9.0 step 190), off-policy §9 recipe, step_000300 of 1000",
       "category": "distilled",
       "architecture": "gemma-4-E4B",
       "trained_on": "medium",
@@ -698,7 +698,7 @@
     },
     {
       "tag": "distill_12bd_medium_to_e4b_step1000",
-      "display_name": "Distilled E4B base <- RL'd distilled 12B medium teacher (\u00a79.0 step 190), off-policy \u00a79 recipe, final step_001000",
+      "display_name": "Distilled E4B base <- RL'd distilled 12B medium teacher (§9.0 step 190), off-policy §9 recipe, final step_001000",
       "category": "distilled",
       "architecture": "gemma-4-E4B",
       "trained_on": "medium",
@@ -714,6 +714,380 @@
         "uri": "s3://scale-ml/genai/rl-distill/gemma4-12bd-distill-ckpts-v1/12bd-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/huggingface/",
         "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-12bd-distill-ckpts-v1/12bd-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/_REMOTE_COMPLETE.json",
         "expected_global_step": 1000,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_12bd_lr1e6_medium_to_e4b_step1000",
+      "display_name": "Distilled E4B base <- RL'd distilled 12B medium teacher (§9.0 step 190), §9 recipe at peak LR 1e-6 (§9.0j b), final step_001000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-12bd-distill-ckpts-v1/12bd-medium-to-e4b-bs128-s1000-lr1e-6/global_step_1000/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-12bd-distill-ckpts-v1/12bd-medium-to-e4b-bs128-s1000-lr1e-6/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_12br_medium_to_e4b_step1000",
+      "display_name": "Distilled E4B base <- resumed untrained-12B RL medium teacher (§9.0h step 140), 3000x16 traces, peak LR 1e-6 (§9.0j a), final step_001000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-12br-distill-ckpts-v1/12br-medium-to-e4b-bs128-s1000-lr1e-6/global_step_1000/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-12br-distill-ckpts-v1/12br-medium-to-e4b-bs128-s1000-lr1e-6/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_12br_lr2e6_medium_to_e4b_step1000",
+      "display_name": "Distilled E4B base <- resumed untrained-12B RL medium teacher (§9.0h step 140), 3000x16 traces, peak LR 2e-6 (§9.0j c), final step_001000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-12br-distill-ckpts-v1/12br-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-12br-distill-ckpts-v1/12br-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_12bo_lr2e6_medium_to_e4b_step1000",
+      "display_name": "Distilled E4B base <- RL-on-tail-bucket-on-policy 12B medium teacher (§9.0i step 100, val 0.444), 3000x16 traces, peak LR 2e-6 (§9.0k), final step_001000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-12bo-distill-ckpts-v1/12bo-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-12bo-distill-ckpts-v1/12bo-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_26bw_lr2e6_medium_to_e4b_step1000",
+      "display_name": "Distilled E4B base <- warm-started untrained-26B-A4B RL (§9.0n, stopped at 5 h) teacher, 3000x16 traces, peak LR 2e-6 (§9.0o), final step_001000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-26bw-distill-ckpts-v1/26bw-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-26bw-distill-ckpts-v1/26bw-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_26bw_lr2e6_medium_to_e4b_step1000_n8",
+      "display_name": "Distilled E4B base <- warm-started untrained-26B-A4B RL (§9.0n, stopped at 5 h) teacher, 3000x16 traces, peak LR 2e-6 (§9.0o), 8-GPU copy (-n8 prefix), final step_001000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-26bw-distill-ckpts-v1/26bw-medium-to-e4b-bs128-s1000-lr2e-6-n8/global_step_1000/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-26bw-distill-ckpts-v1/26bw-medium-to-e4b-bs128-s1000-lr2e-6-n8/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_26bd_lr2e6_medium_to_e4b_step1000",
+      "display_name": "Distilled E4B base <- RL on the E4B-base-distilled 26B-A4B (§9.0m, stopped at 5 h) teacher, 3000x16 traces, peak LR 2e-6 (§9.0o), final step_001000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-26bd-distill-ckpts-v1/26bd-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-26bd-distill-ckpts-v1/26bd-medium-to-e4b-bs128-s1000-lr2e-6/global_step_1000/_REMOTE_COMPLETE.json",
+        "expected_global_step": 1000,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_26bw_lr2e6_medium_to_e4b_step750",
+      "display_name": "Distilled E4B base <- warm-started untrained-26B-A4B RL (§9.0n, best 0.694 @orig-170) teacher, 3000x16 traces, peak LR 2e-6 (§9.0o), step_000750 of 1000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-26bw-distill-ckpts-v1/26bw-medium-to-e4b-bs128-s1000-lr2e-6-n8/global_step_750/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-26bw-distill-ckpts-v1/26bw-medium-to-e4b-bs128-s1000-lr2e-6-n8/global_step_750/_REMOTE_COMPLETE.json",
+        "expected_global_step": 750,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_26bw_lr2e6_medium_to_e4b_step500",
+      "display_name": "Distilled E4B base <- warm-started untrained-26B-A4B RL (§9.0n, best 0.694 @orig-170) teacher, 3000x16 traces, peak LR 2e-6 (§9.0o), step_000500 of 1000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-26bw-distill-ckpts-v1/26bw-medium-to-e4b-bs128-s1000-lr2e-6-n8/global_step_500/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-26bw-distill-ckpts-v1/26bw-medium-to-e4b-bs128-s1000-lr2e-6-n8/global_step_500/_REMOTE_COMPLETE.json",
+        "expected_global_step": 500,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_26bw_lr2e6_medium_to_e4b_step700",
+      "display_name": "Distilled E4B base <- warm-started untrained-26B-A4B RL (§9.0n, best 0.694 @orig-170) teacher, 3000x16 traces, peak LR 2e-6 (§9.0o), step_000700 of 1000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-26bw-distill-ckpts-v1/26bw-medium-to-e4b-bs128-s1000-lr2e-6-n8/hf_exports/global_step_700/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-26bw-distill-ckpts-v1/26bw-medium-to-e4b-bs128-s1000-lr2e-6-n8/hf_exports/global_step_700/_REMOTE_COMPLETE.json",
+        "expected_global_step": 700,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_26bd_lr2e6_medium_to_e4b_step750",
+      "display_name": "Distilled E4B base <- RL on the E4B-base-distilled 26B-A4B (§9.0m, best 0.638 @250) teacher, 3000x16 traces, peak LR 2e-6 (§9.0o), step_000750 of 1000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-26bd-distill-ckpts-v1/26bd-medium-to-e4b-bs128-s1000-lr2e-6/global_step_750/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-26bd-distill-ckpts-v1/26bd-medium-to-e4b-bs128-s1000-lr2e-6/global_step_750/_REMOTE_COMPLETE.json",
+        "expected_global_step": 750,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "distill_26bd_lr2e6_medium_to_e4b_step500",
+      "display_name": "Distilled E4B base <- RL on the E4B-base-distilled 26B-A4B (§9.0m, best 0.638 @250) teacher, 3000x16 traces, peak LR 2e-6 (§9.0o), step_000500 of 1000",
+      "category": "distilled",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-26bd-distill-ckpts-v1/26bd-medium-to-e4b-bs128-s1000-lr2e-6/global_step_500/huggingface/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-26bd-distill-ckpts-v1/26bd-medium-to-e4b-bs128-s1000-lr2e-6/global_step_500/_REMOTE_COMPLETE.json",
+        "expected_global_step": 500,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "rl_e4b_medium_s43",
+      "display_name": "E4B RL medium seed 43 best (step 120, val 0.3175)",
+      "category": "rl",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-difficulty-s43-20260910/gemma4-e4b-medium/best_hf/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-difficulty-s43-20260910/gemma4-e4b-medium/best_hf/_REMOTE_COMPLETE.json",
+        "expected_global_step": 120,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "rl_e4b_medium_bs256_s45",
+      "display_name": "E4B RL medium 4x batch (256x16, mini 128) seed 45 best (step 100, val 0.378)",
+      "category": "rl",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-e4b-bs256-s45-20260919/gemma4-e4b-medium/best_hf/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-e4b-bs256-s45-20260919/gemma4-e4b-medium/best_hf/_REMOTE_COMPLETE.json",
+        "expected_global_step": 100,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "rl_e4b_medium_bs256_s46",
+      "display_name": "E4B RL medium 4x batch (256x16, mini 128) seed 46 best (step 100, val 0.404)",
+      "category": "rl",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-e4b-bs256-s46-20260919/gemma4-e4b-medium/best_hf/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-e4b-bs256-s46-20260919/gemma4-e4b-medium/best_hf/_REMOTE_COMPLETE.json",
+        "expected_global_step": 100,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "rl_e4b_medium_bs256_s47",
+      "display_name": "E4B RL medium 4x batch (256x16, mini 128) seed 47 best (step 130, val 0.404)",
+      "category": "rl",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-e4b-bs256-s47-20260919/gemma4-e4b-medium/best_hf/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-e4b-bs256-s47-20260919/gemma4-e4b-medium/best_hf/_REMOTE_COMPLETE.json",
+        "expected_global_step": 130,
+        "base_repo": "google/gemma-4-E4B",
+        "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
+      }
+    },
+    {
+      "tag": "rl_e4b_medium_s44",
+      "display_name": "E4B RL medium seed 44 best (step 160, val 0.3404)",
+      "category": "rl",
+      "architecture": "gemma-4-E4B",
+      "trained_on": "medium",
+      "math_datasets": [
+        "id_easy",
+        "id_medium",
+        "id_hard",
+        "math500",
+        "gsm8k"
+      ],
+      "source": {
+        "type": "s3_hf_export",
+        "uri": "s3://scale-ml/genai/rl-distill/gemma4-difficulty-s44-20260910/gemma4-e4b-medium/best_hf/",
+        "completion_uri": "s3://scale-ml/genai/rl-distill/gemma4-difficulty-s44-20260910/gemma4-e4b-medium/best_hf/_REMOTE_COMPLETE.json",
+        "expected_global_step": 160,
         "base_repo": "google/gemma-4-E4B",
         "base_revision": "411aa17b749aa952df1359d2dcea73917a544d9a"
       }

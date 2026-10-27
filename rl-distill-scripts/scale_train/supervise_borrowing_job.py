@@ -234,8 +234,12 @@ def _durable_completion_status(
     expected_step: int | None,
     max_step: int | None,
     expected_world_size: int | None,
+    marker_uris: list[str] = (),
 ) -> tuple[bool, str]:
     checks: list[tuple[bool, str]] = []
+    for uri in marker_uris:
+        present = _read_s3_json_object(uri) is not None
+        checks.append((present, f"{uri}:{'present' if present else 'missing'}"))
     if receipt_uris:
         assert expected_world_size is not None
         checks.append(
@@ -553,6 +557,13 @@ def main() -> None:
         help="Logical-run artifact root whose durable best-HF marker is required; repeat per run.",
     )
     parser.add_argument(
+        "--completion-marker-s3-uri",
+        action="append",
+        default=[],
+        help="Exact S3 object (JSON) whose existence marks the job done, for non-RL pipelines; repeat for several. A "
+        "COMPLETED status without it is treated as a misreported preemption and relaunched.",
+    )
+    parser.add_argument(
         "--pod-log-dir",
         type=Path,
         help="Persist a live kubectl log stream for each attempted pod in this directory.",
@@ -574,6 +585,20 @@ def main() -> None:
         default=300,
         help="A job CANCELED within this many seconds of submission counts as a quick cancel (platform rejecting "
         "submissions, mass cancellation); consecutive quick cancels back off and eventually stop the supervisor.",
+    )
+    parser.add_argument(
+        "--quick-completion-seconds",
+        type=int,
+        default=1800,
+        help="A job that reports COMPLETED without durable completion within this many seconds of first running counts "
+        "as a quick missing completion (the run-file finishes but never writes the receipt / best_hf marker).",
+    )
+    parser.add_argument(
+        "--max-quick-missing-completions",
+        type=int,
+        default=3,
+        help="Stop relaunching after this many consecutive quick missing completions instead of relaunching the same "
+        "no-op resume until the relaunch budget runs out.",
     )
     parser.add_argument(
         "--max-quick-cancels",
@@ -604,6 +629,13 @@ def main() -> None:
         default=120,
         help="Wait this long times the number of consecutive failures (capped at 10x) before relaunching after FAILED/ERROR.",
     )
+    parser.add_argument(
+        "--max-failure-backoff-seconds",
+        type=int,
+        default=0,
+        help="Cap on the growing FAILED/ERROR backoff (0 = no cap). Equal to --failure-backoff-seconds gives a fixed retry "
+        "interval, e.g. 3600 + 3600 = retry hourly while pods keep landing on a broken node (2026-10-08).",
+    )
     parser.add_argument("launch_command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = list(args.launch_command)
@@ -627,17 +659,19 @@ def main() -> None:
     attempt = 0
     consecutive_failures = 0
     consecutive_quick_cancels = 0
+    consecutive_quick_missing_completions = 0
     initial_job_id = args.initial_job_id
     image_uri = _command_image(command)
     while not args.stop_file.exists():
         if attempt - 1 >= args.max_relaunches and initial_job_id is None:
             _log(args.monitor_log, f"name={args.name} relaunch budget exhausted (max_relaunches={args.max_relaunches}); supervisor stopping")
             return
-        completion_configured = bool(args.completion_s3_uri or args.completion_best_hf_s3_uri)
+        completion_configured = bool(args.completion_s3_uri or args.completion_best_hf_s3_uri or args.completion_marker_s3_uri)
         if completion_configured:
             complete, detail = _durable_completion_status(
                 receipt_uris=args.completion_s3_uri,
                 best_hf_uris=args.completion_best_hf_s3_uri,
+                marker_uris=args.completion_marker_s3_uri,
                 expected_step=args.expected_completion_step,
                 max_step=args.max_completion_step,
                 expected_world_size=args.expected_completion_world_size,
@@ -671,6 +705,7 @@ def main() -> None:
         _write_state(args.state_file, state)
         _log(args.monitor_log, f"name={args.name} attempt={attempt} job_id={job_id} submitted")
         submitted_monotonic = time.monotonic()
+        running_monotonic: float | None = None
 
         last_status = None
         missing_status_polls = 0
@@ -696,6 +731,7 @@ def main() -> None:
                 complete, completion_detail = _durable_completion_status(
                     receipt_uris=args.completion_s3_uri,
                     best_hf_uris=args.completion_best_hf_s3_uri,
+                    marker_uris=args.completion_marker_s3_uri,
                     expected_step=args.expected_completion_step,
                     max_step=args.max_completion_step,
                     expected_world_size=args.expected_completion_world_size,
@@ -721,6 +757,8 @@ def main() -> None:
                 time.sleep(args.poll_seconds)
                 continue
             missing_status_polls = 0
+            if status == "IN_PROGRESS" and running_monotonic is None:
+                running_monotonic = time.monotonic()
             if status != last_status:
                 if status == "IN_PROGRESS" and last_status is not None:
                     consecutive_failures = 0
@@ -749,6 +787,21 @@ def main() -> None:
                         _write_state(args.state_file, state)
                         time.sleep(args.poll_seconds)
                         continue
+                    ran = 0.0 if running_monotonic is None else time.monotonic() - running_monotonic
+                    quick = ran < args.quick_completion_seconds
+                    consecutive_quick_missing_completions = consecutive_quick_missing_completions + 1 if quick else 0
+                    if consecutive_quick_missing_completions >= args.max_quick_missing_completions:
+                        _log(
+                            args.monitor_log,
+                            f"name={args.name} job_id={job_id} terminal=COMPLETED after {ran:.0f}s running but durable "
+                            f"completion is incomplete: {completion_detail}; {consecutive_quick_missing_completions} "
+                            f"consecutive quick missing completions (< {args.quick_completion_seconds}s) -- the run "
+                            "finishes without writing its completion marker; supervisor stopping for diagnosis",
+                        )
+                        state.update(status="STOPPED_MISSING_COMPLETION", updated_at=_utc_now())
+                        _write_state(args.state_file, state)
+                        _stop_pod_log_capture(pod_log_capture)
+                        return
                     _log(
                         args.monitor_log,
                         f"name={args.name} job_id={job_id} terminal=COMPLETED but durable "
@@ -805,6 +858,8 @@ def main() -> None:
                 if args.relaunch_on_failure:
                     consecutive_failures += 1
                     backoff = args.failure_backoff_seconds * min(consecutive_failures, 10)
+                    if args.max_failure_backoff_seconds > 0:
+                        backoff = min(backoff, args.max_failure_backoff_seconds)
                     _log(
                         args.monitor_log,
                         f"name={args.name} job_id={job_id} terminal={status}; consecutive_failures={consecutive_failures}; "

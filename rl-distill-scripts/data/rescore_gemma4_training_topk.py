@@ -19,7 +19,7 @@ The source vLLM trace bundle is immutable. This writes a separate one-to-one,
 order-preserving target overlay whose rows are cryptographically bound to the
 validated source dataset, shards, and trace-ID sets.
 
-Operator instructions: ``GEMMA4_TRAINING_TOPK_RESCORER.md``. GPU execution
+Legacy (July HF-overlay era); the operator notes are in git history. GPU execution
 requires separate, explicit approval.
 """
 

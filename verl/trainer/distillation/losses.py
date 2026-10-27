@@ -243,6 +243,13 @@ def distillation_ppo_loss(
 
     # Called as final policy loss
     distillation_loss_config = distillation_config.distillation_loss
+    # rl-distill fork: the distillation PG loss normalises with config.global_batch_info, which ppo_loss() only refreshes
+    # from the micro-batch afterwards -- set it first (otherwise the first micro-batch of a run is normalised by its own
+    # token count with dp_size 1, and the first micro-batch of every later step by the previous step's token count).
+    config.global_batch_info["dp_size"] = data["dp_size"]
+    config.global_batch_info["batch_num_tokens"] = data["batch_num_tokens"]
+    config.global_batch_info["global_batch_size"] = data["global_batch_size"]
+    config.global_batch_info["loss_scale_factor"] = config.loss_scale_factor
     distill_loss, distill_metrics = distillation_loss(config, distillation_config, model_output, data)
     policy_loss, policy_metrics = ppo_loss(config, model_output, data, dp_group)
     if not distillation_loss_config.use_task_rewards:

@@ -603,14 +603,23 @@ class vLLMHttpServer:
         # exactly 0 (observed: step-0 val 0.0 across 3200 samples on run z63vu5yf). Stop-string
         # matching requires vLLM-side detokenization, so re-enable it when stops are set (safe here:
         # stopped rollouts are short, avoiding the long-rollout detokenizer failures noted above).
+        # Literal "\n" in an entry is a newline, so plain-text turn starts such as "\nHuman:" (Qwen3 base) fit in an env var.
         _extra_stop = os.environ.get("VERL_ROLLOUT_EXTRA_STOP")
         if _extra_stop:
-            _stops = [s for s in _extra_stop.split(",") if s]
+            _stops = [s.replace("\\n", "\n") for s in _extra_stop.split(",") if s]
             _prev_stop = sampling_params.get("stop")
             if isinstance(_prev_stop, str):  # vLLM accepts str | list[str]; don't splinter a str
                 _prev_stop = [_prev_stop]
             sampling_params["stop"] = list(_prev_stop or []) + _stops
             sampling_params["detokenize"] = True
+        # rl-distill fork: extra stop *token ids* via env (comma-separated). Special tokens never match a stop string
+        # (they are skipped in the detokenized text), so e.g. Qwen3 base, whose only eos is <|endoftext|>, needs
+        # <|im_end|>/<|im_start|> here to end at the turn boundary like the eval sampler. The stop token is kept in
+        # the response ids (and so in the loss mask), as for eos.
+        _extra_stop_ids = os.environ.get("VERL_ROLLOUT_EXTRA_STOP_TOKEN_IDS")
+        if _extra_stop_ids:
+            _ids = [int(t) for t in _extra_stop_ids.split(",") if t.strip()]
+            sampling_params["stop_token_ids"] = list(sampling_params.get("stop_token_ids") or []) + _ids
         sampling_params = SamplingParams(max_tokens=max_tokens, **sampling_params)
         prompt_ids = qwen2_5_vl_dedup_image_tokens(prompt_ids, self.model_config.processor)
         multi_modal_data = {}
