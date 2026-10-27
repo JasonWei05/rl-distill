@@ -9,6 +9,6 @@ ENV_VARS="TEACHER_SPEC=${TEACHER_SPEC},STUDENT=${STUDENT},STAGES=${STAGES}"
 [ -n "${EXTRA_ENV_VARS:-}" ] && ENV_VARS+=",${EXTRA_ENV_VARS}"
 echo "LAUNCH_ENV ${ENV_VARS}"
 BORROW_FLAG=""; [ "${ALLOW_BORROWING:-false}" = true ] && BORROW_FLAG="--allow-borrowing"
-case "${STAGES}" in 1) tag=trace ;; 2) tag=dist-${STUDENT} ;; *) tag=s${STAGES// /} ;; esac
+case "${STAGES}" in 1) tag=trace ;; 2) tag=dist-${STUDENT} ;; 3) tag=eval-${STUDENT} ;; *) tag=s${STAGES// /} ;; esac
 exec bash ../launch_st_with_code.sh --gpus-per-instance "${GPUS:-4}" --priority high ${BORROW_FLAG} --active-deadline-hours 120 \
   --run-file gemma4/run_gemma4_base_all_distill_st.sh --job-name "${JOB_NAME:-g4-${TEACHER_SPEC}-${tag}}" --env-vars "${ENV_VARS}" "$@"
