@@ -107,7 +107,7 @@ if [[ " ${STAGES} " == *" 3 "* ]]; then
   EVAL_S3="${EVAL_S3:-s3://scale-ml/genai/rl-distill/${FAMILY}-distill-evals-v1/${CKPT_ROOT##*/}}"
   DATA_ROOT=/tmp/g4base_val32/data
   python rl-distill-scripts/data/prepare_gemma4_rl_distill_eval_data.py --output-dir "${DATA_ROOT}" --overwrite \
-    --samples-override "id_easy=32,id_medium=32,id_hard=32" --protocol gemma4_rl_distill_math_eval_v2_x32_allbands
+    --samples-override "id_easy=32,id_medium=32,id_hard=32" --protocol gemma4_rl_distill_math_eval_v2_x32
   test -s "${DATA_ROOT}/math_eval_manifest.json"
   models=(--model e4b_base=base:e4b --model g12b_base=base:12b)
   for s in ${EVAL_STEPS:-250 500 750 1000}; do
