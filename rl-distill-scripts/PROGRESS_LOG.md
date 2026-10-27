@@ -193,6 +193,17 @@ final OPD stage.
   is ~59 GiB/GPU, so rollout would need phase offload + TP>=2 with a small KV cache and the update would run near the 80 GiB limit;
   8 GPUs costs about the same GPU-hours per step (~2x the GPUs at ~half the step time) with proven memory headroom. Medium on
   borrowing false (rl-q3-14b-rl-med), easy + hard on borrowing true (rl-q3-14b-rl-{easy,hard}); MAX_RELAUNCHES 200, 1-h failure backoff.
+- 2026-10-27: **Gemma 4 E4B' pre-distillation LAUNCHED** (user): removes the RL confound in the medium E4B / 12B case (distillation
+  beat RL there). Untrained Gemma 4 12B PT base (google/gemma-4-12B @023679ed) -> E4B base (@411aa17b), off-policy top-128 forward KL
+  with the FIXED tail bucket (logsumexp over the head's complement, 7a3e1e56). Traces: spec 12b-base-all = union of the 26B-PT easy +
+  medium + hard train splits (9000 q x 8 samples, 900 val q x 1), 12-shot Gemma prompt, temp 1, 8192 tokens, 4 TP-1 engines ->
+  s3://.../gemma4-12b-base-traces-topk128-v1/12b-base-all. Distill (after the traces): batch 128, lr 2e-6 (100 warmup, linear ->
+  2e-7), 1000 steps (~1.8 epochs), val KL every 10, permanent ckpt + HF export every 250 -> s3://.../gemma4-12b-base-distill-ckpts-v1/
+  12b-base-all-to-e4b-bs128-s1000-lr2e-6. Both jobs 4 GPUs, borrowing false, priority high: supervisor rl-g4-12bbase-trace
+  (job_dbg012degg5g08bj7dg0), then rl-g4-12bbase-dist-e4b, started by a detached follow-up watcher when COMPLETE.json lands. Scripts:
+  scale_train/gemma4/{run,launch,start}_gemma4_base_all_distill*.sh (e84da0e5). GATE: user inspects the distillation results before
+  any E4B' RL. Also fixed: the cleanup merge dropped `interactive_configs:` from st_config/build_manifest.yaml, so every real
+  ScaleTrain launch failed validation (launch_st_job --dry-run does not run it); restored in 902eb080; no live run relaunched meanwhile.
 - 2026-10-25 grid results: 8B medium @480 -> 1.7B base DONE 19:44Z best 33.5 @230 (4B-teacher student 37.3, 1.7B RL 34.7); 8B medium
   @480 -> 4B base DONE 20:39Z best 61.1 @245 (4B RL medium 65.8) -> on medium the 8B teacher is a worse teacher than the 4B for
   1.7B and distillation from base trails RL for the 4B student (like easy, -0.8). Controls (same-size 1.7B RL -> 1.7B base) reach
