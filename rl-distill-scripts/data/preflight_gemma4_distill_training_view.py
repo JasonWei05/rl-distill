@@ -66,6 +66,8 @@ ALLOWED_DIRECTIONS = {
     # Qwen3-4B-Base medium / hard RL teachers (best steps 510 / 560) -> Qwen3-1.7B-Base student, 16 samples.
     "q4bm_medium_r510_to_1p7b",
     "q4bh_hard_r560_to_1p7b",
+    # Untrained Gemma 4 12B base teacher on the easy + medium + hard band union -> E4B base student, 8 train samples.
+    "12b_base_all_to_e4b",
     "q1p7b_base_all_to_4b",
     "q4b_base_all_to_1p7b",
     # very_hard band RL teachers: 30B (best step 460) -> 4B / 1.7B and 4B (best step 620) -> 1.7B, 16 samples.

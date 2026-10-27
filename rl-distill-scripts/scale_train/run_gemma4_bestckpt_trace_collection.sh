@@ -69,6 +69,9 @@ case "${TRACE_SPEC}" in
   q4b-base-hard)   RUN_KEY=qwen3-4b-base; BAND=hard;   BEST_STEP=0; DIRECTION=q4b_base_hard_to_30b;   TEACHER_HF_REPO=Qwen/Qwen3-4B-Base; TEACHER_HF_REVISION=906bfd4b4dc7f14ee4320094d8b41684abff8539; TEACHER_HF_ROOT=1 ;;
   # Pre-training-vs-RL ablation (PROGRESS_LOG 2026-10-26): untrained base teachers on the UNION of the easy + medium + hard train
   # splits (BAND=all: 9000 train q, 900 val q), 8 samples per training question; students = the other base (4B' / 1.7B').
+  # Untrained Gemma 4 12B PT base as teacher on the union of the easy + medium + hard 26B-PT bands (BAND=all: 9000 train q x 8 samples,
+  # 900 val q x 1), student = the E4B base (E4B' pre-training ablation of the medium E4B/12B case, PROGRESS_LOG 2026-10-27).
+  12b-base-all) RUN_KEY=12b-base; BAND=all; BEST_STEP=0; DIRECTION=12b_base_all_to_e4b; TEACHER_HF_REPO=google/gemma-4-12B; TEACHER_HF_REVISION=023679ed352de9bb66cc873c9009ce3482585c08; TEACHER_HF_ROOT=1 ;;
   q1p7b-base-all) RUN_KEY=qwen3-1.7b-base; BAND=all; BEST_STEP=0; DIRECTION=q1p7b_base_all_to_4b; TEACHER_HF_REPO=Qwen/Qwen3-1.7B-Base; TEACHER_HF_REVISION=ea980cb0a6c2ae4b936e82123acc929f1cec04c1; TEACHER_HF_ROOT=1 ;;
   q4b-base-all)   RUN_KEY=qwen3-4b-base;   BAND=all; BEST_STEP=0; DIRECTION=q4b_base_all_to_1p7b; TEACHER_HF_REPO=Qwen/Qwen3-4B-Base;   TEACHER_HF_REVISION=906bfd4b4dc7f14ee4320094d8b41684abff8539; TEACHER_HF_ROOT=1 ;;
   # Qwen3-30B-A3B-Base medium RL (es5 run: early stop @420, best val mean@16 0.7575 @ step 320) as the teacher for a Qwen3-4B-Base
@@ -271,6 +274,7 @@ MAX_WORKER_ATTEMPTS="${MAX_WORKER_ATTEMPTS:-5}"
 # Trace family: RL-teacher study bundles vs the E4B-base (pre-training control) bundles.
 case "${TRACE_SPEC}" in
   e4b-base-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/gemma4_e4b_base_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-e4b-base-traces-topk128-v1}" ;;
+  12b-base-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/gemma4_12b_base_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/gemma4-12b-base-traces-topk128-v1}" ;;
   q4b-base-*|q1p7b-base-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/qwen3_4b_base_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-base-traces-topk128-v1}" ;;
   q30bm-*|q30bh-*) TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/qwen3_30b_rl_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-30b-rl-traces-topk128-v1}" ;;
   q4bm-*|q4bh-*)   TRACE_LOCAL_BASE="${TRACE_LOCAL_BASE:-/tmp/qwen3_4b_rl_traces_v1}"; TRACE_S3_BASE="${TRACE_S3_BASE:-s3://scale-ml/genai/rl-distill/qwen3-4b-rl-traces-topk128-v1}" ;;
@@ -288,7 +292,7 @@ mkdir -p "${DATA_DIR}" "${TRAIN_DIR}" "${VALIDATION_DIR}" "${OUTPUT_ROOT}/logs"
 
 # validation-repeats 1 => the 300 unique validation questions (1 response each).
 if [[ ${BAND} == all ]]; then
-  # Union of the three Qwen3-30B bands: prep each band in a scratch dir, then write ONE train / val parquet under source/
+  # Union of the three bands (Qwen3-30B or Gemma 26B-PT): prep each band in a scratch dir, then write ONE train / val parquet under source/
   # (the training-view builder requires exactly one of each). Bands are disjoint by construction; checked here anyway.
   "${VENV}/bin/python" "${DATA_PREP_SCRIPT}" --data-dir "${OUTPUT_ROOT}/source_bands" --band easy --band medium --band hard --validation-repeats 1
   "${VENV}/bin/python" - "${OUTPUT_ROOT}/source_bands" "${DATA_DIR}" "${DATA_PREFIX}" <<'PY'
