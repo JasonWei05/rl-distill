@@ -278,7 +278,7 @@ Outputs:
 | `pgk1-v1` | 2e-6 / 20 | 120 (4 runs launched at 150, stopped at 120) | off | two-stage: off-policy step-1000 student → OPD (§5.1). Code pinned to `5c6d47d5` (before the `global_batch_info` fix `07e9460f`) |
 | `pgk1-base-v1` | 2e-6 / 20 | 250 (extensions to 500) | off; extensions and controls: no +0.5 in 100 steps | from base: FLOP sweep, dense-ladder grid, controls (§5.2–5.3) |
 | `pgk1-pre-v1` | 2e-6 / 20 | 250 | off | base→base pre-distillation (abandoned, §5.4) |
-| `pgk1-base-lr1e6w50` | 1e-6 constant / 50 | cap 400 | no +0.5 in 100 steps (patience 10, min_delta 0.005) | v2 recipe (§5.5) |
+| `pgk1-base-lr1e6w50` | 1e-6 constant / 50 | cap 400 | no +0.5 in 100 steps (patience 10, min_delta 0.005) | v2 ablation (§5.5); not adopted, v1 is the standard |
 
 ### 5.1 Two-stage: off-policy student → OPD (`pgk1-v1`, 2026-10-20/21)
 
@@ -440,7 +440,19 @@ base. The baseline is direct 1.7B RL.
   `B/qwen3-4b-base-rl-full-checkpoints/qwen30b-<band>-p4b1000-es10/`.
 - Next step: OPD from each 4B′-RL best into the 1.7B base (cap 500, +0.5 / 100-step early stopping), compared against 1.7B RL.
 
-### 5.5 OPD recipe v2 (`pgk1-base-lr1e6w50`, launched 2026-10-26)
+### 5.5 OPD recipe v2 ablation (`pgk1-base-lr1e6w50`, launched 2026-10-26) -- not adopted
+
+**Result (2026-10-27): v2 did not improve on v1, so v1 (lr 2e-6, 20 warmup, constant) is the standard OPD recipe.** 4B RL teacher
+-> 1.7B base, val mean@16 (W&B `q3-opd-<SPEC>-<RUN_TAG>-s42`):
+
+| Teacher band | v1 best | v2 best | v1 / v2 at step 100 | at 200 | at 300 |
+|---|---|---|---|---|---|
+| easy | 74.2 @ 430 (74.0 within 400) | 73.9 @ 330 | 70.8 / 68.1 | 72.9 / 71.2 | 73.8 / 72.4 |
+| medium | 38.0 @ 360 | 36.1 @ 390 (still rising at the cap; best_hf republished 340 -> 390) | 33.7 / 29.2 | 36.0 / 33.3 | 37.2 / 35.0 |
+| hard | 19.5 @ 280 | 18.4 @ 280 (run still going at step ~290 on 2026-10-27) | 16.7 / 12.9 | 18.4 / 16.5 | 18.1 / - |
+
+The lower LR avoided v1's early transient but cost 2-4 points at every matched step and never caught up. The 8B-teacher v2 runs
+were cancelled in the 8B -> 14B switch, so there is no v2 comparison for 8B teachers.
 
 **Why:** v1's lr 2e-6 with 20-step warmup overshot in the first ~50 steps (grad norm ~3, response length 2.8k ± 0.8k, 8%
 truncated).

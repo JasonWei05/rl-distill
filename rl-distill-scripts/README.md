@@ -146,16 +146,20 @@ The student samples one response per prompt; a colocated vLLM teacher scores the
 **IcePop** token mask (trainer/vLLM ratio outside [0.5, 2] → weight 0). 128 prompts × 1 sample, one update per step (PPO clip
 inactive), temp 1, same RL contract otherwise (val every 10 on the band's val300 × 16).
 
-| | v1 (`pgk1-v1`, `pgk1-base-v1`, `pgk1-pre-v1`) | **v2 (`pgk1-base-lr1e6w50`, current)** |
+**Standard recipe = v1** (user, 2026-10-27): **lr 2e-6, 20-step linear warmup, then constant** (the `OPD_LR` /
+`OPD_LR_WARMUP_STEPS` defaults). The v2 ablation (lr 1e-6, 50 warmup) learned more slowly and never beat v1
+(4B → 1.7B best val: easy 73.9 vs 74.2, medium 36.1 vs 38.0, hard 18.4 vs 19.5; [QWEN3_RESULTS §5.5](docs/QWEN3_RESULTS.md)).
+
+| | **v1 = standard** (`pgk1-v1`, `pgk1-base-v1`, `pgk1-pre-v1`) | v2 ablation (`pgk1-base-lr1e6w50`, 2026-10-26, not adopted) |
 |---|---|---|
-| LR | 2e-6, 20 warmup, constant | **1e-6, 50 warmup, constant** |
-| Steps / stop | 120 (grid: 250), no early stopping | cap **400**; stop when no +0.5-pt val gain in 100 steps (patience 10, `min_delta` 0.005) |
-| Capacity | borrowing false | **borrowing true**, priority high |
+| LR | **2e-6, 20 warmup, constant** | 1e-6, 50 warmup, constant |
+| Steps / stop | 120 (grid: 250, extensions to 500); v1 bests landed at steps 280-430, so give new runs >= 400 steps | cap 400; stop when no +0.5-pt val gain in 100 steps (patience 10, `min_delta` 0.005) |
+| Capacity | borrowing false | borrowing true, priority high |
 
 `SPEC=<teacher>[-s<STEP>]-to-<student>[-base]`, e.g. `q4bm-s510-to-q1p7b-base` = the 4B medium RL run's step-510 checkpoint
 teaching the untrained 1.7B base on the medium band. Launch: `scale_train/launch_qwen3_onpolicy_distill.sh` (one run),
-`start_qwen3_onpolicy_distill_supervisor.sh` (supervised), `launch_qwen3_opd_recipe_v2_batch.sh` (the v2 batch; no args = dry
-run). The 2026-09 Gemma 4 on-policy runs used a different, supervised reverse-KL-on-top-k loss that is retired
+`start_qwen3_onpolicy_distill_supervisor.sh` (supervised; v1 defaults), `launch_qwen3_opd_recipe_v2_batch.sh` (the v2 ablation batch,
+kept for the record; no args = dry run). The 2026-09 Gemma 4 on-policy runs used a different, supervised reverse-KL-on-top-k loss that is retired
 ([RECIPES §3.5](docs/RECIPES.md)).
 
 ## Launching on ScaleTrain (H100)
@@ -174,9 +178,8 @@ SEED=43 SIZES="e2b e4b" BANDS="easy medium hard" bash gemma4/start_gemma4_rl_see
 bash gemma4/launch_gemma4_12b_distilled_rl_medium.sh
 # Off-policy distillation (Qwen3; traces + distill + evals, resumable)
 TEACHER_SPEC=q4bh-hard STUDENT=q1p7b GPUS=2 bash start_qwen3_30bm_to_4b_distill_supervisor.sh
-# On-policy distillation (PG-k1 v2 batch)
-bash launch_qwen3_opd_recipe_v2_batch.sh            # dry run: resolved env per spec
-bash launch_qwen3_opd_recipe_v2_batch.sh --launch   # one supervisor per spec (skips finished / running ones)
+# On-policy distillation (PG-k1, standard v1 recipe: lr 2e-6 / 20 warmup are the defaults)
+SPEC=q4bm-s510-to-q1p7b-base RUN_TAG=<tag> TOTAL_TRAINING_STEPS=400 bash start_qwen3_onpolicy_distill_supervisor.sh
 ```
 
 What happens after launch ([OPERATIONS §3–§5](docs/OPERATIONS.md)):
@@ -185,7 +188,7 @@ What happens after launch ([OPERATIONS §3–§5](docs/OPERATIONS.md)):
   relaunches after preemption / failure / cancel until the S3 completion receipt (and `best_hf`) exists. Every relaunch ships the
   `CODE_REF` the run started on (pinned at supervisor start). Stop: `touch <state>/STOP`, then `tmux kill-session -t "=rl-<name>"`
   (note the `=`: exact-match target).
-- **Borrowing.** RL and OPD v2 launch with borrowing true (preemptible); dedicated (`ALLOW_BORROWING=false`) jobs queued > 60 min are
+- **Borrowing.** RL (and the OPD v2 ablation) launched with borrowing true (preemptible); dedicated (`ALLOW_BORROWING=false`) jobs queued > 60 min are
   switched to borrowing by `borrowing_fallback_watcher.sh`.
 - **Resume.** On every pod start the run-file restores the newest *complete* S3 checkpoint (`full_checkpoint_s3.py restore-latest`):
   model + Adam + LR/RNG + dataloader cursor + early-stopping state, so a preemption costs at most 5 steps.

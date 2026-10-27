@@ -449,9 +449,11 @@ The common settings come from [`launch_qwen3_onpolicy_distill.sh`](../scale_trai
   - Hub push off.
 - Data: the student trains on the **teacher's band** train split (`DIFFICULTY_DATASET_SOURCE=qwen3_30b_bands`, `DIFFICULTY_DATASET=<band>`).
 
-| | v1 (`pgk1-v1`, 2026-10-20; `pgk1-base-v1` / `pgk1-pre-v1`, 10-23 → 10-25) | **v2 (`pgk1-base-lr1e6w50`, launched 2026-10-26)** |
+**Standard = v1** (user, 2026-10-27). v2 was an ablation that did not improve on v1 (slower at every step; 4B → 1.7B best val easy 73.9 vs 74.2, medium 36.1 vs 38.0, hard 18.4 vs 19.5; QWEN3_RESULTS §5.5).
+
+| | **v1 = standard** (`pgk1-v1`, 2026-10-20; `pgk1-base-v1` / `pgk1-pre-v1`, 10-23 → 10-25) | v2 ablation (`pgk1-base-lr1e6w50`, 2026-10-26, not adopted) |
 |---|---|---|
-| LR schedule | 2e-6, 20-step linear warmup, constant (`OPD_LR` / `OPD_LR_WARMUP_STEPS` defaults) | **1e-6, 50-step warmup, constant** |
+| LR schedule | **2e-6, 20-step linear warmup, constant** (`OPD_LR` / `OPD_LR_WARMUP_STEPS` defaults) | 1e-6, 50-step warmup, constant |
 | steps | 120 (`TOTAL_TRAINING_STEPS` default; first four runs launched at 150 and stopped at 120); from-base sweep / grid 250 | cap **400** |
 | early stopping | off (fixed steps); the 10-25 extensions used the v2 rule | **on**: patience 10 evals × `TEST_FREQ` 10 = "no +0.5-pt gain in 100 steps" (`min_delta=0.005`, no miss tolerance) |
 | val / permanent ckpt | every 10 (from-base sweep: val every 5) | every 10 |
@@ -459,7 +461,7 @@ The common settings come from [`launch_qwen3_onpolicy_distill.sh`](../scale_trai
 | student init | v1: off-policy distilled student `global_step_1000` (`<spec>-bs128-s1000-lr2e-6`); `-base` suffix → untrained base | untrained base (all 7 specs) |
 | code | `5c6d47d5` (pre-fix) for `pgk1-v1`; HEAD afterwards | HEAD (`8186d486` at launch) |
 
-v2 sources: [`launch_qwen3_opd_recipe_v2_batch.sh`](../scale_train/launch_qwen3_opd_recipe_v2_batch.sh) L135-144. Why v2 changed the LR: at 2e-6 / 20 warmup, the first ~50 steps overshot (grad norm ~3, response length 2.8k ± 0.8k, 8% truncation).
+v2 sources: [`launch_qwen3_opd_recipe_v2_batch.sh`](../scale_train/launch_qwen3_opd_recipe_v2_batch.sh) L135-144. Why v2 tried a lower LR: at 2e-6 / 20 warmup the first ~50 steps are volatile (grad norm ~3, response length 2.8k ± 0.8k, 8% truncation). That transient did not hurt v1's final accuracy, and halving the LR cost 2-4 points at every matched step, so v1 stays the standard.
 
 Because `min_delta` is set, the early-stopping "best" lags the true maximum. Re-publish `best_hf` at the best saved
 checkpoint after a v2 run finishes.
@@ -487,7 +489,7 @@ The intermediate-checkpoint teacher path is `qwen3-<size>-base-rl-full-checkpoin
 **Student layout:** `GEN_TP=1`, vLLM sleep on, MBS 4 / 8192 padded cap, `ROLLOUT_GPU_MEMORY_UTILIZATION=0.10`, 8 GiB KV
 (`n=1` needs little KV), no FSDP CPU offload policy.
 
-**v2 spec list** (dry-run output 2026-10-26, borrowing true, priority high):
+**v2 ablation spec list** (dry-run output 2026-10-26, borrowing true, priority high):
 
 | Pair | Specs | GPUs |
 |---|---|---|
@@ -501,11 +503,10 @@ Exclusions: no 30B teachers, no same-size controls, and the 8B hard teacher wait
 
 ```bash
 cd rl-distill-scripts/scale_train
+# standard (v1) run: lr 2e-6 / 20 warmup are the defaults; give it >= 400 steps (v1 bests landed at 280-430)
+SPEC=q4bm-s510-to-q1p7b-base RUN_TAG=my-tag TOTAL_TRAINING_STEPS=400 bash start_qwen3_onpolicy_distill_supervisor.sh
+# the v2 ablation batch (kept for the record, not the standard recipe):
 bash launch_qwen3_opd_recipe_v2_batch.sh            # dry run: prints each v2 spec's resolved env (safe)
-bash launch_qwen3_opd_recipe_v2_batch.sh --launch   # one supervisor per spec; skips complete / running specs
-# single run (v1 defaults unless overridden):
-SPEC=q4bm-s510-to-q1p7b-base RUN_TAG=my-tag OPD_LR=1e-6 OPD_LR_WARMUP_STEPS=50 TOTAL_TRAINING_STEPS=400 \
-  EARLY_STOPPING_PATIENCE=10 EARLY_STOPPING_MIN_DELTA=0.005 ALLOW_BORROWING=true bash start_qwen3_onpolicy_distill_supervisor.sh
 ```
 
 Outputs:

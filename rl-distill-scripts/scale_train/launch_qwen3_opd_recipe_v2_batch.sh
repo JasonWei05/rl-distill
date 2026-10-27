@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# ABLATION, NOT THE STANDARD RECIPE (2026-10-27): v2 did not beat v1; the standard OPD recipe is v1 (lr 2e-6, 20 warmup, constant =
+# the start_qwen3_onpolicy_distill_supervisor.sh defaults). Kept to document / reproduce the ablation (docs/QWEN3_RESULTS.md §5.5).
 # Re-run of the from-base on-policy distillations with the v2 recipe (PROGRESS_LOG 2026-10-26): PG-k1 as before, but a CONSTANT
 # learning rate of 1e-6 after a 50-step linear warmup (was 2e-6 / 20 -- the first ~50 steps overshot: grad norm ~3, response length
 # 2.8k +- 0.8k with 8% truncation), cap 400 steps, stop on no +0.5 gain in 100 steps, val + permanent checkpoint every 10, borrowing true,

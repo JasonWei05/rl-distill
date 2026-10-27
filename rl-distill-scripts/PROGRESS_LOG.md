@@ -204,6 +204,10 @@ final OPD stage.
   scale_train/gemma4/{run,launch,start}_gemma4_base_all_distill*.sh (e84da0e5). GATE: user inspects the distillation results before
   any E4B' RL. Also fixed: the cleanup merge dropped `interactive_configs:` from st_config/build_manifest.yaml, so every real
   ScaleTrain launch failed validation (launch_st_job --dry-run does not run it); restored in 902eb080; no live run relaunched meanwhile.
+- 2026-10-27: **OPD recipe standardized on v1** (user): lr 2e-6, 20-step linear warmup, constant (the OPD_LR / OPD_LR_WARMUP_STEPS
+  defaults). The v2 ablation (1e-6 / 50) was slower at every matched step and never beat v1 (4B -> 1.7B best val: easy 73.9 vs 74.2,
+  medium 36.1 vs 38.0, hard 18.4 vs 19.5 with v2 hard still running). Docs (README, RECIPES, QWEN3_RESULTS §5.5) and the v2 batch
+  launcher header updated; v1 bests landed at steps 280-430, so new standard runs should get >= 400 steps.
 - 2026-10-25 grid results: 8B medium @480 -> 1.7B base DONE 19:44Z best 33.5 @230 (4B-teacher student 37.3, 1.7B RL 34.7); 8B medium
   @480 -> 4B base DONE 20:39Z best 61.1 @245 (4B RL medium 65.8) -> on medium the 8B teacher is a worse teacher than the 4B for
   1.7B and distillation from base trails RL for the 4B student (like easy, -0.8). Controls (same-size 1.7B RL -> 1.7B base) reach
