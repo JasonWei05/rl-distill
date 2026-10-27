@@ -10,7 +10,7 @@
 #            Adam + LR/RNG + data cursor + HF export) every 250 steps; skipped once step 1000 is on S3
 #   stage 3  x32 band-validation evals (eval/eval_gemma4_models_passk.py: id_easy / id_medium / id_hard, 300 q x 32, 12-shot, temp 1,
 #            8192 tokens, strict boxed grader = the RL reward) of the E4B base, the 12B base teacher and the student's step 250 / 500 /
-#            750 / 1000 exports: pass@k for k in {1,2,4,8,16,32}, mean@32, and the own-sample NLL per token (sampled-token logprobs);
+#            750 / 1000 exports: pass@k for k in {1,2,4,8,16,32}, mean@32, per-token top-128 predictive entropy and own-sample NLL;
 #            ALL_DONE.json under the eval prefix marks completion
 # STAGES selects the stages (default "1 2"): the trace job runs STAGES=1, the distillation job STAGES=2 once the bundle is complete,
 # the eval job STAGES=3 once step 1000 is on S3.
@@ -117,7 +117,7 @@ if [[ " ${STAGES} " == *" 3 "* ]]; then
   echo "G4BASE stage3: evals start $(date -u +%FT%TZ) out=${EVAL_S3}"
   python rl-distill-scripts/eval/eval_gemma4_models_passk.py "${models[@]}" --s3-arch "${STUDENT}" --bands easy,medium,hard \
     --gpus "${GPU_IDS_CSV}" --parallelism dp --manifest "${DATA_ROOT}/math_eval_manifest.json" --out-root /tmp/g4base_val32/models_out \
-    --s3-root "${EVAL_S3}" --predictive-topk-width 1
+    --s3-root "${EVAL_S3}" --predictive-topk-width 128
   echo "{\"done\": \"$(date -u +%FT%TZ)\"}" > /tmp/g4base_all_done.json
   aws s3 cp --only-show-errors /tmp/g4base_all_done.json "${EVAL_S3}/ALL_DONE.json"
   echo "G4BASE stage3: done $(date -u +%FT%TZ)"

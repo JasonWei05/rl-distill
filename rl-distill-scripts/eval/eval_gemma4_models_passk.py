@@ -6,8 +6,9 @@ id_<band> validation set, 300 q x 32 samples), whose materialize -> eval_math_pa
 step exports. Two differences:
   * models are given explicitly:  --model TAG=base:e4b  |  --model TAG=s3:<checkpoint root>/global_step_<N>  (an SFT-trainer
     permanent checkpoint with huggingface/ + _REMOTE_COMPLETE.json; architecture from --s3-arch)
-  * --predictive-topk-width 1 makes vLLM return the sampled token's logprob, so every trace row carries
-    sampled_token_logprob_{sum,count}: -sum/count over a model's samples is its own-sample NLL per token (temp 1 = entropy estimate)
+  * --predictive-topk-width 128 (the width the x32 protocol pins; eval_math_passk accepts only that or 0 = no logprobs) records per
+    token the top-128 predictive entropy (+ tail residual) and the sampled token's logprob, so every trace row carries
+    token_entropy_{sum,count} and sampled_token_logprob_{sum,count}: entropy per token and own-sample NLL per token
 Each (model, band) result goes to <s3-root>/<tag>__x32_<band>/ (metrics.json, traces/); finished ones are skipped.
     python eval_gemma4_models_passk.py --gpus 0,1,2,3 --parallelism dp --bands easy,medium,hard --s3-root s3://... \\
         --model e4b_base=base:e4b --model e4bp_s250=s3:s3://.../12b-base-all-to-e4b-.../global_step_250 --s3-arch e4b
@@ -54,7 +55,7 @@ def main() -> int:
     ap.add_argument("--out-root", type=Path, required=True)
     ap.add_argument("--s3-root", required=True)
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.9)
-    ap.add_argument("--predictive-topk-width", type=int, default=1)
+    ap.add_argument("--predictive-topk-width", type=int, default=128)
     ap.add_argument("--keep-materialized", action="store_true")
     args = ap.parse_args()
     args.gpus = [g.strip() for g in args.gpus.split(",") if g.strip()]
@@ -76,6 +77,13 @@ def main() -> int:
             (step_root / "source_registry.json").write_text(json.dumps(registry, indent=2))
             if not ctl._evaluate_tag(run_tag, band, args, step_root):
                 failed.append(run_tag)
+                # the shard logs live on the pod's local disk only: put their tails into the job log, then stop
+                for log in sorted(step_root.glob("dp*/eval.log")) + [step_root / "eval.log"]:
+                    if log.exists():
+                        print(f"----- tail of {log}", flush=True)
+                        print("\n".join(log.read_text(errors="replace").splitlines()[-25:]), flush=True)
+                print(f"EVAL_LIST_DONE failed={failed} (stopped at the first failure)", flush=True)
+                return 1
     print(f"EVAL_LIST_DONE failed={failed}", flush=True)
     return 1 if failed else 0
 
