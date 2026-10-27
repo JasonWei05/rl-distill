@@ -51,6 +51,8 @@ build_configs:
     remote:
       registry: 692474966980.dkr.ecr.us-west-2.amazonaws.com
       repository: scale_train/shared/training/tmp
+
+interactive_configs:
   train-rl-distill:
     use_gpu: True
     raw_run_params:
