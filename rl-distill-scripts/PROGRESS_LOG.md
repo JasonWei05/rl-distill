@@ -12,6 +12,40 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-10-27 — Text-maze synthetic study: S₀ direct RL vs L₀ RL → distillation at matched FLOPs (TailRL, aiai-rtx-2)
+
+**Goal.** Controlled comparison on TailRL's text-maze task (github.com/Zanette-Labs/TailRL): at a fixed total compute
+budget, direct GRPO on a 3.9M student S₀ (Arm B) against GRPO on a 13.3M teacher L₀ for a share ρ of the budget followed by
+distillation into S₀ with the rest (Arm A; on-policy PG-k1 and off-policy exact forward KL), at three matched starting
+levels (goal_reached pass@1 ≈ 10% / 1% / 0.1%). S₀/L₀ pairs are SWA-averaged pretraining checkpoints from one S run and one
+L run (same data order), matched within 0.0004 pass@1 at k = 1024 (k = 2048 for 0.1%).
+
+**Config.** B5 = compute at which S₀'s own RL saturates (the whole 4000-step run at 0.1%, which never saturated),
+Bⱼ = B5 / 2^(5−j): 1.2–19.4 / 8.7–139 / 16.6–266 PFLOPs. ρ ∈ {0.5, 0.75, 0.9} (+ a 0.25 extension on the 10% pair); 15 cells
+× 2 distillation variants per pair, S₀ seed-1 replicates for all pairs, a seed-1 replicate of the whole 10% matrix. Small
+budgets are prefixes of one RL run (constant LR). Dev = TailRL eval1000 at k = 64, test = 1000 fresh mazes at k = 256.
+Code: `rl-distill-scripts/maze/` (`BUDGET_STUDY_RUNBOOK.md`, `select_matched_init.py`, `make_pair.py`, `launch_pair_rl.sh`,
+`plan_budgets.py`, `run_budget_matrix.sh`, `run_offpolicy_budget.sh`, `collect_budget_results.py`); TailRL fork patch:
+FLOPs-budget stop `trainer.max_total_tflops` in `ray_trainer.py` + `MAX_TOTAL_TFLOPS` in `scripts/train.sh`.
+
+**Results (dev pass@1, Arm B vs best detour cell).** 10%: 0.525 / 0.750 / 0.862 vs 0.294 / 0.529 / 0.767 at B1 / B3 / B5 —
+direct RL wins every budget by 7–23 pt. 1%: 0.401 / 0.483 / 0.653 vs 0.298 / 0.521 / 0.729 — crossover at B3, detour +8
+(dev) / +4 (test) at B5. 0.1%: 0.071 / 0.083 / 0.120 vs 0.063 / 0.132 / 0.441 — crossover at B3, detour +32 pt at B5.
+Students recover 85–93% of the teacher at 0.1%; best split moves from ρ = 0.5 (10%) to 0.9 (0.1%); off-policy students keep
+pass@64 20–45 pt above S₀ RL everywhere. Full tables: `rl-distill-scripts/maze/BUDGET_STUDY_RESULTS.md`; interactive panel:
+https://claude.ai/artifact/GwvwZLHcj5YJPg5vBqwbGK; design doc: https://claude.ai/artifact/F3QeYeG11kq88uaxnjRykj.
+
+**Artifacts.** Public Hub dataset repo https://huggingface.co/datasets/hi-todayis-jh/tailrl-text-maze-budget-study:
+`used/<pair>/<label>/` (HF export of every evaluated checkpoint + S₀/L₀ bases, 4.5 GB), `archive/<run>.tar` (HF exports,
+FLOPs ledgers and console log of every RL run, 97 GB), `meta/` (plans, results, manifests). Local runs dir
+`~/tailrl_maze_runs/` on aiai-rtx-2 keeps only the 134 evaluated checkpoint dirs (HF exports), the off-policy finals,
+plans/results and the teacher traces; optimizer states and unused RL checkpoints were deleted after the upload was
+verified (`stage_hub_archive.sh` → `verify_hub_archive.py` → `prune_rl_ckpts.sh`).
+
+**Status.** Complete. Hub upload verified 2026-10-27 23:20 (`verify_hub_archive.py`: 1,251 files, sizes equal, 215 LFS
+sha256 equal, 108 GB); local prune done 23:30 (16,640 optimizer/FSDP shards = 310 GB and 4,026 unused checkpoint dirs
+deleted; `checkpoints/tailrl-text-maze` 375 GB → 3.5 GB, every evaluated checkpoint path still resolves; box 799 GB free).
+
 ## 2026-10-23 — FLOP-matched sweep: on-policy distillation from intermediate 4B medium RL checkpoints into the 1.7B BASE LAUNCHED
 
 Goal (10-22 meeting): FLOP-vs-performance curves for distillation vs RL at 1.7B on medium. Direct-RL curve = the existing 1.7B medium

@@ -1,0 +1,404 @@
+diff --git a/experiments/text_maze/scripts/sft_pretrain.py b/experiments/text_maze/scripts/sft_pretrain.py
+index 668db55..3efc2a7 100644
+--- a/experiments/text_maze/scripts/sft_pretrain.py
++++ b/experiments/text_maze/scripts/sft_pretrain.py
+@@ -324,6 +324,10 @@ def create_model_from_scratch(args):
+         dtype="bfloat16",
+         use_cache=True,
+     )
++    # init_seed decides the weights only; the data order comes from data_seed (see the train DataLoader),
++    # so two sizes with the same data_seed see the same batches regardless of how much RNG their init consumes
++    init_seed = args.init_seed if getattr(args, "init_seed", None) is not None else args.seed
++    torch.manual_seed(init_seed)
+     model = AutoModelForCausalLM.from_config(config, torch_dtype=torch.bfloat16)
+ 
+     reserved = {f"RESERVED_{i}": len(MAZE_VOCAB) + i for i in range(num_reserved)}
+@@ -389,10 +393,13 @@ class MazeSFTTrainer:
+         logger.info(f"All datasets loaded in {dataset_load_time:.2f}s")
+         
+         # 创建DataLoader
++        data_seed = args.data_seed if getattr(args, "data_seed", None) is not None else args.seed
++        logger.info(f"Seeds: global={args.seed} data_order={data_seed} init={getattr(args, 'init_seed', None) if getattr(args, 'init_seed', None) is not None else args.seed}")
+         self.train_loader = DataLoader(
+             self.train_dataset,
+             batch_size=args.batch_size,
+             shuffle=True,
++            generator=torch.Generator().manual_seed(data_seed),  # order depends on data_seed only
+             collate_fn=lambda b: collate_fn(b, self.tokenizer.pad_token_id),
+             num_workers=4,
+             pin_memory=True,
+@@ -762,6 +769,9 @@ class MazeSFTTrainer:
+                 loss = self.train_step(batch)
+                 epoch_loss += loss
+                 num_batches += 1
++                if self.global_step % max(1, getattr(self.args, "log_steps", 10)) == 0:
++                    with open(os.path.join(self.args.output_dir, "train_metrics.jsonl"), "a") as f:
++                        f.write(json.dumps({"step": self.global_step, "train_loss": float(loss), "lr": float(self.scheduler.get_last_lr()[0])}) + "\n")
+                 
+                 # 更新进度条
+                 pbar.set_postfix({
+@@ -879,6 +889,7 @@ def main():
+     # 评估和保存参数
+     parser.add_argument("--save_steps", type=int, default=50, help="Save checkpoint every N steps")
+     parser.add_argument("--eval_steps", type=int, default=25, help="Evaluate every N steps")
++    parser.add_argument("--log_steps", type=int, default=10, help="Append step/train_loss/lr to <output_dir>/train_metrics.jsonl every N steps")
+     parser.add_argument("--eval_schedule", type=str, default="", help="Comma-separated '<end_step>:<interval>' eval schedule, e.g. '2000:200,6000:50'. Overrides --eval_steps.")
+     parser.add_argument("--save_on_eval", action="store_true", help="Save a checkpoint immediately after each evaluation.")
+     parser.add_argument("--use_generative_eval", action="store_true", help="Use generative evaluation (RL-style)")
+@@ -889,6 +900,8 @@ def main():
+     parser.add_argument("--early_stop_pass1", type=float, default=0.0, help="If > 0, exit when eval/pass@1 reaches this value.")
+     parser.add_argument("--max_steps", type=int, default=0, help="If > 0, exit training once global_step reaches this value.")
+     parser.add_argument("--seed", type=int, default=0, help="Seed for python/numpy/torch RNG (deterministic shuffling).")
++    parser.add_argument("--data_seed", type=int, default=None, help="Seed of the train-loader shuffle only (default: --seed). Same value => same batch order for any model size.")
++    parser.add_argument("--init_seed", type=int, default=None, help="Seed of the from-scratch weight init only (default: --seed).")
+     
+     # 日志参数
+     parser.add_argument("--project_name", type=str, default="maze-sft", help="Project name for logging")
+diff --git a/experiments/text_maze/scripts/tests/smoke_goal_reaching.py b/experiments/text_maze/scripts/tests/smoke_goal_reaching.py
+index bb3468b..c3042bb 100755
+--- a/experiments/text_maze/scripts/tests/smoke_goal_reaching.py
++++ b/experiments/text_maze/scripts/tests/smoke_goal_reaching.py
+@@ -25,7 +25,7 @@ import pyarrow.parquet as pq
+ import torch
+ from transformers import AutoConfig, AutoTokenizer, AutoModelForCausalLM
+ 
+-REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
++REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+ CACHE = os.environ.get("HF_CACHE_DIR", os.path.expanduser("~/.cache/maxrl_sft_ckpts"))
+ 
+ CK = sys.argv[1] if len(sys.argv) > 1 else os.path.join(CACHE, "ckpt-3550")
+diff --git a/experiments/text_maze/scripts/train.sh b/experiments/text_maze/scripts/train.sh
+index 6533aec..91d87b5 100755
+--- a/experiments/text_maze/scripts/train.sh
++++ b/experiments/text_maze/scripts/train.sh
+@@ -85,6 +85,17 @@ CKPT_STEP=""
+ PASS_RATE_INDEX=""
+ PASS_RATE_ID=""
+ MODEL_BASE_DIR_ARG=""
++REF_MODEL_DIR=""
++OPD=0
++ACTOR_LR="${ACTOR_LR:-1e-4}"
++MAX_ACTOR_CKPT_TO_KEEP="${MAX_ACTOR_CKPT_TO_KEEP:-3}"
++USE_KL_IN_REWARD=False
++KL_PENALTY=kl
++KL_COEF=0.0
++REF_ARGS=()
++# FLOPs budget stop (text-maze budget study): MAX_TOTAL_TFLOPS=<TFLOPs> ends the run once the ledger total reaches it
++BUDGET_ARGS=()
++if [ -n "${MAX_TOTAL_TFLOPS:-}" ]; then BUDGET_ARGS=(+trainer.max_total_tflops="${MAX_TOTAL_TFLOPS}"); fi
+ HF_REPO="${HF_REPO:-${TAILRL_MAZE_CKPT_REPO}}"
+ CONDA_ENV_NAME="${CONDA_ENV:-}"
+ DRY_RUN=0
+@@ -123,6 +134,10 @@ while [ "$#" -gt 0 ]; do
+     --pass-rate-index) PASS_RATE_INDEX="${2:?}"; shift 2 ;;
+     --pass-rate-id) PASS_RATE_ID="${2:?}"; shift 2 ;;
+     --model-base-dir) MODEL_BASE_DIR_ARG="${2:?}"; shift 2 ;;
++    --ref-model-dir) REF_MODEL_DIR="${2:?}"; shift 2 ;;
++    --opd) OPD=1; [ -z "${METHOD}" ] && METHOD=opd_token; shift ;;
++    --lr) ACTOR_LR="${2:?}"; shift 2 ;;
++    --max-ckpt-keep) MAX_ACTOR_CKPT_TO_KEEP="${2:?}"; shift 2 ;;
+     --hf-repo) HF_REPO="${2:?}"; shift 2 ;;
+     --hf-cache-dir) HF_CACHE_DIR="${2:?}"; shift 2 ;;
+     --conda-env) CONDA_ENV_NAME="${2:?}"; shift 2 ;;
+@@ -321,6 +336,17 @@ case "$REWARD_TYPE" in
+       custom_reward_function.name=compute_score
+     )
+     ;;
++  zero)
++    # on-policy distillation: no task reward, the KL term is the whole signal (metrics still logged)
++    TRAIN_DATA="${TRAIN_PARQUET_DIR}/train_maze_17_continuous.parquet"
++    VAL_DATA="${VAL_PARQUET_DIR}/test_maze_17_continuous.parquet"
++    REWARD_LABEL="zero"
++    REWARD_HPARAM_TAG=""
++    REWARD_ARGS=(
++      custom_reward_function.path="src/maze_zero_reward.py"
++      custom_reward_function.name=compute_score
++    )
++    ;;
+   binary)
+     TRAIN_DATA="${TRAIN_PARQUET_DIR}/train.parquet"
+     VAL_DATA="${VAL_PARQUET_DIR}/test.parquet"
+@@ -403,6 +429,12 @@ else
+ fi
+ EXPERIMENT_NAME="textmaze_${SUITE}_${METHOD_TAG}_${REWARD_LABEL}${REWARD_HPARAM_TAG}${TRANSFORM_TAG}_${INIT_TAG}_bs${BATCH_SIZE}_G${N_ROLLOUTS}_${NUM_GPUS}gpu_${GPU_TAG}_seed${SEED}"
+ 
++if [ "$OPD" = 1 ]; then
++  [ -n "$REF_MODEL_DIR" ] || { echo "--opd needs --ref-model-dir <teacher HF dir>" >&2; exit 1; }
++  USE_KL_IN_REWARD=True; KL_PENALTY=k1; KL_COEF="${OPD_KL_COEF:-1.0}"
++  REF_ARGS=(+actor_rollout_ref.ref.model_path="${REF_MODEL_DIR}" +algorithm.opd_max_clamp="${OPD_MAX_CLAMP:-5.0}")
++  echo "[config] on-policy distillation (PG-k1): teacher=${REF_MODEL_DIR} kl_coef=${KL_COEF} clamp=${OPD_MAX_CLAMP:-5.0}"
++fi
+ echo "[config] suite=${SUITE} method=${METHOD} adv_estimator=${ADVANTAGE_ESTIMATOR}"
+ echo "[config] pass_rate=${PASS_RATE_TAG} target_pct=${PASS_RATE_PCT} ckpt=${CKPT_STEP}"
+ echo "[config] reward=${REWARD_LABEL}${REWARD_HPARAM_TAG} transform=${REWARD_TRANSFORM} seed=${SEED} G=${N_ROLLOUTS} pass_k=${PASS_K}"
+@@ -582,7 +614,8 @@ python3 -m verl.trainer.main_ppo \
+   hydra.run.dir="${TAILRL_MAZE_RUN_DIR}/hydra/${EXPERIMENT_NAME}" \
+   ray_init.ray_dir="${RAY_TEMP_DIR}" \
+   algorithm.adv_estimator="${ADVANTAGE_ESTIMATOR}" \
+-  algorithm.use_kl_in_reward=False \
++  algorithm.use_kl_in_reward="${USE_KL_IN_REWARD}" \
++  algorithm.kl_penalty="${KL_PENALTY}" \
+   algorithm.pass_k="${PASS_K}" \
+   algorithm.reward_transform="${REWARD_TRANSFORM}" \
+   +data.seed="${SEED}" \
+@@ -593,9 +626,11 @@ python3 -m verl.trainer.main_ppo \
+   data.max_response_length="${MAX_RESPONSE_LENGTH}" \
+   data.apply_chat_template=False \
+   actor_rollout_ref.model.path="${MODEL_PATH}" \
+-  actor_rollout_ref.actor.optim.lr=1e-4 \
++  actor_rollout_ref.actor.optim.lr="${ACTOR_LR}" \
++  actor_rollout_ref.actor.checkpoint.save_contents=[model,optimizer,extra,hf_model] \
+   actor_rollout_ref.actor.use_kl_loss=False \
+   actor_rollout_ref.actor.dtype=float16 \
++  actor_rollout_ref.model.attn_implementation="${ATTN_IMPL:-flash_attention_2}" \
+   actor_rollout_ref.actor.ppo_mini_batch_size="${BATCH_SIZE}" \
+   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu="${PPO_MICRO_BATCH:-${BATCH_SIZE}}" \
+   actor_rollout_ref.rollout.name=hf \
+@@ -615,7 +650,9 @@ python3 -m verl.trainer.main_ppo \
+   +reward_model.reward_kwargs.num_processes="${REWARD_NUM_PROCESSES:-4}" \
+   +reward_model.reward_kwargs.chunksize=64 \
+   "${REWARD_ARGS[@]}" \
+-  algorithm.kl_ctrl.kl_coef=0.0 \
++  algorithm.kl_ctrl.kl_coef="${KL_COEF}" \
++  "${REF_ARGS[@]}" \
++  "${BUDGET_ARGS[@]}" \
+   trainer.project_name="${PROJECT_NAME}" \
+   trainer.experiment_name="${EXPERIMENT_NAME}" \
+   trainer.logger=['console','wandb'] \
+@@ -625,7 +662,7 @@ python3 -m verl.trainer.main_ppo \
+   trainer.save_freq="${SAVE_FREQ}" \
+   trainer.test_freq="${TEST_FREQ}" \
+   trainer.total_training_steps="${TOTAL_STEPS}" \
+-  trainer.max_actor_ckpt_to_keep=3 \
++  trainer.max_actor_ckpt_to_keep="${MAX_ACTOR_CKPT_TO_KEEP}" \
+   trainer.default_local_dir="${CHECKPOINT_DIR}/${PROJECT_NAME}/${EXPERIMENT_NAME}" \
+   "${VAL_ONLY_ARGS[@]}" \
+   trainer.total_epochs=100 ; } 2>&1 | { [ -n "${VAL_OUT}" ] && tee "${VAL_OUT}" || cat ; }
+diff --git a/experiments/text_maze/verl/trainer/ppo/core_algos.py b/experiments/text_maze/verl/trainer/ppo/core_algos.py
+index b1fa468..9eaf974 100644
+--- a/experiments/text_maze/verl/trainer/ppo/core_algos.py
++++ b/experiments/text_maze/verl/trainer/ppo/core_algos.py
+@@ -186,6 +186,7 @@ class AdvantageEstimator(str, Enum):
+     PKPO_CONTINUOUS = "pkpo_continuous"
+     REINFORCE = "reinforce"
+     TAILRL = "tailrl"
++    OPD_TOKEN = "opd_token"  # on-policy distillation, policy-gradient form (PG-k1)
+ 
+ 
+ class AdaptiveKLController:
+@@ -1331,3 +1332,22 @@ def compute_tailrl_outcome_advantage(
+ 
+         advantages = tailrl_advantages.flatten().unsqueeze(-1) * response_mask
+     return advantages, advantages
++
++
++@register_adv_est(AdvantageEstimator.OPD_TOKEN)
++def compute_opd_token_advantage(token_level_rewards: torch.Tensor, response_mask: torch.Tensor, config=None, **kwargs):
++    """On-policy distillation in policy-gradient form (PG-k1; rl-distill RECIPES.md section 3.1).
++
++    With algorithm.use_kl_in_reward=True, kl_penalty=k1, kl_coef=1 and a zero task reward, each response token's
++    reward is -(log pi_theta(y_t) - log pi_T(y_t)) = log pi_T(y_t) - log pi_theta(y_t). The advantage is that
++    token's own value, clipped to [-c, c] (c = algorithm.opd_max_clamp, default 5): no normalisation, no
++    discounting, no sum over future tokens. Returns are set equal to the advantages.
++    """
++    clamp = 5.0
++    if config is not None:
++        try:
++            clamp = float(config.get("opd_max_clamp", 5.0))
++        except Exception:
++            pass
++    advantages = token_level_rewards.clamp(-clamp, clamp) * response_mask
++    return advantages, advantages
+diff --git a/experiments/text_maze/verl/trainer/ppo/ray_trainer.py b/experiments/text_maze/verl/trainer/ppo/ray_trainer.py
+index 36838ab..3b8d44c 100644
+--- a/experiments/text_maze/verl/trainer/ppo/ray_trainer.py
++++ b/experiments/text_maze/verl/trainer/ppo/ray_trainer.py
+@@ -50,6 +50,7 @@ from verl.trainer.ppo.metric_utils import (
+     process_validation_metrics,
+ )
+ from verl.trainer.ppo.reward import compute_reward, compute_reward_async
++from verl.utils.flops_ledger import FlopsLedger
+ from verl.utils.reward_score.maze import (
+     compute_advantage_diagnostics as _maze_advantage_diagnostics,
+     compute_maze_aggregate_metrics as _maze_aggregate_metrics,
+@@ -422,6 +423,7 @@ class RayPPOTrainer:
+             AdvantageEstimator.PKPO_CONTINUOUS,
+             AdvantageEstimator.REINFORCE,
+             AdvantageEstimator.TAILRL,
++            AdvantageEstimator.OPD_TOKEN,
+         ]:
+             self.use_critic = False
+ 
+@@ -1568,6 +1570,21 @@ class RayPPOTrainer:
+         self.global_steps = 0
+         self._load_checkpoint()
+ 
++        # analytic per-phase FLOPs (RL-vs-distillation study); cumulative totals resume with the checkpoint
++        self.flops_ledger = FlopsLedger.from_model_path(
++            self.config.actor_rollout_ref.model.path,
++            ppo_epochs=self.config.actor_rollout_ref.actor.ppo_epochs,
++            trust_remote_code=self.config.actor_rollout_ref.model.get("trust_remote_code", False),
++        )
++        self.flops_ledger.uncounted_critic = self.use_critic
++        _ref_path = self.config.actor_rollout_ref.ref.get("model_path", None)
++        if _ref_path:
++            self.flops_ledger.set_ref_model_path(_ref_path, trust_remote_code=self.config.actor_rollout_ref.model.get("trust_remote_code", False))
++        if self.global_steps > 0:
++            self.flops_ledger.load(
++                os.path.join(self.config.trainer.default_local_dir, f"global_step_{self.global_steps}", "flops_ledger.json")
++            )
++
+         # see if there is a custom global steps from which we want to restart training
+         if isinstance(self.config.resume_training_parameters.resume_global_steps, int):
+             self.global_steps = self.config.resume_training_parameters.resume_global_steps
+@@ -1685,6 +1702,7 @@ class RayPPOTrainer:
+ 
+                     # compute global_valid tokens
+                     batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
++                    self.flops_ledger.record_forward("gen", batch.meta_info["global_token_num"])
+ 
+                     with marked_timer("reward", timing_raw, color="yellow"):
+                         # compute reward model score
+@@ -1700,6 +1718,7 @@ class RayPPOTrainer:
+                     # recompute old_log_probs
+                     with marked_timer("old_log_prob", timing_raw, color="blue"):
+                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
++                        self.flops_ledger.record_forward("old_log_prob", batch.meta_info["global_token_num"])
+                         entropys = old_log_prob.batch["entropys"]
+                         response_masks = batch.batch["response_mask"]
+                         loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
+@@ -1741,6 +1760,7 @@ class RayPPOTrainer:
+                             else:
+                                 ref_log_prob = self.actor_rollout_wg.compute_ref_log_prob(batch)
+                             batch = batch.union(ref_log_prob)
++                            self.flops_ledger.record_forward("ref", batch.meta_info["global_token_num"])
+ 
+                     # compute values
+                     if self.use_critic:
+@@ -1867,6 +1887,7 @@ class RayPPOTrainer:
+                         with marked_timer("update_actor", timing_raw, color="red"):
+                             batch.meta_info["multi_turn"] = self.config.actor_rollout_ref.rollout.multi_turn.enable
+                             actor_output = self.actor_rollout_wg.update_actor(batch)
++                            self.flops_ledger.record_train("update_actor", torch.sum(batch.batch["attention_mask"], dim=-1).tolist())
+                         actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
+                         metrics.update(actor_output_metrics)
+                         
+@@ -1924,6 +1945,14 @@ class RayPPOTrainer:
+                                 dump_path=rollout_data_dir,
+                             )
+ 
++                    # FLOPs budget (text-maze budget study): once the ledger's cumulative total reaches
++                    # trainer.max_total_tflops this step is the last one (validated and saved as such)
++                    max_total_tflops = self.config.trainer.get("max_total_tflops", None)
++                    if max_total_tflops and self.flops_ledger.cumulative["total"] >= float(max_total_tflops):
++                        if not is_last_step:
++                            print(f"FLOPs budget reached: {self.flops_ledger.cumulative['total']:.1f} >= {float(max_total_tflops):.1f} TFLOPs at step {self.global_steps}; stopping")
++                        is_last_step = True
++
+                     # validate
+                     validate_on_last_step = (
+                         is_last_step
+@@ -1947,6 +1976,7 @@ class RayPPOTrainer:
+                     if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
+                         with marked_timer("save_checkpoint", timing_raw, color="green"):
+                             self._save_checkpoint()
++                            self.flops_ledger.save(os.path.join(self.config.trainer.default_local_dir, f"global_step_{self.global_steps}", "flops_ledger.json"))
+ 
+                 # training metrics
+                 metrics.update(
+@@ -1961,6 +1991,7 @@ class RayPPOTrainer:
+                 # TODO: implement actual tflpo and theoretical tflpo
+                 n_gpus = self.resource_pool_manager.get_n_gpus()
+                 metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
++                metrics.update(self.flops_ledger.step_metrics())
+ 
+                 # TODO: make a canonical logger that supports various backend
+                 logger.log(data=metrics, step=self.global_steps)
+diff --git a/experiments/text_maze/verl/workers/actor/dp_actor.py b/experiments/text_maze/verl/workers/actor/dp_actor.py
+index 3073ef0..b31c48b 100644
+--- a/experiments/text_maze/verl/workers/actor/dp_actor.py
++++ b/experiments/text_maze/verl/workers/actor/dp_actor.py
+@@ -41,7 +41,10 @@ from verl.utils.ulysses import gather_outpus_and_unpad, ulysses_pad, ulysses_pad
+ from verl.workers.actor import BasePPOActor
+ 
+ if is_cuda_available:
+-    from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
++    try:
++        from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
++    except ImportError:  # no flash-attn build for this GPU; these helpers are only used when use_remove_padding=True
++        index_first_axis = pad_input = rearrange = unpad_input = None
+ elif is_npu_available:
+     from transformers.integrations.npu_flash_attention import index_first_axis, pad_input, rearrange, unpad_input
+ 
+diff --git a/experiments/text_maze/verl/workers/critic/dp_critic.py b/experiments/text_maze/verl/workers/critic/dp_critic.py
+index aedeadd..e2ce07a 100644
+--- a/experiments/text_maze/verl/workers/critic/dp_critic.py
++++ b/experiments/text_maze/verl/workers/critic/dp_critic.py
+@@ -37,7 +37,10 @@ from verl.utils.ulysses import gather_outpus_and_unpad, ulysses_pad_and_slice_in
+ from verl.workers.critic import BasePPOCritic
+ 
+ if is_cuda_available:
+-    from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
++    try:
++        from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
++    except ImportError:  # no flash-attn build for this GPU; these helpers are only used when use_remove_padding=True
++        index_first_axis = pad_input = rearrange = unpad_input = None
+ elif is_npu_available:
+     from transformers.integrations.npu_flash_attention import index_first_axis, pad_input, rearrange, unpad_input
+ 
+diff --git a/experiments/text_maze/verl/workers/fsdp_workers.py b/experiments/text_maze/verl/workers/fsdp_workers.py
+index 1d9ffbd..5a54fde 100644
+--- a/experiments/text_maze/verl/workers/fsdp_workers.py
++++ b/experiments/text_maze/verl/workers/fsdp_workers.py
+@@ -560,7 +560,11 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
+             self.rollout, self.rollout_sharding_manager = self._build_rollout(trust_remote_code=self.config.model.get("trust_remote_code", False))
+ 
+         if self._is_ref:
+-            local_path = copy_to_local(self.config.model.path, use_shm=use_shm)
++            # on-policy distillation: actor_rollout_ref.ref.model_path points the reference policy at the teacher
++            ref_path = self.config.ref.get("model_path", None) or self.config.model.path
++            _saved = ((self.tokenizer, self.processor, self.generation_config, getattr(self, "actor_model_config", None))
++                      if (self._is_actor and ref_path != self.config.model.path) else None)
++            local_path = copy_to_local(ref_path, use_shm=use_shm)
+             self.ref_module_fsdp = self._build_model_optimizer(
+                 model_path=local_path,
+                 fsdp_config=self.config.ref.fsdp_config,
+@@ -572,6 +576,10 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
+                 use_liger=self.config.model.get("use_liger", False),
+                 role="ref",
+             )[0]
++            if _saved is not None:  # the actor keeps its own tokenizer / generation config / model config
++                self.tokenizer, self.processor, self.generation_config, _amc = _saved
++                if _amc is not None:
++                    self.actor_model_config = _amc
+             OmegaConf.set_struct(self.config.ref, True)
+             with open_dict(self.config.ref):
+                 self.config.ref.use_remove_padding = use_remove_padding
+diff --git a/experiments/text_maze/src/maze_zero_reward.py b/experiments/text_maze/src/maze_zero_reward.py
+new file mode 100644
+index 0000000..c6201e0
+--- /dev/null
++++ b/experiments/text_maze/src/maze_zero_reward.py
+@@ -0,0 +1,15 @@
++"""Zero task reward for on-policy distillation (PG-k1): the training signal is the KL term alone.
++
++Returns score 0.0 for every rollout while still reporting the maze judge's outcome fields, so the
++validation metrics (goal_reached, is_shortest, wall_collision, ...) are logged exactly as for RL.
++Mirrors rl-distill's `use_task_rewards=False` (rl-distill-scripts/docs/RECIPES.md, section 3.1).
++"""
++
++from verl.utils.reward_score.maze import judge_maze
++
++
++def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kwargs):
++    res = judge_maze(solution_str=solution_str, ground_truth=ground_truth)
++    res["task_score"] = res.get("score", 0.0)  # keep the goal-reached signal visible in the metrics
++    res["score"] = 0.0
++    return res
+diff --git a/.uv-constraints.txt b/.uv-constraints.txt
+new file mode 100644
+index 0000000..bdd96cd
+--- /dev/null
++++ b/.uv-constraints.txt
+@@ -0,0 +1 @@
++torch==2.8.0
