@@ -69,3 +69,24 @@ Test: Arm B 0.067 / 0.085 / 0.077 / 0.086 / 0.144; best detour 0.060 / 0.092 / 0
 
 Caveat: the largest off-policy cells of the 1% and 0.1% pairs asked for more teacher samples than the 1.3M training
 mazes, so they ran 1.4–5 epochs over 1.3M unique traces within their budget instead of one epoch over more.
+
+## Are the pairs also matched on pretraining CE? (added 2026-10-28)
+
+The pairs were matched on goal-reached pass@1 only. `ce_of_pairs.py` checks the pretraining objective after the fact: CE over
+the path tokens of the 1000 dev mazes' reference paths, i.e. the `eval/val_loss` of the pretraining logs (bf16 reproduces the
+logged values exactly), here in fp32 on the SWA checkpoints; everything is in `ce_of_pairs.json`.
+
+| Start | S0 | L0 | S0 CE | L0 CE | S0 − L0 (paired 95% CI) | entropy S0 / L0 |
+|---|---|---|---|---|---|---|
+| 10% | avg-10040-w60 | avg-4020-w60 | 0.2396 | 0.2428 | −0.0032 [−0.0058, −0.0006] | 0.294 / 0.282 |
+| 1% | avg-9160-w60 | avg-3240-w60 | 0.3244 | 0.3266 | −0.0022 [−0.0058, +0.0015] | 0.385 / 0.368 |
+| 0.1% | avg-8080-w60 | avg-2680-w60 | 0.4033 | 0.4000 | +0.0033 [−0.0001, +0.0067] | 0.461 / 0.473 |
+
+Nats per path token. The pairs are matched to 0.002–0.003 nat (≈1%), which is the resolution of this validation set (≈32k
+path tokens): the seven SWA members of one window scatter with sd 0.006–0.028 (the 10% L0 members span 0.25–0.32), and
+matching by step instead would give S at L's step 0.46 vs L 0.24, L at S's step 0.20 vs S 0.24. Between adjacent pairs CE
+moves ≈0.08 nat per decade of pass@1, so 0.003 nat corresponds to ≈9% relative pass@1; pass@1 itself was matched tighter
+(0.1009 vs 0.1009), so CE agrees as far as it can be measured here, not exactly. Along both pretraining runs the
+(val_loss, screening pass@1) points of S and L lie on one curve, which is why matching pass@1 also matched CE. The
+train-stream loss (per batch, every 10 steps) averaged over ±60 or ±300 steps around the centres differs by ±0.01–0.02 with
+varying sign, single-batch noise.

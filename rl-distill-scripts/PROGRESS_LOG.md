@@ -42,6 +42,13 @@ FLOPs ledgers and console log of every RL run, 97 GB), `meta/` (plans, results, 
 plans/results and the teacher traces; optimizer states and unused RL checkpoints were deleted after the upload was
 verified (`stage_hub_archive.sh` → `verify_hub_archive.py` → `prune_rl_ckpts.sh`).
 
+**Addendum 2026-10-28, pretraining CE of the pairs.** The pairs were matched on pass@1 only; `maze/ce_of_pairs.py`
+(CPU, fp32, the SWA checkpoints, CE over the path tokens of the 1000 dev mazes' reference paths = the pretraining
+`eval/val_loss`) finds them matched on CE too: S₀ / L₀ 0.2396 / 0.2428 (10%), 0.3244 / 0.3266 (1%), 0.4033 / 0.4000 (0.1%)
+nats per token, paired differences 0.002–0.003 with 95% CIs of width ≈0.005, versus 0.22 if matched by step; single SWA
+members scatter with sd 0.006–0.028. Table and context in `maze/BUDGET_STUDY_RESULTS.md`, all numbers in `maze/ce_of_pairs.json`,
+also in the design doc (match-report section) and the panel's pairs table.
+
 **Status.** Complete. Hub upload verified 2026-10-27 23:20 (`verify_hub_archive.py`: 1,251 files, sizes equal, 215 LFS
 sha256 equal, 108 GB); local prune done 23:30 (16,640 optimizer/FSDP shards = 310 GB and 4,026 unused checkpoint dirs
 deleted; `checkpoints/tailrl-text-maze` 375 GB → 3.5 GB, every evaluated checkpoint path still resolves; box 799 GB free).

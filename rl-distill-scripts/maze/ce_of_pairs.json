@@ -1,0 +1,1019 @@
+{
+ "val_set": "/home/jiahaoz4/tailrl_maze_data/sft_data/test.json",
+ "dtype": "float32",
+ "paired": {
+  "p10": {
+   "diff": -0.0032141399251265526,
+   "ci95": [
+    -0.00578958047273291,
+    -0.0005714887216378948
+   ],
+   "s0": "avg-10040-w60",
+   "l0": "avg-4020-w60",
+   "s0_ce": 0.23960287684743714,
+   "l0_ce": 0.24281701677256368,
+   "s0_entropy": 0.2940379818147962,
+   "l0_entropy": 0.28169187004432705
+  },
+  "p1": {
+   "diff": -0.002187217629487213,
+   "ci95": [
+    -0.005817566443038829,
+    0.0014820393106733552
+   ],
+   "s0": "avg-9160-w60",
+   "l0": "avg-3240-w60",
+   "s0_ce": 0.3244039628298419,
+   "l0_ce": 0.3265911804593291,
+   "s0_entropy": 0.3847454306701785,
+   "l0_entropy": 0.3683382730890139
+  },
+  "p01": {
+   "diff": 0.003273085818511076,
+   "ci95": [
+    -0.00012788128251088151,
+    0.006692069089149612
+   ],
+   "s0": "avg-8080-w60",
+   "l0": "avg-2680-w60",
+   "s0_ce": 0.4032935853879604,
+   "l0_ce": 0.40002049956944935,
+   "s0_entropy": 0.461113898305767,
+   "l0_entropy": 0.472793480543636
+  }
+ },
+ "checkpoints": [
+  {
+   "val_loss_sft": 0.23921217346191406,
+   "ce_token": 0.23960287684743714,
+   "ce_token_ci95": [
+    0.23445580003870858,
+    0.24480713824667022
+   ],
+   "nll_seq_mean": 7.600682459354401,
+   "entropy_token": 0.2940379818147962,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "S0",
+   "kind": "matched",
+   "label": "avg-10040-w60",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/matched/p10_S0",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.25501442956924436,
+   "ce_token": 0.25547473107526086,
+   "ce_token_ci95": [
+    0.24979463702567717,
+    0.2615679811942399
+   ],
+   "nll_seq_mean": 8.104169419169425,
+   "entropy_token": 0.29505230491103923,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-9980",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-9980",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.2882059862613678,
+   "ce_token": 0.2887142096963147,
+   "ce_token_ci95": [
+    0.2822191386874467,
+    0.29533270783012966
+   ],
+   "nll_seq_mean": 9.158592159986496,
+   "entropy_token": 0.3085286545781978,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-10000",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-10000",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.23207680976390838,
+   "ce_token": 0.23257290803651837,
+   "ce_token_ci95": [
+    0.22719269401261813,
+    0.23817471451359465
+   ],
+   "nll_seq_mean": 7.377677788734436,
+   "entropy_token": 0.27808209739171424,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-10020",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-10020",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.27168250477313993,
+   "ce_token": 0.2721063898021731,
+   "ce_token_ci95": [
+    0.26642594099262334,
+    0.27795074961253974
+   ],
+   "nll_seq_mean": 8.631758897304534,
+   "entropy_token": 0.3209650854011001,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-10040",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-10040",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.25016389226913455,
+   "ce_token": 0.25058838298376235,
+   "ce_token_ci95": [
+    0.2451341414360602,
+    0.25617070622891797
+   ],
+   "nll_seq_mean": 7.94916468501091,
+   "entropy_token": 0.30307453277004454,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-10060",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-10060",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.2614852570295334,
+   "ce_token": 0.26187605307236134,
+   "ce_token_ci95": [
+    0.25619551488971076,
+    0.2675625097362031
+   ],
+   "nll_seq_mean": 8.307232155561447,
+   "entropy_token": 0.30804401493821065,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-10080",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-10080",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.25202580869197844,
+   "ce_token": 0.25241590082085485,
+   "ce_token_ci95": [
+    0.24705857412957355,
+    0.25775303488017975
+   ],
+   "nll_seq_mean": 8.007137205839157,
+   "entropy_token": 0.30757513502545825,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-10100",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-10100",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.24244356393814087,
+   "ce_token": 0.24281701677256368,
+   "ce_token_ci95": [
+    0.2375453845534005,
+    0.24829866333051973
+   ],
+   "nll_seq_mean": 7.702641406059265,
+   "entropy_token": 0.28169187004432705,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "L0",
+   "kind": "matched",
+   "label": "avg-4020-w60",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/matched/p10_L0",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.322788547039032,
+   "ce_token": 0.3232334871121053,
+   "ce_token_ci95": [
+    0.3149087606776004,
+    0.33252983434515554
+   ],
+   "nll_seq_mean": 10.253612678170205,
+   "entropy_token": 0.3238200616347047,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-3960",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-3960",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.2652122030258179,
+   "ce_token": 0.2656751280135777,
+   "ce_token_ci95": [
+    0.25966679044742613,
+    0.2718420411417562
+   ],
+   "nll_seq_mean": 8.42774641084671,
+   "entropy_token": 0.292616567570208,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-3980",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-3980",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.25511597204208375,
+   "ce_token": 0.2555117869571046,
+   "ce_token_ci95": [
+    0.24993514737876343,
+    0.26128310184418535
+   ],
+   "nll_seq_mean": 8.105344905853272,
+   "entropy_token": 0.28872719705934546,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-4000",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-4000",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.27891358983516695,
+   "ce_token": 0.27931511849324675,
+   "ce_token_ci95": [
+    0.27270077881533583,
+    0.2859882601589334
+   ],
+   "nll_seq_mean": 8.860434188842774,
+   "entropy_token": 0.2983533872668996,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-4020",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-4020",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.3222352224588394,
+   "ce_token": 0.3224843426900962,
+   "ce_token_ci95": [
+    0.3145631147615545,
+    0.33067789411368576
+   ],
+   "nll_seq_mean": 10.22984831881523,
+   "entropy_token": 0.30590772796638366,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-4040",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-4040",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.2875707827806473,
+   "ce_token": 0.28789985618828207,
+   "ce_token_ci95": [
+    0.2817166922752743,
+    0.2942600643794433
+   ],
+   "nll_seq_mean": 9.132759238004684,
+   "entropy_token": 0.31224506150765474,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-4060",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-4060",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.24970910727977752,
+   "ce_token": 0.2501771521932067,
+   "ce_token_ci95": [
+    0.2444821694351564,
+    0.25602631764883776
+   ],
+   "nll_seq_mean": 7.936119621872902,
+   "entropy_token": 0.2816837891388721,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-4080",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-4080",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.3239254431724548,
+   "ce_token": 0.3244039628298419,
+   "ce_token_ci95": [
+    0.3183180334905411,
+    0.33068530473325536
+   ],
+   "nll_seq_mean": 10.290742508888245,
+   "entropy_token": 0.3847454306701785,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "S0",
+   "kind": "matched",
+   "label": "avg-9160-w60",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/matched/p1_S0",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.34441386365890503,
+   "ce_token": 0.3449594746411023,
+   "ce_token_ci95": [
+    0.3383104748055526,
+    0.3516263733095152
+   ],
+   "nll_seq_mean": 10.942804454565048,
+   "entropy_token": 0.39380352748745384,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-9100",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-9100",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.3490685317516327,
+   "ce_token": 0.3495871740454466,
+   "ce_token_ci95": [
+    0.34298027619230054,
+    0.3561466722526304
+   ],
+   "nll_seq_mean": 11.089604335069657,
+   "entropy_token": 0.392958947547116,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-9120",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-9120",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.3501287186145782,
+   "ce_token": 0.35057005605077723,
+   "ce_token_ci95": [
+    0.34419362034919443,
+    0.35698724331751636
+   ],
+   "nll_seq_mean": 11.120783318042756,
+   "entropy_token": 0.4067627382283925,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-9140",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-9140",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.3247635647058487,
+   "ce_token": 0.3253630686885554,
+   "ce_token_ci95": [
+    0.31896210438575484,
+    0.33192011075872635
+   ],
+   "nll_seq_mean": 10.321167264938355,
+   "entropy_token": 0.3881439467856116,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-9160",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-9160",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.3306870082616806,
+   "ce_token": 0.33118915123443765,
+   "ce_token_ci95": [
+    0.32473887933261575,
+    0.3378482111990389
+   ],
+   "nll_seq_mean": 10.505982255458832,
+   "entropy_token": 0.37451937572495164,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-9180",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-9180",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.3484160383939743,
+   "ce_token": 0.34887982194942724,
+   "ce_token_ci95": [
+    0.3424647277878575,
+    0.35554010481050385
+   ],
+   "nll_seq_mean": 11.06716571187973,
+   "entropy_token": 0.40521705062139574,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-9200",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-9200",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.3523240351676941,
+   "ce_token": 0.3527364507613481,
+   "ce_token_ci95": [
+    0.3465120593905979,
+    0.3590816766398677
+   ],
+   "nll_seq_mean": 11.189505691051483,
+   "entropy_token": 0.3924310281505939,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-9220",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-9220",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.3260386712551117,
+   "ce_token": 0.3265911804593291,
+   "ce_token_ci95": [
+    0.32072897201211625,
+    0.332707674256363
+   ],
+   "nll_seq_mean": 10.360125426530837,
+   "entropy_token": 0.3683382730890139,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "L0",
+   "kind": "matched",
+   "label": "avg-3240-w60",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/matched/p1_L0",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.3745056077241898,
+   "ce_token": 0.37507360786186417,
+   "ce_token_ci95": [
+    0.36823328191479304,
+    0.38220882412490365
+   ],
+   "nll_seq_mean": 11.898084988594055,
+   "entropy_token": 0.4052123529641284,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-3180",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-3180",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.35890171194076537,
+   "ce_token": 0.3594448537124856,
+   "ce_token_ci95": [
+    0.3530736331383453,
+    0.3658188148632721
+   ],
+   "nll_seq_mean": 11.402309649467469,
+   "entropy_token": 0.4030626978963747,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-3200",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-3200",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.33596147048473357,
+   "ce_token": 0.3365458371953265,
+   "ce_token_ci95": [
+    0.3300759678679544,
+    0.3430454331935938
+   ],
+   "nll_seq_mean": 10.675907047510147,
+   "entropy_token": 0.3784186106278993,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-3220",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-3220",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.3408723895549774,
+   "ce_token": 0.34153434224029816,
+   "ce_token_ci95": [
+    0.3349579658711131,
+    0.34837937058803253
+   ],
+   "nll_seq_mean": 10.834152404546737,
+   "entropy_token": 0.3681084434499816,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-3240",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-3240",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.32635154950618744,
+   "ce_token": 0.32701454618961573,
+   "ce_token_ci95": [
+    0.3202285191709076,
+    0.3342250962164834
+   ],
+   "nll_seq_mean": 10.37355543422699,
+   "entropy_token": 0.35728087795125923,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-3260",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-3260",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.34028564047813414,
+   "ce_token": 0.34090661228428376,
+   "ce_token_ci95": [
+    0.33468371814622433,
+    0.347352569343686
+   ],
+   "nll_seq_mean": 10.81423955488205,
+   "entropy_token": 0.3718528011328302,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-3280",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-3280",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.337483695268631,
+   "ce_token": 0.33805246247476217,
+   "ce_token_ci95": [
+    0.3317388142374189,
+    0.3445078956723013
+   ],
+   "nll_seq_mean": 10.723700214624404,
+   "entropy_token": 0.38547741911093086,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-3300",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-3300",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.40283728432655336,
+   "ce_token": 0.4032935853879604,
+   "ce_token_ci95": [
+    0.3974862811894014,
+    0.40951680177955985
+   ],
+   "nll_seq_mean": 12.79327911567688,
+   "entropy_token": 0.461113898305767,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "S0",
+   "kind": "matched",
+   "label": "avg-8080-w60",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/matched/p01_S0",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.41133409523963926,
+   "ce_token": 0.41180156140976526,
+   "ce_token_ci95": [
+    0.4057948627480875,
+    0.41825023493275454
+   ],
+   "nll_seq_mean": 13.063169131040572,
+   "entropy_token": 0.4629857110564124,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-8020",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-8020",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.4116566445827484,
+   "ce_token": 0.4121314480719444,
+   "ce_token_ci95": [
+    0.40555212054561307,
+    0.4187385080935464
+   ],
+   "nll_seq_mean": 13.07363379573822,
+   "entropy_token": 0.4642029162358258,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-8040",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-8040",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.40176965546607973,
+   "ce_token": 0.4022806666701718,
+   "ce_token_ci95": [
+    0.39590483267487364,
+    0.4091178232292066
+   ],
+   "nll_seq_mean": 12.761147308111191,
+   "entropy_token": 0.4508874855450671,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-8060",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-8060",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.41712414407730103,
+   "ce_token": 0.41755109192271167,
+   "ce_token_ci95": [
+    0.4114771241500658,
+    0.42377628958579644
+   ],
+   "nll_seq_mean": 13.245555737972259,
+   "entropy_token": 0.48069342045279334,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-8080",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-8080",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.42227282404899597,
+   "ce_token": 0.42270395203501343,
+   "ce_token_ci95": [
+    0.41652243236787284,
+    0.42896872002399467
+   ],
+   "nll_seq_mean": 13.409014766454696,
+   "entropy_token": 0.4813585986545019,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-8100",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-8100",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.412817111492157,
+   "ce_token": 0.41330299815767224,
+   "ce_token_ci95": [
+    0.4072602695882372,
+    0.4197954461255261
+   ],
+   "nll_seq_mean": 13.110797707557678,
+   "entropy_token": 0.4769081098608175,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-8120",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-8120",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.4061150016784668,
+   "ce_token": 0.40660626839722597,
+   "ce_token_ci95": [
+    0.40034347641047324,
+    0.4134803333798426
+   ],
+   "nll_seq_mean": 12.898364046096802,
+   "entropy_token": 0.4478200247583163,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "S0",
+   "kind": "member",
+   "label": "ckpt-8140",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-8140",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.39950449895858764,
+   "ce_token": 0.40002049956944935,
+   "ce_token_ci95": [
+    0.39381869534233155,
+    0.40672217154555956
+   ],
+   "nll_seq_mean": 12.689450287342071,
+   "entropy_token": 0.472793480543636,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "L0",
+   "kind": "matched",
+   "label": "avg-2680-w60",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/matched/p01_L0",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.44076960039138796,
+   "ce_token": 0.4413226265886544,
+   "ce_token_ci95": [
+    0.43428568685831365,
+    0.4487085075667887
+   ],
+   "nll_seq_mean": 13.999636360645294,
+   "entropy_token": 0.5137631669933443,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-2620",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-2620",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.4160624585151672,
+   "ce_token": 0.41664146768228305,
+   "ce_token_ci95": [
+    0.40972518570503,
+    0.4242223065002448
+   ],
+   "nll_seq_mean": 13.216700637817382,
+   "entropy_token": 0.47970843044912265,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-2640",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-2640",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.41503137946128843,
+   "ce_token": 0.41556941223553395,
+   "ce_token_ci95": [
+    0.40912655979586954,
+    0.4223542976170655
+   ],
+   "nll_seq_mean": 13.182692894935608,
+   "entropy_token": 0.488281398287999,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-2660",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-2660",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.3997003884315491,
+   "ce_token": 0.4002659230791119,
+   "ce_token_ci95": [
+    0.39355408351359733,
+    0.40705881299102425
+   ],
+   "nll_seq_mean": 12.697235611915588,
+   "entropy_token": 0.45258484318450676,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-2680",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-2680",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.41326220011711123,
+   "ce_token": 0.41383580319420415,
+   "ce_token_ci95": [
+    0.40733956307719826,
+    0.4207413445415242
+   ],
+   "nll_seq_mean": 13.127699348926544,
+   "entropy_token": 0.47365562880921097,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-2700",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-2700",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.40796685314178466,
+   "ce_token": 0.40851672161242514,
+   "ce_token_ci95": [
+    0.40193364434191015,
+    0.4156311484986527
+   ],
+   "nll_seq_mean": 12.95896744298935,
+   "entropy_token": 0.47089683244285774,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-2720",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-2720",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.4130447106361389,
+   "ce_token": 0.41351411033117125,
+   "ce_token_ci95": [
+    0.4068316561451988,
+    0.42065507482104336
+   ],
+   "nll_seq_mean": 13.117494607925416,
+   "entropy_token": 0.4846427876482418,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "L0",
+   "kind": "member",
+   "label": "ckpt-2740",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-2740",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.4605054717063904,
+   "ce_token": 0.4610306767044659,
+   "ce_token_ci95": [
+    0.45400916833925764,
+    0.4679943177963078
+   ],
+   "nll_seq_mean": 14.624815126419067,
+   "entropy_token": 0.5363141326823053,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "S0",
+   "kind": "control",
+   "label": "ckpt-4020 (S at L's step)",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-4020",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.20119866859912872,
+   "ce_token": 0.20149384564976397,
+   "ce_token_ci95": [
+    0.19682586292873125,
+    0.2062529712345298
+   ],
+   "nll_seq_mean": 6.391787771701813,
+   "entropy_token": 0.2182035246821966,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p10",
+   "model": "L0",
+   "kind": "control",
+   "label": "ckpt-10040 (L at S's step)",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-10040",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.4606976680755615,
+   "ce_token": 0.46126651266365104,
+   "ce_token_ci95": [
+    0.45421537954928964,
+    0.4682759687305821
+   ],
+   "nll_seq_mean": 14.632296314716339,
+   "entropy_token": 0.5262613391963524,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "S0",
+   "kind": "control",
+   "label": "ckpt-3240 (S at L's step)",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-3240",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.20602537882328034,
+   "ce_token": 0.20628119492078367,
+   "ce_token_ci95": [
+    0.20161287837449088,
+    0.21106122234385774
+   ],
+   "nll_seq_mean": 6.5436520652771,
+   "entropy_token": 0.22928650370606077,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p1",
+   "model": "L0",
+   "kind": "control",
+   "label": "ckpt-9160 (L at S's step)",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-9160",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.4564801881313324,
+   "ce_token": 0.4571519438401649,
+   "ce_token_ci95": [
+    0.4495110924509394,
+    0.46488900972888836
+   ],
+   "nll_seq_mean": 14.501773962497712,
+   "entropy_token": 0.5097216370871023,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "S0",
+   "kind": "control",
+   "label": "ckpt-2680 (S at L's step)",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/S_ds0_is4/ckpt-2680",
+   "dtype": "float32"
+  },
+  {
+   "val_loss_sft": 0.2058954985141754,
+   "ce_token": 0.2061124302220896,
+   "ce_token_ci95": [
+    0.20110242713888202,
+    0.21102390249036854
+   ],
+   "nll_seq_mean": 6.538298511505127,
+   "entropy_token": 0.22394711981654913,
+   "n_seq": 1000,
+   "n_tok": 31722,
+   "pair": "p01",
+   "model": "L0",
+   "kind": "control",
+   "label": "ckpt-8080 (L at S's step)",
+   "path": "/home/jiahaoz4/tailrl_maze_runs/pretrain20k/L_ds0_is0_rep/ckpt-8080",
+   "dtype": "float32"
+  }
+ ]
+}
