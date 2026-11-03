@@ -13,6 +13,8 @@
 # Usage: bash rl-distill-scripts/maze/launch_pretrain_matrix.sh [--dry-run]
 #   RUNS_ROOT (default ~/tailrl_maze_runs/pretrain), TRAIN_GPUS (default "0 1"), MAX_STEPS (6000),
 #   SAVE_STEPS (10), EVAL_STEPS (50) can be overridden in the environment.
+#   RUN_SPECS="S_ds0_is4 S 4;L_ds0_is0_rep L 0" replaces the default run list ("name size init_seed" per ';'), e.g. to
+#   regenerate the two trajectories the matched pairs came from (20k steps: MAX_STEPS=20000 SAVE_STEPS=20).
 set -euo pipefail
 
 TAILRL=${TAILRL:-$HOME/TailRL}
@@ -44,6 +46,7 @@ RUNS=(
   "L_ds${DATA_SEED}_is2 L 2"
   "L_ds${DATA_SEED}_is0_rep L 0"
 )
+if [ -n "${RUN_SPECS:-}" ]; then IFS=';' read -r -a RUNS <<< "$RUN_SPECS"; fi
 
 mkdir -p "$RUNS_ROOT"
 i=0

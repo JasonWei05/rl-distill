@@ -58,6 +58,15 @@ venv pins, `.env`, data rebuild from the public corpus, Hub checkpoints in the e
 reproduced. The pruned pretraining runs (`~/tailrl_maze_runs/pretrain20k`, 1.29 GB, 546 files) were uploaded to the Hub repo
 as `pretrain/` with `meta/pretrain_manifest.json` (`maze/upload_pretrain_archive.py`).
 
+**Addendum 2026-11-03, RL-curve family and extra starts (planned).** First scaling-law pass on the study: per size, a
+two-phase family a(C; p1, p16, p64) (fast sharpening to pass@16, then a sigmoid in log compute whose midpoint is
+C_mid ∝ pass@16^−γ) fitted jointly over the three starts reproduces every RL dev curve to 0.02–0.03 with six shared
+parameters per size; γ ≈ 2.5 (S) vs 1.1 (L) is the size × start interaction. Composed with a transfer law
+(students recover 0.8–1.07 of the teacher's gain, rising with D/C_L), it reproduces best-detour − direct-RL to 0.03
+in-sample, but the start dependence does not extrapolate from three levels. `maze/rl_curve_family.py` (extract +
+fit) and `maze/data/rl_curves_v1.json` (the existing curves and start profiles) are committed; two more start levels
+(3%, 0.3%) per size are planned on another machine, runbook: https://claude.ai/artifact/Fppdo1u52xm7SLEQCpcN5k.
+
 **Status.** Complete. Hub upload verified 2026-10-27 23:20 (`verify_hub_archive.py`: 1,251 files, sizes equal, 215 LFS
 sha256 equal, 108 GB); local prune done 23:30 (16,640 optimizer/FSDP shards = 310 GB and 4,026 unused checkpoint dirs
 deleted; `checkpoints/tailrl-text-maze` 375 GB → 3.5 GB, every evaluated checkpoint path still resolves; box 799 GB free).
