@@ -85,7 +85,8 @@ are not needed.
    (other args default), then the two `to_rl_parquet.py` calls of `prepare_dataset.sh` with `--in_path .../test_fresh.jsonl
    --out_dir ~/tailrl_maze_data/test1000 --test_prompts 1000` (`--variants maze_17_continuous`, and `--variants maze_17 --canonical`
    → `test.parquet`). Generation is seeded, so this reproduces the set used here (not re-verified on another machine).
-5. **Starting checkpoints** (instead of re-running the pretraining matrix + `make_pair.py`; `pretrain20k/` is not archived): for
+5. **Starting checkpoints** (instead of re-running the pretraining matrix + `make_pair.py`; what survives of the pretraining
+   runs is on the Hub under `pretrain/<run>/`, described by `meta/pretrain_manifest.json`, uploaded by `upload_pretrain_archive.py`): for
    each pair `p10`, `p1`, `p01` download `used/<pair>/S0_base` and `used/<pair>/L0_base` from the Hub and lay them out as
    `~/tailrl_maze_runs/matched/<pair>_S0` (the HF dir) + `~/tailrl_maze_runs/matched/<pair>_S0_base/ckpt-0 -> ../<pair>_S0` (same
    for `L0`); `meta/matched_manifest.json` → `matched/manifest.json`. `launch_pair_rl.sh` and `run_budget_matrix.sh` take it from there.
@@ -95,7 +96,8 @@ are not needed.
    `~/tailrl_maze_runs/budget/<pair>/`. Those files store absolute `/home/jiahaoz4/…` paths: rewrite the prefix
    (`sed -i "s#/home/jiahaoz4#$HOME#g"`) if `$HOME` differs; `meta/used_manifest.json` maps every `used/` entry to its original run
    path. Not reproducible anywhere: resuming an RL run with its optimizer state (`*.pt` were deleted everywhere) and re-screening or
-   re-averaging the pretraining trajectories (pruned; the 1.3 GB remnant lives only on aiai-rtx-2). The teacher traces of the
+   re-averaging the pretraining trajectories (pruned; the 1.3 GB that survives — the used candidates' 7-member windows, the same-step
+   S/L controls, every run's init model, metrics, screening curves and selection tables — is `pretrain/` on the Hub). The teacher traces of the
    off-policy cells (112 GB here) are not archived; `gen_teacher_traces.py --seed 0` regenerates them from the Hub teachers.
 7. **GPU memory.** Everything is one GPU per job. The study ran on 96 GB cards; evaluation (`collect_budget_results.py` →
    `screen_sft_ckpts.screen_one`, ≤ 8192 sequences per generate call) peaked at 40–60 GB at k = 256 — on smaller cards lower the

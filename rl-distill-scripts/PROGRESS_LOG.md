@@ -37,7 +37,9 @@ https://claude.ai/artifact/GwvwZLHcj5YJPg5vBqwbGK; design doc: https://claude.ai
 
 **Artifacts.** Public Hub dataset repo https://huggingface.co/datasets/hi-todayis-jh/tailrl-text-maze-budget-study:
 `used/<pair>/<label>/` (HF export of every evaluated checkpoint + S₀/L₀ bases, 4.5 GB), `archive/<run>.tar` (HF exports,
-FLOPs ledgers and console log of every RL run, 97 GB), `meta/` (plans, results, manifests). Local runs dir
+FLOPs ledgers and console log of every RL run, 97 GB), `meta/` (plans, results, manifests), and since 2026-11-02 `pretrain/<run>/`
+(what survives of the 12 pretraining runs after `prune_pretrain_ckpts.sh`: SWA candidates, the used candidates' member windows and
+same-step S/L controls, init models, metrics, screening and selection tables, 1.3 GB; `meta/pretrain_manifest.json`). Local runs dir
 `~/tailrl_maze_runs/` on aiai-rtx-2 keeps only the 134 evaluated checkpoint dirs (HF exports), the off-policy finals,
 plans/results and the teacher traces; optimizer states and unused RL checkpoints were deleted after the upload was
 verified (`stage_hub_archive.sh` → `verify_hub_archive.py` → `prune_rl_ckpts.sh`).
@@ -48,6 +50,13 @@ verified (`stage_hub_archive.sh` → `verify_hub_archive.py` → `prune_rl_ckpts
 nats per token, paired differences 0.002–0.003 with 95% CIs of width ≈0.005, versus 0.22 if matched by step; single SWA
 members scatter with sd 0.006–0.028. Table and context in `maze/BUDGET_STUDY_RESULTS.md`, all numbers in `maze/ce_of_pairs.json`,
 also in the design doc (match-report section) and the panel's pairs table.
+
+**Addendum 2026-11-02, portability.** `maze/tailrl_text_maze.patch` had shipped 10 of the 11 TailRL changes (the new
+`verl/utils/flops_ledger.py` was missing, so upstream + patch failed at import); regenerated and verified against upstream
+`5682c6a` (9530b80f). `BUDGET_STUDY_RUNBOOK.md` gained a "Setting up on another machine" section (c62aee0f): fork + patch,
+venv pins, `.env`, data rebuild from the public corpus, Hub checkpoints in the expected `matched/` layout, what cannot be
+reproduced. The pruned pretraining runs (`~/tailrl_maze_runs/pretrain20k`, 1.29 GB, 546 files) were uploaded to the Hub repo
+as `pretrain/` with `meta/pretrain_manifest.json` (`maze/upload_pretrain_archive.py`).
 
 **Status.** Complete. Hub upload verified 2026-10-27 23:20 (`verify_hub_archive.py`: 1,251 files, sizes equal, 215 LFS
 sha256 equal, 108 GB); local prune done 23:30 (16,640 optimizer/FSDP shards = 310 GB and 4,026 unused checkpoint dirs
