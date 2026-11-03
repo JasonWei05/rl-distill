@@ -1,3 +1,10 @@
+diff --git a/.uv-constraints.txt b/.uv-constraints.txt
+new file mode 100644
+index 0000000..bdd96cd
+--- /dev/null
++++ b/.uv-constraints.txt
+@@ -0,0 +1 @@
++torch==2.8.0
 diff --git a/experiments/text_maze/scripts/sft_pretrain.py b/experiments/text_maze/scripts/sft_pretrain.py
 index 668db55..3efc2a7 100644
 --- a/experiments/text_maze/scripts/sft_pretrain.py
@@ -174,6 +181,27 @@ index 6533aec..91d87b5 100755
    trainer.default_local_dir="${CHECKPOINT_DIR}/${PROJECT_NAME}/${EXPERIMENT_NAME}" \
    "${VAL_ONLY_ARGS[@]}" \
    trainer.total_epochs=100 ; } 2>&1 | { [ -n "${VAL_OUT}" ] && tee "${VAL_OUT}" || cat ; }
+diff --git a/experiments/text_maze/src/maze_zero_reward.py b/experiments/text_maze/src/maze_zero_reward.py
+new file mode 100644
+index 0000000..c6201e0
+--- /dev/null
++++ b/experiments/text_maze/src/maze_zero_reward.py
+@@ -0,0 +1,15 @@
++"""Zero task reward for on-policy distillation (PG-k1): the training signal is the KL term alone.
++
++Returns score 0.0 for every rollout while still reporting the maze judge's outcome fields, so the
++validation metrics (goal_reached, is_shortest, wall_collision, ...) are logged exactly as for RL.
++Mirrors rl-distill's `use_task_rewards=False` (rl-distill-scripts/docs/RECIPES.md, section 3.1).
++"""
++
++from verl.utils.reward_score.maze import judge_maze
++
++
++def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kwargs):
++    res = judge_maze(solution_str=solution_str, ground_truth=ground_truth)
++    res["task_score"] = res.get("score", 0.0)  # keep the goal-reached signal visible in the metrics
++    res["score"] = 0.0
++    return res
 diff --git a/experiments/text_maze/verl/trainer/ppo/core_algos.py b/experiments/text_maze/verl/trainer/ppo/core_algos.py
 index b1fa468..9eaf974 100644
 --- a/experiments/text_maze/verl/trainer/ppo/core_algos.py
@@ -314,6 +342,137 @@ index 36838ab..3b8d44c 100644
  
                  # TODO: make a canonical logger that supports various backend
                  logger.log(data=metrics, step=self.global_steps)
+diff --git a/experiments/text_maze/verl/utils/flops_ledger.py b/experiments/text_maze/verl/utils/flops_ledger.py
+new file mode 100644
+index 0000000..025b7d9
+--- /dev/null
++++ b/experiments/text_maze/verl/utils/flops_ledger.py
+@@ -0,0 +1,125 @@
++"""Per-phase analytic FLOPs ledger for the RL loop (text-maze RL-vs-distillation study).
++
++FLOPs are computed from token counts with the same formula as `FlopsCounter`, never from
++wall-clock time, so the numbers do not depend on hardware or utilization:
++
++    training pass (forward + backward) = 6 N T + 12 d_head n_heads n_layers sum_s len_s^2
++    forward-only pass                  = one third of that
++
++Phases recorded by the trainer:
++    gen           rollout generation, counted as one forward over prompt + response of every
++                  generated sequence (prefill + decode; the attention term is the full non-causal
++                  formula; calibrated 2026-10-26 at 0.97-0.98 of FlopCounterMode for generation,
++                  0.998-1.000 for forward and update)
++    old_log_prob  the actor forward that recomputes log-probs before the update
++    ref           the reference-policy forward (KL in reward); for on-policy distillation the
++                  reference is the TEACHER, so this phase is costed with the teacher's config
++                  (set_ref_model_path)
++    update_actor  the policy update, forward + backward, times ppo_epochs
++    teacher       reserved for other teacher passes
++
++Generated tokens are counted at generation time, before any filtering, so discarded groups still
++cost what they cost. Cumulative totals are saved next to each checkpoint (flops_ledger.json) and
++restored on resume. Everything is logged in TFLOPs.
++"""
++
++import json
++import os
++from collections import defaultdict
++
++from transformers import AutoConfig
++
++from verl.utils.flops_counter import FlopsCounter
++
++
++class FlopsLedger:
++    PHASES = ("gen", "old_log_prob", "ref", "update_actor", "teacher")
++
++    def __init__(self, model_config, ppo_epochs: int = 1):
++        self.counter = FlopsCounter(model_config)
++        self.model_type = model_config.model_type
++        self.ref_counter = None  # a different model (the teacher) for the "ref" phase, if set
++        self.ref_model_type = None
++        self.ppo_epochs = ppo_epochs
++        self.uncounted_critic = False
++        self.cumulative = defaultdict(float)  # TFLOPs per phase, plus "total"
++        self.cumulative_gen_tokens = 0
++        self._step = defaultdict(float)
++        self._step_gen_tokens = 0
++
++    @classmethod
++    def from_model_path(cls, model_path: str, ppo_epochs: int = 1, trust_remote_code: bool = False):
++        config = AutoConfig.from_pretrained(model_path, trust_remote_code=trust_remote_code)
++        return cls(config, ppo_epochs=ppo_epochs)
++
++    def set_ref_model_path(self, model_path: str, trust_remote_code: bool = False):
++        config = AutoConfig.from_pretrained(model_path, trust_remote_code=trust_remote_code)
++        self.ref_counter = FlopsCounter(config)
++        self.ref_model_type = config.model_type
++
++    # ---- the formula -------------------------------------------------------------------------
++    def _train_tflops_with(self, counter, model_type, seqlens) -> float:
++        fn = counter.estimate_func.get(model_type)
++        if fn is None:  # FlopsCounter already printed that the architecture is unsupported
++            return 0.0
++        seqlens = [int(s) for s in seqlens]
++        # estimate_* returns flops / delta_time / 1e12, so delta_time = 1 gives TFLOPs
++        return float(fn(sum(seqlens), seqlens, 1.0))
++
++    def train_tflops(self, seqlens) -> float:
++        """Forward + backward TFLOPs for one actor pass over sequences of the given lengths."""
++        return self._train_tflops_with(self.counter, self.model_type, seqlens)
++
++    def forward_tflops(self, seqlens, phase: str = "gen") -> float:
++        if phase == "ref" and self.ref_counter is not None:
++            return self._train_tflops_with(self.ref_counter, self.ref_model_type, seqlens) / 3.0
++        return self.train_tflops(seqlens) / 3.0
++
++    # ---- recording ---------------------------------------------------------------------------
++    def record_forward(self, phase: str, seqlens):
++        self._add(phase, self.forward_tflops(seqlens, phase))
++        if phase == "gen":
++            n = int(sum(int(s) for s in seqlens))
++            self._step_gen_tokens += n
++            self.cumulative_gen_tokens += n
++
++    def record_train(self, phase: str, seqlens, epochs: int | None = None):
++        self._add(phase, self.train_tflops(seqlens) * (self.ppo_epochs if epochs is None else epochs))
++
++    def _add(self, phase: str, tflops: float):
++        self._step[phase] += tflops
++        self._step["total"] += tflops
++        self.cumulative[phase] += tflops
++        self.cumulative["total"] += tflops
++
++    # ---- reporting ---------------------------------------------------------------------------
++    def step_metrics(self, prefix: str = "tflops") -> dict:
++        """Metrics for the step just finished; resets the per-step accumulators."""
++        m = {f"{prefix}/{k}": v for k, v in self._step.items()}
++        m.update({f"{prefix}/cumulative_{k}": v for k, v in self.cumulative.items()})
++        m[f"{prefix}/gen_tokens"] = self._step_gen_tokens
++        m[f"{prefix}/cumulative_gen_tokens"] = self.cumulative_gen_tokens
++        if self.uncounted_critic:
++            m[f"{prefix}/critic_uncounted"] = 1.0
++        self._step = defaultdict(float)
++        self._step_gen_tokens = 0
++        return m
++
++    # ---- persistence across resume -----------------------------------------------------------
++    def save(self, path: str):
++        os.makedirs(os.path.dirname(path), exist_ok=True)
++        with open(path, "w") as f:
++            json.dump(
++                {"cumulative_tflops": dict(self.cumulative), "cumulative_gen_tokens": self.cumulative_gen_tokens},
++                f,
++                indent=2,
++            )
++
++    def load(self, path: str) -> bool:
++        if not os.path.isfile(path):
++            return False
++        with open(path) as f:
++            state = json.load(f)
++        self.cumulative = defaultdict(float, state.get("cumulative_tflops", {}))
++        self.cumulative_gen_tokens = int(state.get("cumulative_gen_tokens", 0))
++        return True
 diff --git a/experiments/text_maze/verl/workers/actor/dp_actor.py b/experiments/text_maze/verl/workers/actor/dp_actor.py
 index 3073ef0..b31c48b 100644
 --- a/experiments/text_maze/verl/workers/actor/dp_actor.py
@@ -374,31 +533,3 @@ index 1d9ffbd..5a54fde 100644
              OmegaConf.set_struct(self.config.ref, True)
              with open_dict(self.config.ref):
                  self.config.ref.use_remove_padding = use_remove_padding
-diff --git a/experiments/text_maze/src/maze_zero_reward.py b/experiments/text_maze/src/maze_zero_reward.py
-new file mode 100644
-index 0000000..c6201e0
---- /dev/null
-+++ b/experiments/text_maze/src/maze_zero_reward.py
-@@ -0,0 +1,15 @@
-+"""Zero task reward for on-policy distillation (PG-k1): the training signal is the KL term alone.
-+
-+Returns score 0.0 for every rollout while still reporting the maze judge's outcome fields, so the
-+validation metrics (goal_reached, is_shortest, wall_collision, ...) are logged exactly as for RL.
-+Mirrors rl-distill's `use_task_rewards=False` (rl-distill-scripts/docs/RECIPES.md, section 3.1).
-+"""
-+
-+from verl.utils.reward_score.maze import judge_maze
-+
-+
-+def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kwargs):
-+    res = judge_maze(solution_str=solution_str, ground_truth=ground_truth)
-+    res["task_score"] = res.get("score", 0.0)  # keep the goal-reached signal visible in the metrics
-+    res["score"] = 0.0
-+    return res
-diff --git a/.uv-constraints.txt b/.uv-constraints.txt
-new file mode 100644
-index 0000000..bdd96cd
---- /dev/null
-+++ b/.uv-constraints.txt
-@@ -0,0 +1 @@
-+torch==2.8.0
