@@ -15,6 +15,7 @@
 #   SAVE_STEPS (10), EVAL_STEPS (50) can be overridden in the environment.
 #   RUN_SPECS="S_ds0_is4 S 4;L_ds0_is0_rep L 0" replaces the default run list ("name size init_seed" per ';'), e.g. to
 #   regenerate the two trajectories the matched pairs came from (20k steps: MAX_STEPS=20000 SAVE_STEPS=20).
+#   FOREGROUND=1: after launching, wait until every run has a DONE or FAILED marker; exit 1 if any FAILED (gpu_queue.sh).
 set -euo pipefail
 
 TAILRL=${TAILRL:-$HOME/TailRL}
@@ -65,7 +66,7 @@ for spec in "${RUNS[@]}"; do
   echo "[gpu $gpu] $name: ${cmd[*]}"
   if [ "$DRY_RUN" = 0 ]; then
     if [ -f "$out/DONE" ]; then echo "  [skip] $out/DONE exists"; i=$((i+1)); continue; fi
-    mkdir -p "$out"
+    mkdir -p "$out"; rm -f "$out/FAILED"   # a relaunch clears the marker of an earlier failed attempt
     ( cd "$EXP" && CUDA_VISIBLE_DEVICES=$gpu PYTHONPATH=$EXP PYTHONNOUSERSITE=1 setsid nohup bash -c \
         "$(printf '%q ' "${cmd[@]}") > '$out/train.log' 2>&1 && touch '$out/DONE' || touch '$out/FAILED'" \
         > /dev/null 2>&1 < /dev/null & )
@@ -74,3 +75,18 @@ for spec in "${RUNS[@]}"; do
   i=$((i+1))
 done
 echo "launched ${#RUNS[@]} runs under $RUNS_ROOT (DRY_RUN=$DRY_RUN); logs: <run>/train.log; markers: DONE / FAILED"
+if [ "$DRY_RUN" = 0 ] && [ "${FOREGROUND:-0}" = 1 ]; then
+  echo "$(date -Is) FOREGROUND=1: waiting for every run's DONE / FAILED marker"
+  while :; do
+    pending=0; failed=0
+    for spec in "${RUNS[@]}"; do
+      read -r name _ <<< "$spec"; out=$RUNS_ROOT/$name
+      [ -f "$out/FAILED" ] && failed=1
+      { [ -f "$out/DONE" ] || [ -f "$out/FAILED" ]; } || pending=1
+    done
+    [ $pending = 0 ] && break
+    sleep "${WAIT_POLL:-60}"
+  done
+  echo "$(date -Is) all runs finished; failed=$failed"
+  [ $failed = 0 ] || exit 1
+fi

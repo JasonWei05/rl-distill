@@ -116,13 +116,21 @@ def cmd_extract(args):
 
 # --------------------------------------------------------------------------------------------------------- fit
 def load_data(paths):
-    starts, curves = {}, []
+    """Merge data files; a curve (pair, model, seed) in a later file replaces the same curve from an earlier one
+    (e.g. the 1% seed-1 re-run replaces the 2,200-step run in rl_curves_v1.json)."""
+    starts, curves = {}, {}
     for p in paths:
         d = json.load(open(os.path.expanduser(p)))
         for pair, v in d["starts"].items():
             starts.setdefault(pair, {}).update(v)
-        curves.extend(d["curves"])
-    return starts, curves
+        new = {}
+        for c in d["curves"]:
+            new.setdefault((c["pair"], c["model"], c["seed"]), []).append(c)
+        for k, v in new.items():
+            if k in curves:
+                print(f"curve {k[0]} {k[1]} seed {k[2]}: {len(curves[k])} points replaced by {len(v)} from {p}")
+            curves[k] = v
+    return starts, [c for v in curves.values() for c in v]
 
 
 def model_fn(form, th, C, start, rref=None):

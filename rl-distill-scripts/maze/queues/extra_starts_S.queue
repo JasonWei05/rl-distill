@@ -1,0 +1,47 @@
+# Extra start levels for the RL-curve law, S first (runbook: https://claude.ai/artifact/Fppdo1u52xm7SLEQCpcN5k).
+# Pretraining re-run -> k=16 screening -> selection of the 0.3% and 3% S/L pairs -> S RL, two seeds per new start,
+# plus the 1% seed-1 re-run -> curve extraction and the S fit. Run from anywhere, after the runbook's setup and
+#   ~/TailRL/.venv/bin/python rl-distill-scripts/maze/fetch_hub_bases.py --pairs p1 --sides S0 --manifest
+# with
+#   bash rl-distill-scripts/maze/gpu_queue.sh rl-distill-scripts/maze/queues/extra_starts_S.queue 0 1 2 3   # your GPU ids
+#   bash rl-distill-scripts/maze/gpu_queue.sh --status rl-distill-scripts/maze/queues/extra_starts_S.queue
+# Format: <name> [after=<jobs>] <command>; {gpu} = the worker's GPU, $M = rl-distill-scripts/maze, $PY = the TailRL venv
+# python (exported by gpu_queue.sh). Jobs start in file order as soon as their `after` jobs are DONE.
+
+# 1. both pretraining trajectories (S init_seed 4, L init_seed 0; data_seed 0; 20k steps, ckpt every 20) on ONE GPU
+pretrain RUNS_ROOT=$HOME/tailrl_maze_runs/pretrain20k_rerun MAX_STEPS=20000 SAVE_STEPS=20 EVAL_STEPS=50 TRAIN_GPUS={gpu} RUN_SPECS="S_ds0_is4 S 4;L_ds0_is0_rep L 0" bash $M/launch_pretrain_matrix.sh
+
+# 2. screening: every 50th checkpoint at k=16 on the 1000 dev mazes, split four ways (about 1 GPU-hour each)
+screen-w0 after=pretrain CUDA_VISIBLE_DEVICES={gpu} $PY $M/screen_watch.py --run-dirs $HOME/tailrl_maze_runs/pretrain20k_rerun/S_ds0_is4 $HOME/tailrl_maze_runs/pretrain20k_rerun/L_ds0_is0_rep --stride 50 --k 16 --worker 0 --n-workers 4 --tag stride50_k16 --once
+screen-w1 after=pretrain CUDA_VISIBLE_DEVICES={gpu} $PY $M/screen_watch.py --run-dirs $HOME/tailrl_maze_runs/pretrain20k_rerun/S_ds0_is4 $HOME/tailrl_maze_runs/pretrain20k_rerun/L_ds0_is0_rep --stride 50 --k 16 --worker 1 --n-workers 4 --tag stride50_k16 --once
+screen-w2 after=pretrain CUDA_VISIBLE_DEVICES={gpu} $PY $M/screen_watch.py --run-dirs $HOME/tailrl_maze_runs/pretrain20k_rerun/S_ds0_is4 $HOME/tailrl_maze_runs/pretrain20k_rerun/L_ds0_is0_rep --stride 50 --k 16 --worker 2 --n-workers 4 --tag stride50_k16 --once
+screen-w3 after=pretrain CUDA_VISIBLE_DEVICES={gpu} $PY $M/screen_watch.py --run-dirs $HOME/tailrl_maze_runs/pretrain20k_rerun/S_ds0_is4 $HOME/tailrl_maze_runs/pretrain20k_rerun/L_ds0_is0_rep --stride 50 --k 16 --worker 3 --n-workers 4 --tag stride50_k16 --once
+
+# 3. selection (SWA candidates on the crossing bracket, grid k then finals at k=1024), then the pair (exit 2 = matched
+#    outside the tolerance, still usable: the gap is in matched/manifest.json)
+sel-p03-S after=screen-w0,screen-w1,screen-w2,screen-w3 CUDA_VISIBLE_DEVICES={gpu} $PY $M/select_matched_init.py --run $HOME/tailrl_maze_runs/pretrain20k_rerun/S_ds0_is4 --target 0.003 --k 256 --final-k 1024 --n-final 3 --out-name select_goal_reached_0p3pct.json
+sel-p03-L after=screen-w0,screen-w1,screen-w2,screen-w3 CUDA_VISIBLE_DEVICES={gpu} $PY $M/select_matched_init.py --run $HOME/tailrl_maze_runs/pretrain20k_rerun/L_ds0_is0_rep --target 0.003 --k 256 --final-k 1024 --n-final 3 --out-name select_goal_reached_0p3pct.json
+sel-p3-S after=screen-w0,screen-w1,screen-w2,screen-w3 CUDA_VISIBLE_DEVICES={gpu} $PY $M/select_matched_init.py --run $HOME/tailrl_maze_runs/pretrain20k_rerun/S_ds0_is4 --target 0.03 --k 64 --final-k 1024 --n-final 3 --out-name select_goal_reached_3pct.json
+sel-p3-L after=screen-w0,screen-w1,screen-w2,screen-w3 CUDA_VISIBLE_DEVICES={gpu} $PY $M/select_matched_init.py --run $HOME/tailrl_maze_runs/pretrain20k_rerun/L_ds0_is0_rep --target 0.03 --k 64 --final-k 1024 --n-final 3 --out-name select_goal_reached_3pct.json
+pair-p03 after=sel-p03-S,sel-p03-L CUDA_VISIBLE_DEVICES={gpu} $PY $M/make_pair.py --pair p03 --target 0.003 --tol 0.00015 --k 1024 --select-name select_goal_reached_0p3pct.json --s-run $HOME/tailrl_maze_runs/pretrain20k_rerun/S_ds0_is4 --l-run $HOME/tailrl_maze_runs/pretrain20k_rerun/L_ds0_is0_rep || [ $? = 2 ]
+pair-p3 after=sel-p3-S,sel-p3-L CUDA_VISIBLE_DEVICES={gpu} $PY $M/make_pair.py --pair p3 --target 0.03 --tol 0.0015 --k 1024 --select-name select_goal_reached_3pct.json --s-run $HOME/tailrl_maze_runs/pretrain20k_rerun/S_ds0_is4 --l-run $HOME/tailrl_maze_runs/pretrain20k_rerun/L_ds0_is0_rep || [ $? = 2 ]
+
+# 4. S RL under the 266 PF ceiling (4,000 S steps): 0.3% first, then 3% (saturates by ~2,000), then the 1% seed-1 re-run
+#    (needs only the Hub base, so an idle GPU starts it right away). Extend a run still rising at its end by appending a
+#    line with a new name and a larger STEPS (same pair/side/seed resumes it) and starting a worker again.
+rl-p03-S-s0 after=pair-p03 STEPS=4000 bash $M/launch_single_rl.sh p03 S0 0 {gpu}
+rl-p03-S-s1 after=pair-p03 STEPS=4000 bash $M/launch_single_rl.sh p03 S0 1 {gpu}
+rl-p3-S-s0 after=pair-p3 STEPS=2000 bash $M/launch_single_rl.sh p3 S0 0 {gpu}
+rl-p3-S-s1 after=pair-p3 STEPS=2000 bash $M/launch_single_rl.sh p3 S0 1 {gpu}
+rl-p1-S-s1 STEPS=4000 bash $M/launch_single_rl.sh p1 S0 1 {gpu}
+
+# 5. curves and the S fit (CPU, seconds); re-run by hand after any extension
+extract after=rl-p03-S-s0,rl-p03-S-s1,rl-p3-S-s0,rl-p3-S-s1,rl-p1-S-s1 $PY $M/rl_curve_family.py extract --pairs p3 p03 --replicates p3s1=p3:1 p03s1=p03:1 p1s1=p1:1 --runs $HOME/tailrl_maze_runs --out $HOME/tailrl_maze_runs/rl_curves_extra.json
+fit after=extract $PY $M/rl_curve_family.py fit --data $M/data/rl_curves_v1.json $HOME/tailrl_maze_runs/rl_curves_extra.json --model S0 --loo --json-out $HOME/tailrl_maze_runs/rl_curve_family_S0.json
+
+# Optional 30% level: uncomment, and add p30 / p30s1=p30:1 to the extract line (re-run extract and fit afterwards).
+# sel-p30-S after=screen-w0,screen-w1,screen-w2,screen-w3 CUDA_VISIBLE_DEVICES={gpu} $PY $M/select_matched_init.py --run $HOME/tailrl_maze_runs/pretrain20k_rerun/S_ds0_is4 --target 0.30 --k 64 --final-k 1024 --n-final 3 --out-name select_goal_reached_30pct.json
+# sel-p30-L after=screen-w0,screen-w1,screen-w2,screen-w3 CUDA_VISIBLE_DEVICES={gpu} $PY $M/select_matched_init.py --run $HOME/tailrl_maze_runs/pretrain20k_rerun/L_ds0_is0_rep --target 0.30 --k 64 --final-k 1024 --n-final 3 --out-name select_goal_reached_30pct.json
+# pair-p30 after=sel-p30-S,sel-p30-L CUDA_VISIBLE_DEVICES={gpu} $PY $M/make_pair.py --pair p30 --target 0.30 --tol 0.006 --k 1024 --select-name select_goal_reached_30pct.json --s-run $HOME/tailrl_maze_runs/pretrain20k_rerun/S_ds0_is4 --l-run $HOME/tailrl_maze_runs/pretrain20k_rerun/L_ds0_is0_rep || [ $? = 2 ]
+# rl-p30-S-s0 after=pair-p30 STEPS=1000 bash $M/launch_single_rl.sh p30 S0 0 {gpu}
+# rl-p30-S-s1 after=pair-p30 STEPS=1000 bash $M/launch_single_rl.sh p30 S0 1 {gpu}
