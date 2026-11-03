@@ -14,8 +14,16 @@ Two subcommands:
   fit       joint fit of one size's curves over all its starts, with leave-one-start-out validation
       ~/TailRL/.venv/bin/python rl-distill-scripts/maze/rl_curve_family.py fit --model S0 \
           --data rl-distill-scripts/maze/data/rl_curves_v1.json ~/tailrl_maze_runs/rl_curves_extra.json --loo
-      Form SIG (default):  a = p1 + (R - p1)(1 - exp(-C/tau)) + (A - R) / (1 + (Cmid/C)^beta),
-                           R = p16 + kappa (p64 - p16),  log10 Cmid = m0 + m1 log10 p16        (6 params per size)
+      Form PAPER (default): the ScaleRL / Bailey et al. sigmoid in log compute, fitted as published: points below
+                           the reference step (--ref-steps LO HI, default 30 50) are dropped and R_ref is the
+                           observed dev level at the reference (mean over LO..HI), per curve; the midpoint is a
+                           power law in the start's pass@16 (log-linear, as scaling laws parameterise covariates):
+                           a = R_ref + (A - R_ref) / (1 + (Cmid/C)^B),  log10 Cmid = m0 + m1 log10 p16
+                           (4 shared params per size: A, B, m0, m1; Khatri et al. 2025 arXiv 2510.13786 eq. 1,
+                           Bailey et al. 2026 arXiv 2604.20209 eq. 1 and App. A).
+      Form SIG:            two-phase, a = p1 + (R - p1)(1 - exp(-C/tau)) + (A - R) / (1 + (Cmid/C)^beta),
+                           R = p16 + kappa (p64 - p16),  log10 Cmid = m0 + m1 log10 p16        (6 params per size;
+                           no reference window: predicts a curve from (p1, p16, p64) alone).
       Form LIN:            a = min(A, p1 + (R - p1)(1 - exp(-C/tau)) + s log10(1 + C/(3 tau))),
                            s = smax sigmoid((log10 p16 - x*)/w)                                  (6 params per size)
       Needs scipy (not in the TailRL venv by default: `uv pip install --python ~/TailRL/.venv/bin/python scipy`).
@@ -117,10 +125,14 @@ def load_data(paths):
     return starts, curves
 
 
-def model_fn(form, th, C, start):
+def model_fn(form, th, C, start, rref=None):
     import numpy as np
     p1, p16, p64 = start
     C = np.asarray(C, float)
+    if form == "PAPER":
+        A, B, m0, m1 = th
+        cmid = 10 ** (m0 + m1 * np.log10(p16))
+        return rref + np.maximum(A - rref, 0) / (1 + (cmid / C) ** B)
     if form == "SIG":
         kappa, tau, A, beta, m0, m1 = th
         r = p16 + kappa * (p64 - p16)
@@ -134,28 +146,46 @@ def model_fn(form, th, C, start):
     return np.minimum(A, fast + s * np.log10(1 + C / (3 * tau)))
 
 
-BOUNDS = {"SIG": ([0, 0.02, 0.3, 0.2, -2, -4], [1.5, 30, 1.0, 5, 5, 1]),
+BOUNDS = {"PAPER": ([0.3, 0.2, -2, -4], [1.0, 5, 5, 1]),
+          "SIG": ([0, 0.02, 0.3, 0.2, -2, -4], [1.5, 30, 1.0, 5, 5, 1]),
           "LIN": ([0, 0.02, 0.3, 0, -3, 0.1], [1.5, 30, 1.0, 1.5, 0.5, 2])}
-X0 = {"SIG": [0.5, 1.0, 0.9, 1.0, 1.0, -0.8], "LIN": [0.5, 1.0, 0.9, 0.3, -1.5, 0.4]}
-NAMES = {"SIG": ["kappa", "tau_pf", "A", "beta", "m0", "m1"], "LIN": ["kappa", "tau_pf", "A", "smax", "xstar", "w"]}
+X0 = {"PAPER": [0.9, 1.0, 1.0, -1.0], "SIG": [0.5, 1.0, 0.9, 1.0, 1.0, -0.8], "LIN": [0.5, 1.0, 0.9, 0.3, -1.5, 0.4]}
+NAMES = {"PAPER": ["A", "B", "m0", "m1"], "SIG": ["kappa", "tau_pf", "A", "beta", "m0", "m1"],
+         "LIN": ["kappa", "tau_pf", "A", "smax", "xstar", "w"]}
 
 
-def fit_family(form, keys, curves, starts, model, restarts=12, seed=0):
+def make_series(form, curves, keys, ref_steps):
+    """Per curve: (x PFLOPs, y dev, R_ref). PAPER keeps steps >= ref_steps[0] and pins R_ref to the mean dev over
+    the reference window; the other forms keep every point with C > 0 and carry no R_ref."""
+    import numpy as np
+    series = {}
+    for k in keys:
+        pts = sorted((c["step"], c["pflops"], c["dev"]) for c in curves[k])
+        if form == "PAPER":
+            win = [d for s, _, d in pts if ref_steps[0] <= s <= ref_steps[1]]
+            if not win:
+                raise SystemExit(f"{k}: no dev points in the reference window {ref_steps}")
+            kept = [(c, d) for s, c, d in pts if s >= ref_steps[0] and c > 0]
+            series[k] = (np.array([a for a, _ in kept]), np.array([b for _, b in kept]), float(np.mean(win)))
+        else:
+            kept = [(c, d) for _, c, d in pts if c > 0]
+            series[k] = (np.array([a for a, _ in kept]), np.array([b for _, b in kept]), None)
+    return series
+
+
+def fit_family(form, keys, curves, starts, model, restarts=12, seed=0, ref_steps=(30, 50)):
     import numpy as np
     from scipy.optimize import least_squares
 
     rng = np.random.default_rng(seed)
-    series = {}
-    for k in keys:
-        pts = sorted((c["pflops"], c["dev"]) for c in curves[k] if c["pflops"] > 0)
-        series[k] = (np.array([a for a, _ in pts]), np.array([b for _, b in pts]))
+    series = make_series(form, curves, keys, ref_steps)
 
     def resid(th):
         r = []
         for k in keys:
-            x, y = series[k]
+            x, y, rref = series[k]
             st = starts[k[0]][model]
-            r.append((model_fn(form, th, x, (st["pass@1"], st["pass@16"], st["pass@64"])) - y) / math.sqrt(len(x)))
+            r.append((model_fn(form, th, x, (st["pass@1"], st["pass@16"], st["pass@64"]), rref) - y) / math.sqrt(len(x)))
         return np.concatenate(r)
 
     best = None
@@ -170,9 +200,9 @@ def fit_family(form, keys, curves, starts, model, restarts=12, seed=0):
     return best.x
 
 
-def curve_rmse(form, th, x, y, start):
+def curve_rmse(form, th, x, y, start, rref=None):
     import numpy as np
-    return float(math.sqrt(np.mean((model_fn(form, th, x, start) - y) ** 2)))
+    return float(math.sqrt(np.mean((model_fn(form, th, x, start, rref) - y) ** 2)))
 
 
 def cmd_fit(args):
@@ -180,6 +210,7 @@ def cmd_fit(args):
 
     starts, rows = load_data(args.data)
     order = sorted(starts, key=lambda p: -starts[p]["S0"]["pass@1"])  # easiest start first
+    ref = tuple(args.ref_steps)
     results = {}
     for model in args.model:
         curves = {}
@@ -188,37 +219,40 @@ def cmd_fit(args):
                 curves.setdefault((c["pair"], c["seed"]), []).append(c)
         keys = sorted(curves, key=lambda k: (order.index(k[0]), k[1]))
         pairs = sorted({k[0] for k in keys}, key=order.index)
-        print(f"\n==== {model}: {len(keys)} curves over starts {pairs} (form {args.form})")
-        th = fit_family(args.form, keys, curves, starts, model, args.restarts)
+        series = make_series(args.form, curves, keys, ref)
+        prof = lambda p: (starts[p][model]["pass@1"], starts[p][model]["pass@16"], starts[p][model]["pass@64"])
+        print(f"\n==== {model}: {len(keys)} curves over starts {pairs} (form {args.form}" + (f", reference steps {ref[0]}-{ref[1]})" if args.form == "PAPER" else ")"))
+        th = fit_family(args.form, keys, curves, starts, model, args.restarts, ref_steps=ref)
         print("params: " + ", ".join(f"{n} {v:.3f}" for n, v in zip(NAMES[args.form], th)))
-        res = {"params": dict(zip(NAMES[args.form], map(float, th))), "in_sample_rmse": {}, "per_start": {}, "loo": {}}
+        res = {"form": args.form, "params": dict(zip(NAMES[args.form], map(float, th))), "in_sample_rmse": {}, "per_start": {}, "loo": {}}
         for k in keys:
-            x = np.array([c["pflops"] for c in curves[k] if c["pflops"] > 0]); y = np.array([c["dev"] for c in curves[k] if c["pflops"] > 0])
-            st = starts[k[0]][model]
-            r = curve_rmse(args.form, th, x, y, (st["pass@1"], st["pass@16"], st["pass@64"]))
-            res["in_sample_rmse"][f"{k[0]}:s{k[1]}"] = r
+            x, y, rref = series[k]
+            res["in_sample_rmse"][f"{k[0]}:s{k[1]}"] = curve_rmse(args.form, th, x, y, prof(k[0]), rref)
         print("in-sample RMSE: " + "  ".join(f"{k} {v:.3f}" for k, v in res["in_sample_rmse"].items()))
         for p in pairs:
-            st = starts[p][model]; p16, p64 = st["pass@16"], st["pass@64"]
-            if args.form == "SIG":
+            p1, p16, p64 = prof(p)
+            if args.form == "PAPER":
+                d = {"Cmid_pf": 10 ** (th[2] + th[3] * np.log10(p16))}
+                d.update({f"R_ref_s{k[1]}": series[k][2] for k in keys if k[0] == p})
+            elif args.form == "SIG":
                 d = {"R_ref": p16 + th[0] * (p64 - p16), "Cmid_pf": 10 ** (th[4] + th[5] * np.log10(p16))}
             else:
                 d = {"R_ref": p16 + th[0] * (p64 - p16), "slope_per_decade": th[3] / (1 + np.exp(-(np.log10(p16) - th[4]) / th[5]))}
             res["per_start"][p] = {k: float(v) for k, v in d.items()}
             print(f"  {p}: " + ", ".join(f"{k} {v:.3f}" for k, v in d.items()))
         if args.loo and len(pairs) >= 3:
-            print("leave-one-start-out (fit on the other starts, predict the held-out seed-0 curve):")
+            print("leave-one-start-out (fit on the other starts, predict the held-out seed-0 curve" + (" from its reference window" if args.form == "PAPER" else "") + "):")
             for held in pairs:
                 tr = [k for k in keys if k[0] != held]
-                th2 = fit_family(args.form, tr, curves, starts, model, args.restarts)
+                th2 = fit_family(args.form, tr, curves, starts, model, args.restarts, ref_steps=ref)
                 k = (held, 0)
                 if k not in curves:
                     continue
-                x = np.array([c["pflops"] for c in curves[k] if c["pflops"] > 0]); y = np.array([c["dev"] for c in curves[k] if c["pflops"] > 0])
-                st = starts[held][model]
-                r = curve_rmse(args.form, th2, x, y, (st["pass@1"], st["pass@16"], st["pass@64"]))
+                x, y, rref = series[k]
+                r = curve_rmse(args.form, th2, x, y, prof(held), rref)
                 res["loo"][held] = {"rmse": r, "params": dict(zip(NAMES[args.form], map(float, th2)))}
-                print(f"  held out {held}: RMSE {r:.3f}")
+                extra = f", Cmid pred {10 ** (th2[2] + th2[3] * np.log10(prof(held)[1])):.1f} PF" if args.form == "PAPER" else ""
+                print(f"  held out {held}: RMSE {r:.3f}{extra}")
         results[model] = res
     if args.json_out:
         with open(os.path.expanduser(args.json_out), "w") as f:
@@ -238,7 +272,9 @@ def main():
     f = sub.add_parser("fit")
     f.add_argument("--data", nargs="+", required=True)
     f.add_argument("--model", nargs="+", default=["S0", "L0"], choices=MODELS)
-    f.add_argument("--form", default="SIG", choices=["SIG", "LIN"])
+    f.add_argument("--form", default="PAPER", choices=["PAPER", "SIG", "LIN"])
+    f.add_argument("--ref-steps", type=int, nargs=2, default=[30, 50], metavar=("LO", "HI"),
+                   help="PAPER: drop steps < LO and pin R_ref to the mean dev over LO..HI (the published early-phase rule)")
     f.add_argument("--loo", action="store_true")
     f.add_argument("--restarts", type=int, default=12)
     f.add_argument("--json-out", default=None)
