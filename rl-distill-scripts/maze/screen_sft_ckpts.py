@@ -89,7 +89,8 @@ def screen_one(ckpt, prompts, gts, judge, args, device):
     goal = np.zeros(n)
     short = np.zeros(n)
     lengths = []
-    bp = max(1, min(args.batch_prompts, 8192 // args.k))  # keep <= 8192 sequences per generate call
+    # keep <= 8192 sequences per generate call; SCREEN_MAX_SEQS lowers the cap on smaller cards (40-60 GB peak at 8192)
+    bp = max(1, min(args.batch_prompts, int(os.environ.get("SCREEN_MAX_SEQS", 8192)) // args.k))
     for i0 in range(0, n, bp):
         ids = enc.input_ids[i0 : i0 + bp].to(device).repeat_interleave(args.k, 0)
         am = enc.attention_mask[i0 : i0 + bp].to(device).repeat_interleave(args.k, 0)
