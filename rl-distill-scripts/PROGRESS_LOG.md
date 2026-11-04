@@ -12,6 +12,46 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-11-03 — Text-maze RL-curve law: extra start levels 0.3% / 3% / 5% (S and L RL done; federer)
+
+**Goal.** Runbook "Extra start levels for the maze RL-curve law" (https://claude.ai/artifact/Fppdo1u52xm7SLEQCpcN5k): more
+starting levels frozen as matched S/L pairs, S RL curves with two seeds each under the 266 PF ceiling, refit of the S family
+a(C; p1, p16, p64); L RL at the same starts afterwards. Levels: 0.3% (`p03`), 3% (`p3`) and ~5% (`p5`, instead of the optional 30%).
+
+**Config.** Pretraining re-run of `S_ds0_is4` / `L_ds0_is0_rep` (20k steps, ckpt every 20; init models bit-identical to the
+originals); re-run L crosses ~1,000 steps earlier than the original (which had a loss spike near step 2,000), S ~500-1,800
+later; L bases from `L_ds0_is0_rep2` (bit-identical repeat to 5k steps). Pairs at k = 1024: p03 0.00304 / 0.00297 (S
+interpolated), p3 0.03012 / 0.03009, p5 0.0553 / 0.0554 (L jumps 4.4% -> 5.5% between candidates). S GRPO as in the budget
+study (256 x 16, lr 1e-4 constant, dev mean@16 every 10 steps): p3 / p5 x 2 seeds to 2,000 steps, p03 x 2 and the 1% seed-1
+re-run to 4,000 (no run extended: all decelerating at STEPS). L GRPO with the same recipe at p03 / p3 / p5 x 2 seeds plus
+second L seeds at 1% and 0.1%, each to 1,250 steps (the ceiling, 259-273 PF). Inference-only memory knobs for 40 GB cards; PPO_MICRO_BATCH
+unchanged (per-micro-batch token-mean); new runs skip verl's best@n/worst@n validation bootstrap. Machine notes, helper scripts
+(janitor / watchdog / card moves) and every decision: `/work2/jiahaoz4/maze_extra/NOTES.md` on federer.
+
+**Results (S, PAPER form over v1 + extra, 12 curves / 6 starts).** A 0.932, B 0.956, gamma 1.48; in-sample RMSE 0.016-0.057,
+LOO 0.031-0.082 (p03 0.082: held-out C_mid 532 PF vs 376 in the fit). Per-curve C_mid with A, B fixed: p10 6.5 / 7.6, p5 10.7 /
+12.0, p3 14.7 / 16.9, p1 91 / 106, p03 311 / 351, p01 2577 / 2042 PF; log C_mid vs log pass@16 is a line (gamma 1.52) within
++-0.13 dex; the 0.3% points sit below it (earlier lift-off than the power law), no bend down at the sparse end. The 0.3% runs
+reach dev ~0.5 at the ceiling (the old fit put their midpoint near 520 PF).
+
+**Results (L, same fit, 12 curves / 6 starts).** Final dev at 1,250 steps: p5 0.894 / 0.889, p3 0.918 / 0.905, p1 seed 1
+0.825, p03 0.741 / 0.523, p01 seed 1 0.669 (all decelerating, the sparse ones still rising). PAPER fit: A 0.974, B 1.061,
+gamma 0.57; in-sample RMSE 0.021-0.139 (worst: the sparse second seeds), LOO 0.022-0.072; SIG does worse for L (LOO up to
+0.197). Per-curve C_mid: p10 31 / 30, p5 33 / 39, p3 31 / 36, p1 67 / 74, p03 131 / 260, p01 326 / 136 PF. Unlike S: C_mid
+is flat over the three dense starts, the seeds disagree 2.0x (0.3%) and 2.4x (0.1%, opposite direction) at the sparse
+end, and gamma 0.57 vs 1.48 puts the S/L crossover near pass@16 0.15. Dev at the same budget: S ahead at 5% (100 PF:
+0.901 vs 0.841); at 3% L overtakes S between 50 and 100 PF; L ahead at every budget from 1% down (0.1%, 200 PF: 0.118
+vs 0.541).
+
+**Artifacts.** Old repo https://huggingface.co/datasets/hi-todayis-jh/tailrl-text-maze-budget-study `extra/` (README, curves,
+fits, logs, selection/screening files, `used/<pair>/{S0,L0}_base`); new repo
+https://huggingface.co/datasets/hi-todayis-jh/tailrl-text-maze-extra-levels (`rl/<run>/` bf16 HF exports + ledgers per 10
+steps and fp32 final checkpoints, `pretrain/<run>/`).
+
+**Status.** Done (2026-11-04 12:20 EST). All curves, fits, logs and the README (incl. S vs L at the same budget) are in the
+old repo's `extra/`; all RL checkpoint trees and final fp32 checkpoints in the new repo. Not run: test-set (test1000)
+evaluation of the final checkpoints.
+
 ## 2026-10-27 — Text-maze synthetic study: S₀ direct RL vs L₀ RL → distillation at matched FLOPs (TailRL, aiai-rtx-2)
 
 **Goal.** Controlled comparison on TailRL's text-maze task (github.com/Zanette-Labs/TailRL): at a fixed total compute
