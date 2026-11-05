@@ -43,14 +43,21 @@ end, and gamma 0.57 vs 1.48 puts the S/L crossover near pass@16 0.15. Dev at the
 0.901 vs 0.841); at 3% L overtakes S between 50 and 100 PF; L ahead at every budget from 1% down (0.1%, 200 PF: 0.118
 vs 0.541).
 
+**Covariate check (2026-11-05).** The fitted curves are dev mean@16; the start's pass@16 (k = 1024, unbiased; within 0.0021
+of mixed16, the share of 16-rollout groups with a nonzero GRPO advantage) enters only as the C_mid covariate. Refit with
+the start's pass@1 instead: gamma S 1.24 / L 0.51 (vs 1.48 / 0.57); LOO mean / max S 0.056 / 0.073 (vs 0.052 / 0.082), L
+0.041 / 0.073 (vs 0.044 / 0.072), so held-out prediction is the same; the per-curve C_mid lie closer to a line in pass@16
+(rms S 0.081 vs 0.122 dex, L 0.127 vs 0.132). Gamma compares only within one covariate (pass@16 / pass@1 is 7x at 10%, 15x
+at 0.1%). Files: `extra/rl_curve_family_{S0,L0}_cov_pass1.*`.
+
 **Artifacts.** Old repo https://huggingface.co/datasets/hi-todayis-jh/tailrl-text-maze-budget-study `extra/` (README, curves,
 fits, logs, selection/screening files, `used/<pair>/{S0,L0}_base`); new repo
 https://huggingface.co/datasets/hi-todayis-jh/tailrl-text-maze-extra-levels (`rl/<run>/` bf16 HF exports + ledgers per 10
 steps and fp32 final checkpoints, `pretrain/<run>/`).
 
-**Status.** Done (2026-11-04 12:20 EST). All curves, fits, logs and the README (incl. S vs L at the same budget) are in the
-old repo's `extra/`; all RL checkpoint trees and final fp32 checkpoints in the new repo. Not run: test-set (test1000)
-evaluation of the final checkpoints.
+**Status.** Done (2026-11-04 12:20 EST). All curves, fits, logs and the README (incl. S vs L at the same budget and the
+covariate check) are in the old repo's `extra/`; all RL checkpoint trees and final fp32 checkpoints in the new repo. Not
+run: test-set (test1000) evaluation of the final checkpoints.
 
 ## 2026-10-27 — Text-maze synthetic study: S₀ direct RL vs L₀ RL → distillation at matched FLOPs (TailRL, aiai-rtx-2)
 
