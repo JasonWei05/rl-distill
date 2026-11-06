@@ -25,8 +25,9 @@ interpolated), p3 0.03012 / 0.03009, p5 0.0553 / 0.0554 (L jumps 4.4% -> 5.5% be
 study (256 x 16, lr 1e-4 constant, dev mean@16 every 10 steps): p3 / p5 x 2 seeds to 2,000 steps, p03 x 2 and the 1% seed-1
 re-run to 4,000 (no run extended: all decelerating at STEPS). L GRPO with the same recipe at p03 / p3 / p5 x 2 seeds plus
 second L seeds at 1% and 0.1%, each to 1,250 steps (the ceiling, 259-273 PF). Inference-only memory knobs for 40 GB cards; PPO_MICRO_BATCH
-unchanged (per-micro-batch token-mean); new runs skip verl's best@n/worst@n validation bootstrap. Machine notes, helper scripts
-(janitor / watchdog / card moves) and every decision: `/work2/jiahaoz4/maze_extra/NOTES.md` on federer.
+unchanged (per-micro-batch token-mean); new runs skip verl's best@n/worst@n validation bootstrap (these TailRL knobs are in
+`maze/tailrl_text_maze.patch` since 2026-11-06). Helper scripts (janitor / watchdog / card moves / Step 4 / dashboard):
+`maze/extra_levels/`; machine notes and every decision: `/work2/jiahaoz4/maze_extra/NOTES.md` on federer.
 
 **Results (S, PAPER form over v1 + extra, 12 curves / 6 starts).** A 0.932, B 0.956, gamma 1.48; in-sample RMSE 0.016-0.057,
 LOO 0.031-0.082 (p03 0.082: held-out C_mid 532 PF vs 376 in the fit). Per-curve C_mid with A, B fixed: p10 6.5 / 7.6, p5 10.7 /

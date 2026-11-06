@@ -1,0 +1,613 @@
+<meta name="dash-one-writer">
+<style>
+  .mz { max-width: 78rem; margin-inline: auto; display: grid; gap: var(--cds-gap-xl); font-family: var(--font-anthropic-sans); color: var(--color-fg); }
+  .mz-head { display: grid; gap: var(--cds-gap-sm); }
+  .mz-title { margin: 0; font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); line-height: 1.2; text-wrap: balance; }
+  .mz-take { margin: 0; max-width: 70ch; font-size: var(--cds-font-size-body); line-height: 1.6; }
+  .mz-take b, .mz-tile-note b { font-variant-numeric: tabular-nums; }
+  .mz-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: var(--cds-gap-md); }
+  .mz-tile { display: grid; gap: var(--cds-gap-xs); align-content: start; padding: var(--cds-pad-md) var(--cds-pad-lg); background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); min-width: 0; }
+  .mz-tile-label { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .mz-tile-value { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); line-height: 1.15; font-variant-numeric: tabular-nums; }
+  .mz-tile-note { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); line-height: 1.45; }
+  .mz-card { display: grid; gap: var(--cds-gap-md); padding: var(--cds-pad-lg); background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); min-width: 0; }
+  .mz-h2 { margin: 0; font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); text-wrap: balance; }
+  .mz-h3 { margin: var(--cds-gap-sm) 0 0; font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); }
+  .mz-note { margin: 0; max-width: 80ch; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); line-height: 1.5; }
+  .mz-chart { position: relative; min-width: 0; }
+  .mz-chart-cmid { min-height: 20rem; }
+  .mz-chart-panels { min-height: 32rem; }
+  .mz-chart svg { display: block; overflow: visible; }
+  .mz-legend { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs) var(--cds-gap-md); margin-bottom: var(--cds-gap-sm); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .mz-legend-item { display: inline-flex; align-items: center; gap: 0.375rem; }
+  .mz-sw { display: inline-block; width: 0.625rem; height: 0.625rem; border-radius: 50%; border: 1.5px solid transparent; box-sizing: border-box; }
+  .mz-grid { stroke: var(--cds-chart-grid); stroke-width: 1; }
+  .mz-axis { stroke: var(--cds-chart-axis); stroke-width: 1; }
+  .mz-tick { fill: var(--color-fg-muted); font-size: var(--cds-font-size-caption); font-family: var(--font-anthropic-sans); font-variant-numeric: tabular-nums; }
+  .mz-axis-label { fill: var(--color-fg-muted); font-size: var(--cds-font-size-caption); font-family: var(--font-anthropic-sans); }
+  .mz-law { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .mz-fit { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .mz-fit-dashed { stroke-dasharray: 5 4; stroke-linecap: butt; }
+  .mz-pt { stroke-width: 1.5; }
+  .mz-caret { fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .mz-cross { fill: none; stroke: var(--color-fg-muted); stroke-width: 1.5; }
+  .mz-label { font-size: var(--cds-font-size-caption); font-family: var(--font-anthropic-sans); font-weight: 600; }
+  .mz-hl { fill: none; stroke-width: 2; }
+  .mz-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: var(--cds-gap-lg) var(--cds-gap-md); }
+  .mz-panel { position: relative; min-width: 0; }
+  .mz-panel-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--cds-gap-xs); margin-bottom: var(--cds-gap-xs); }
+  .mz-panel-title { font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); }
+  .mz-panel-sub { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }
+  .mz-tip { position: absolute; z-index: 2; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--color-fg); }
+  .mz-tip-head { color: var(--cds-text-secondary); margin-bottom: 0.125rem; }
+  .mz-failed { display: flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: inherit; margin: 0; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+  .mz-failed-dot { width: 0.375rem; height: 0.375rem; border-radius: 50%; background: var(--color-bad); }
+  .mz-table-wrap { overflow-x: auto; min-width: 0; }
+  .mz-table { width: 100%; border-collapse: collapse; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+  .mz-table th, .mz-table td { padding: 0.45rem 0.65rem; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--color-border-line); }
+  .mz-table th { font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); vertical-align: bottom; }
+  .mz-table th:first-child, .mz-table td:first-child { text-align: left; }
+  .mz-method { gap: var(--cds-gap-sm); }
+  .mz-method p { margin: 0; max-width: 74ch; font-size: var(--cds-font-size-body); line-height: 1.6; }
+  .mz-method a { color: inherit; text-underline-offset: 0.15em; }
+  .mz-note a { color: inherit; text-underline-offset: 0.15em; }
+  .mz code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
+  .mz-eqs { display: grid; gap: var(--cds-gap-md); padding: var(--cds-pad-md) var(--cds-pad-lg); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); overflow-x: auto; }
+  .mz-eq { font-family: var(--font-anthropic-serif); font-size: calc(var(--cds-font-size-body) * 1.25); line-height: 1.5; white-space: nowrap; }
+  .mz-eq sub, .mz-eq sup { font-size: 0.7em; }
+  .mz-eq-flow { white-space: normal; }
+  .mz-eq-flow > span { display: inline-block; white-space: nowrap; margin-right: 0.6em; }
+  .mz-frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; margin: 0 0.15em; }
+  .mz-frac > span { padding: 0 0.3em; }
+  .mz-frac > span:first-child { border-bottom: 1px solid currentColor; padding-bottom: 0.1em; }
+  .mz-frac > span:last-child { padding-top: 0.1em; }
+  .mz-terms { font-size: var(--cds-font-size-body); }
+  .mz-terms th, .mz-terms td { white-space: normal; vertical-align: top; }
+  .mz-terms th:nth-child(2), .mz-terms td:nth-child(2) { text-align: left; min-width: 16rem; line-height: 1.5; }
+  .mz-terms td:first-child { font-family: var(--font-anthropic-serif); white-space: nowrap; }
+  .mz-terms td:nth-child(n+3) { white-space: nowrap; }
+  .mz-set { display: block; margin-top: 0.2rem; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .mz-muted { color: var(--color-fg-muted); }
+  @media (max-width: 40rem) {
+    .mz-terms thead { display: none; }
+    .mz-terms tr { display: grid; grid-template-columns: auto 1fr 1fr; column-gap: var(--cds-gap-md); padding: 0.5rem 0; border-bottom: 1px solid var(--color-border-line); }
+    .mz-terms td { border-bottom: 0; padding: 0.15rem 0; text-align: left; }
+    .mz-terms td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
+    .mz-terms td[data-label]::before { content: attr(data-label) " "; color: var(--color-fg-muted); }
+  }
+  .mz [data-dash-source-state=empty] { color: transparent; }
+  .mz [data-dash-source-state=refreshing] { opacity: .5; transition: opacity var(--cds-dur-slow); }
+</style>
+<div class="mz">
+  <header class="mz-head" id="summary">
+    <h1 class="mz-title">Maze RL-curve fits</h1>
+    <p class="mz-take">Midpoint compute grows as pass@16<sup>−γ</sup> as the start gets sparser, with γ <b class="dash-skeleton" data-draw="val" data-source="gamma" data-field="gamma_family" data-where="model=S" data-fmt="f2">—</b> for S and <b class="dash-skeleton" data-draw="val" data-source="gamma" data-field="gamma_family" data-where="model=L" data-fmt="f2">—</b> for L. The two laws cross at pass@16 <b class="dash-skeleton" data-draw="val" data-source="crossover" data-field="p16" data-fmt="f2">—</b>, just above the 1% start: from denser starts S reaches its midpoint on less compute, from sparser ones L does.</p>
+  </header>
+
+  <section class="mz-tiles" aria-label="Headline figures">
+    <div class="mz-tile">
+      <span class="mz-tile-label">S family, exponent γ</span>
+      <span class="mz-tile-value dash-skeleton" data-draw="val" data-source="gamma" data-field="gamma_family" data-where="model=S" data-fmt="f2">—</span>
+      <span class="mz-tile-note">C<sub>mid</sub> ∝ pass@16<sup>−γ</sup> in the PAPER-form family fit</span>
+    </div>
+    <div class="mz-tile">
+      <span class="mz-tile-label">L family, exponent γ</span>
+      <span class="mz-tile-value dash-skeleton" data-draw="val" data-source="gamma" data-field="gamma_family" data-where="model=L" data-fmt="f2">—</span>
+      <span class="mz-tile-note">C<sub>mid</sub> ∝ pass@16<sup>−γ</sup> in the PAPER-form family fit</span>
+    </div>
+    <div class="mz-tile">
+      <span class="mz-tile-label">The two laws cross at pass@16</span>
+      <span class="mz-tile-value dash-skeleton" data-draw="val" data-source="crossover" data-field="p16" data-fmt="f2">—</span>
+      <span class="mz-tile-note">where both give C<sub>mid</sub> = <b data-draw="val" data-source="crossover" data-field="cmid_pf" data-fmt="pf">—</b> PF</span>
+    </div>
+    <div class="mz-tile">
+      <span class="mz-tile-label">Worst held-out start, dev RMSE</span>
+      <span class="mz-tile-value">S <span class="dash-skeleton" data-draw="val" data-source="loo_worst" data-field="loo" data-where="model=S" data-fmt="f3">—</span> · L <span class="dash-skeleton" data-draw="val" data-source="loo_worst" data-field="loo" data-where="model=L" data-fmt="f3">—</span></span>
+      <span class="mz-tile-note">S at the <b data-draw="val" data-source="loo_worst" data-field="level" data-where="model=S">—</b> start, L at the <b data-draw="val" data-source="loo_worst" data-field="level" data-where="model=L">—</b> start, each predicted by the fit without it</span>
+    </div>
+  </section>
+
+  <section class="mz-card" id="model">
+    <h2 class="mz-h2">The fitted curve</h2>
+    <p class="mz-note">Every fitted line on this page is this curve. Each model size has one set of A, B, m<sub>0</sub> and m<sub>1</sub>, shared by all of its runs, and each run starts from its own R<sub>ref</sub>.</p>
+    <div class="mz-eqs">
+      <div class="mz-eq"><i>a</i>(<i>C</i>) = <i>R</i><sub>ref</sub> + <span class="mz-frac"><span><i>A</i> − <i>R</i><sub>ref</sub></span><span>1 + (<i>C</i><sub>mid</sub> / <i>C</i>)<sup><i>B</i></sup></span></span></div>
+      <div class="mz-eq mz-eq-flow"><span>log<sub>10</sub> <i>C</i><sub>mid</sub> = <i>m</i><sub>0</sub> + <i>m</i><sub>1</sub> log<sub>10</sub> pass@16,</span> <span>so <i>C</i><sub>mid</sub> = 10<sup><i>m</i><sub>0</sub></sup> · pass@16<sup>−<i>γ</i></sup></span> <span>with <i>γ</i> = −<i>m</i><sub>1</sub></span></div>
+    </div>
+    <p class="mz-note">The form and the way it is fitted follow Khatri et al. (2025), <a href="https://arxiv.org/abs/2510.13786"><cite>The Art of Scaling Reinforcement Learning Compute for LLMs</cite></a>, eq. 1, and Bailey et al. (2026), <a href="https://arxiv.org/abs/2604.20209"><cite>Scaling Self-Play with Self-Guidance</cite></a>, eq. 1 and App. A: a sigmoid in log compute whose starting level is set to an observed value rather than fitted, with the earliest points left out. Two choices are this study's own: R<sub>ref</sub> is a mean over a window of steps rather than one point, and A, B and a power law for the midpoint in the start's pass@16 are shared by all runs of a size. The fit clips A − R<sub>ref</sub> at zero; no run here starts above A. In the code this is form PAPER of <code>rl_curve_family.py</code>.</p>
+    <div class="mz-table-wrap">
+      <table class="mz-table mz-terms">
+        <thead><tr><th>Term</th><th>What it is</th><th>S, <span data-draw="val" data-source="family" data-field="size" data-where="model=S">—</span></th><th>L, <span data-draw="val" data-source="family" data-field="size" data-where="model=L">—</span></th></tr></thead>
+        <tbody>
+          <tr><td><i>a</i>(<i>C</i>)</td><td>Dev pass@1 after <i>C</i> of RL training: goal_reached averaged over 16 samples on each of the 1,000 dev mazes, logged every 10 steps.<span class="mz-set">Data: the curve being fitted.</span></td><td class="mz-muted" data-label="S">data</td><td class="mz-muted" data-label="L">data</td></tr>
+          <tr><td><i>C</i></td><td>Cumulative RL training compute in PFLOPs (PF), from each run's FLOPs ledger.<span class="mz-set">Data.</span></td><td class="mz-muted" data-label="S">data</td><td class="mz-muted" data-label="L">data</td></tr>
+          <tr><td><i>R</i><sub>ref</sub></td><td>The run's starting level: its mean dev over steps 30 to 50. Points before step 30 are dropped, so the curve starts here rather than at the checkpoint's own pass@1.<span class="mz-set">Measured per run, not fitted.</span></td><td class="mz-muted" data-label="S">per run, below</td><td class="mz-muted" data-label="L">per run, below</td></tr>
+          <tr><td><i>A</i></td><td>Asymptote: the dev level the curve approaches as compute grows, the same for every start of a size.<span class="mz-set">Fitted, one value per size.</span></td><td data-label="S"><span class="dash-skeleton" data-draw="val" data-source="family" data-field="A" data-where="model=S" data-fmt="f3">—</span></td><td data-label="L"><span class="dash-skeleton" data-draw="val" data-source="family" data-field="A" data-where="model=L" data-fmt="f3">—</span></td></tr>
+          <tr><td><i>B</i></td><td>Steepness in log compute. Going from 10% to 90% of the way from R<sub>ref</sub> to A takes a factor of 81<sup>1/B</sup> in compute: <b data-draw="val" data-source="derived" data-field="rise_decades" data-where="model=S" data-fmt="f1">—</b> decades for S and <b data-draw="val" data-source="derived" data-field="rise_decades" data-where="model=L" data-fmt="f1">—</b> for L.<span class="mz-set">Fitted, one value per size.</span></td><td data-label="S"><span class="dash-skeleton" data-draw="val" data-source="family" data-field="B" data-where="model=S" data-fmt="f3">—</span></td><td data-label="L"><span class="dash-skeleton" data-draw="val" data-source="family" data-field="B" data-where="model=L" data-fmt="f3">—</span></td></tr>
+          <tr><td><i>C</i><sub>mid</sub></td><td>Midpoint compute: where the run is halfway from R<sub>ref</sub> to A.<span class="mz-set">Given by the law below, one value per start.</span></td><td class="mz-muted" data-label="S">per start, below</td><td class="mz-muted" data-label="L">per start, below</td></tr>
+          <tr><td><i>m</i><sub>0</sub></td><td>Intercept of the law: log<sub>10</sub> C<sub>mid</sub> at pass@16 = 1, so 10<sup>m<sub>0</sub></sup> is <b data-draw="val" data-source="derived" data-field="cmid_at1" data-where="model=S" data-fmt="pf">—</b> PF for S and <b data-draw="val" data-source="derived" data-field="cmid_at1" data-where="model=L" data-fmt="pf">—</b> PF for L. This lies beyond the data, whose densest start is the 10% one.<span class="mz-set">Fitted, one value per size.</span></td><td data-label="S"><span class="dash-skeleton" data-draw="val" data-source="family" data-field="m0" data-where="model=S" data-fmt="f3">—</span></td><td data-label="L"><span class="dash-skeleton" data-draw="val" data-source="family" data-field="m0" data-where="model=L" data-fmt="f3">—</span></td></tr>
+          <tr><td><i>m</i><sub>1</sub></td><td>Slope of log<sub>10</sub> C<sub>mid</sub> against log<sub>10</sub> pass@16.<span class="mz-set">Fitted, one value per size.</span></td><td data-label="S"><span class="dash-skeleton" data-draw="val" data-source="family" data-field="m1" data-where="model=S" data-fmt="f3">—</span></td><td data-label="L"><span class="dash-skeleton" data-draw="val" data-source="family" data-field="m1" data-where="model=L" data-fmt="f3">—</span></td></tr>
+          <tr><td><i>γ</i></td><td>Minus m<sub>1</sub>. Halving the start's pass@16 multiplies C<sub>mid</sub> by 2<sup>γ</sup>: <b data-draw="val" data-source="derived" data-field="halve_x" data-where="model=S" data-fmt="x1">—</b> for S and <b data-draw="val" data-source="derived" data-field="halve_x" data-where="model=L" data-fmt="x1">—</b> for L. A straight line through the per-run C<sub>mid</sub> values gives <b data-draw="val" data-source="gamma" data-field="gamma_line" data-where="model=S" data-fmt="f2">—</b> and <b data-draw="val" data-source="gamma" data-field="gamma_line" data-where="model=L" data-fmt="f2">—</b>.<span class="mz-set">Derived from m<sub>1</sub>.</span></td><td data-label="S"><span class="dash-skeleton" data-draw="val" data-source="gamma" data-field="gamma_family" data-where="model=S" data-fmt="f2">—</span></td><td data-label="L"><span class="dash-skeleton" data-draw="val" data-source="gamma" data-field="gamma_family" data-where="model=L" data-fmt="f2">—</span></td></tr>
+          <tr><td>pass@16</td><td>The start checkpoint's chance of solving a dev maze in at least one of 16 samples, an unbiased estimate from 1,024 samples per maze (2,048 at the 0.1% start). GRPO draws 16 rollouts per prompt, so this is about the share of mazes that give a learning signal at the start. The start's pass@1 in its place predicts held-out starts about as well (<a href="https://huggingface.co/datasets/hi-todayis-jh/tailrl-text-maze-budget-study/blob/main/extra/README.md">covariate check in the README</a>).<span class="mz-set">Measured per start.</span></td><td class="mz-muted" data-label="S">per start, below</td><td class="mz-muted" data-label="L">per start, below</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="mz-note">How it is fitted: all runs of one size at once, by bounded least squares (SciPy <code>least_squares</code>, the best of 13 starting points). Each run counts equally: its residuals are divided by the square root of its number of points. The free parameters are A, B, m<sub>0</sub> and m<sub>1</sub>; R<sub>ref</sub> is fixed per run. A held-out test refits without one start and predicts that start's seed-0 run from its own R<sub>ref</sub>.</p>
+    <h3 class="mz-h3" id="start-table">Fitted values at each start</h3>
+    <p class="mz-note">What each start feeds into the curve: its pass@16, the C<sub>mid</sub> the law gives at that pass@16, and each run's R<sub>ref</sub>. With A and B above, these give every fitted line in the dev-curve panels.</p>
+    <div class="mz-table-wrap">
+      <table class="mz-table" data-source="start_fit" data-row-key="pair">
+        <thead><tr><th data-field="level">Start</th><th data-field="s_p16" data-fmt="f3">S pass@16</th><th data-field="s_cmid" data-fmt="pf">S C<sub>mid</sub>, PF</th><th data-field="s_rref0" data-fmt="f3">S R<sub>ref</sub>, seed 0</th><th data-field="s_rref1" data-fmt="f3">S R<sub>ref</sub>, seed 1</th><th data-field="l_p16" data-fmt="f3">L pass@16</th><th data-field="l_cmid" data-fmt="pf">L C<sub>mid</sub>, PF</th><th data-field="l_rref0" data-fmt="f3">L R<sub>ref</sub>, seed 0</th><th data-field="l_rref1" data-fmt="f3">L R<sub>ref</sub>, seed 1</th></tr></thead>
+        <tbody data-draw="table"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="mz-card" id="cmid">
+    <h2 class="mz-h2">Midpoint compute against the start</h2>
+    <p class="mz-note">Each point is one RL run's C<sub>mid</sub>, fitted with its family's A and B held fixed; filled points are seed 0 and open points seed 1. A caret marks a C<sub>mid</sub> beyond the run's last point, so an extrapolation. Lines are the family laws log<sub>10</sub> C<sub>mid</sub> = m<sub>0</sub> + m<sub>1</sub> log<sub>10</sub> pass@16, and the ring is where they cross.</p>
+    <div class="mz-chart mz-chart-cmid dash-skeleton" id="cmid-chart" data-draw="cmid" data-source="cmid_curves family crossover"></div>
+    <h3 class="mz-h3" id="cmid-table">C<sub>mid</sub> by start, PF</h3>
+    <p class="mz-note">Family: the law at the start's pass@16. Held out: the law refitted without that start. Seed 0 and seed 1: the per-run values plotted above.</p>
+    <div class="mz-table-wrap">
+      <table class="mz-table" data-source="by_start" data-row-key="pair">
+        <thead><tr><th data-field="level">Start</th><th data-field="s_cmid_fit" data-fmt="pf">S family</th><th data-field="s_cmid_loo" data-fmt="pf">S held out</th><th data-field="s_cmid_s0" data-fmt="pf">S seed 0</th><th data-field="s_cmid_s1" data-fmt="pf">S seed 1</th><th data-field="l_cmid_fit" data-fmt="pf">L family</th><th data-field="l_cmid_loo" data-fmt="pf">L held out</th><th data-field="l_cmid_s0" data-fmt="pf">L seed 0</th><th data-field="l_cmid_s1" data-fmt="pf">L seed 1</th></tr></thead>
+        <tbody data-draw="table"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="mz-card" id="curves">
+    <h2 class="mz-h2">Dev curves and the family fit</h2>
+    <p class="mz-note">One panel per start, training compute on a log axis. Points are dev (goal_reached pass@1, mean@16 on the dev mazes) every 10 RL steps for both seeds; lines are the family fit for each seed from its own R<sub>ref</sub>, solid for seed 0 and dashed for seed 1.</p>
+    <div class="mz-chart mz-chart-panels dash-skeleton" id="curves-chart" data-draw="panels" data-source="curves fit_curves starts family"></div>
+    <h3 class="mz-h3" id="budget-table">Same compute, S against L</h3>
+    <p class="mz-note">Dev at each compute budget, interpolated along each run and averaged over the seeds of that size that reach it; a blank cell means no run of that size got that far.</p>
+    <div class="mz-table-wrap">
+      <table class="mz-table" data-source="budget" data-row-key="pair,budget">
+        <thead><tr><th data-field="level">Start</th><th data-field="budget" data-fmt="int">Budget, PF</th><th data-field="s_dev" data-fmt="f3">S dev</th><th data-field="l_dev" data-fmt="f3">L dev</th><th data-field="s_n" data-fmt="int">S seeds</th><th data-field="l_n" data-fmt="int">L seeds</th></tr></thead>
+        <tbody data-draw="table"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="mz-card" id="quality">
+    <h2 class="mz-h2">How well the fits hold</h2>
+    <p class="mz-note">Dev RMSE of the family fit on each run (seed 0, seed 1), and on the start's seed-0 run when the family is refitted without that start and predicts it from the run's own R<sub>ref</sub> (held out). The SIG columns repeat the held-out test with the two-phase sigmoid form.</p>
+    <div class="mz-table-wrap">
+      <table class="mz-table" data-source="by_start" data-row-key="pair">
+        <thead><tr><th data-field="level">Start</th><th data-field="s_rmse_s0" data-fmt="f3">S seed 0</th><th data-field="s_rmse_s1" data-fmt="f3">S seed 1</th><th data-field="s_loo" data-fmt="f3">S held out</th><th data-field="s_loo_sig" data-fmt="f3">S held out, SIG</th><th data-field="l_rmse_s0" data-fmt="f3">L seed 0</th><th data-field="l_rmse_s1" data-fmt="f3">L seed 1</th><th data-field="l_loo" data-fmt="f3">L held out</th><th data-field="l_loo_sig" data-fmt="f3">L held out, SIG</th></tr></thead>
+        <tbody data-draw="table"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="mz-card mz-method" id="method">
+    <h2 class="mz-h2">Data and method</h2>
+    <p>Two sizes of the text-maze policy, S and L, are trained with GRPO from frozen starting checkpoints matched in pass@1 across the sizes; a start is named by that pass@1. Each start has two RL seeds per size. Dev is goal_reached pass@1 on the dev mazes, the mean of 16 samples per maze, logged every 10 steps; compute is cumulative training PFLOPs from each run's FLOPs ledger.</p>
+    <p>The family fit is described under The fitted curve, above. The per-run C<sub>mid</sub> in the midpoint chart refits each run alone, with A and B fixed at its family's values.</p>
+    <p>The 10%, 1% and 0.1% starts come from the earlier budget study. This round adds the 5.5%, 3% and 0.3% starts, the second L seeds at 1% and 0.1%, and a 1% S seed-1 run to the compute ceiling that replaces the shorter earlier one. Curves, fits and logs are in the <a href="https://huggingface.co/datasets/hi-todayis-jh/tailrl-text-maze-budget-study/tree/main/extra">budget-study repository's extra folder</a>; checkpoints are in <a href="https://huggingface.co/datasets/hi-todayis-jh/tailrl-text-maze-extra-levels">tailrl-text-maze-extra-levels</a>.</p>
+  </section>
+</div>
+<script>
+  const SERIES = {S: 0, L: 1};
+  const colorOf = (m) => dash.colors[SERIES[m] ?? 2];
+  const isNum = (v) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+  const pfFmt = (v) => (v >= 100 ? d3.format(',.0f')(v) : v >= 10 ? d3.format('.1f')(v) : d3.format('.2f')(v));
+  const FMT = {
+    f2: (v) => (isNum(v) ? d3.format('.2f')(Number(v)) : '–'),
+    f1: (v) => (isNum(v) ? d3.format('.1f')(Number(v)) : '–'),
+    f3: (v) => (isNum(v) ? d3.format('.3f')(Number(v)) : '–'),
+    x1: (v) => (isNum(v) ? d3.format('.1f')(Number(v)) + '×' : '–'),
+    pf: (v) => (isNum(v) ? pfFmt(Number(v)) : '–'),
+    int: (v) => (isNum(v) ? d3.format('d')(Number(v)) : '–'),
+    text: (v) => (v === null || v === undefined || v === '' ? '–' : String(v)),
+  };
+
+  dash.calc('gamma', {
+    title: 'Midpoint exponents',
+    description: 'γ = −m1 of each family fit, and minus the least-squares slope of log10 C_mid on log10 pass@16 over that size\'s per-run values.',
+    inputs: ['family', 'cmid_curves'],
+    fn: (family, cmid_curves) => family.map((f) => {
+      const pts = cmid_curves.filter((c) => c.model === f.model).map((c) => [Math.log10(Number(c.pass16)), Math.log10(Number(c.cmid_pf))]);
+      const mx = pts.reduce((a, p) => a + p[0], 0) / pts.length;
+      const my = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+      const sxy = pts.reduce((a, p) => a + (p[0] - mx) * (p[1] - my), 0);
+      const sxx = pts.reduce((a, p) => a + (p[0] - mx) ** 2, 0);
+      return {model: f.model, gamma_family: -Number(f.m1), gamma_line: -sxy / sxx};
+    }),
+  });
+
+  dash.calc('derived', {
+    title: 'What the fitted parameters imply',
+    description: 'Per size: log10(81) / B, the decades of compute the rise from 10% to 90% of the gain takes; 10^m0, the C_mid in PF at pass@16 = 1; and 2^−m1, the factor by which halving the start pass@16 multiplies C_mid.',
+    inputs: ['family'],
+    fn: (family) => family.map((f) => ({
+      model: f.model, rise_decades: Math.log10(81) / Number(f.B), cmid_at1: 10 ** Number(f.m0), halve_x: 2 ** -Number(f.m1),
+    })),
+  });
+
+  dash.calc('start_fit', {
+    title: 'Fitted values at each start',
+    description: 'Per start and size: the start pass@16, the C_mid the family law gives there (the fit output), and each seed\'s R_ref, its mean dev over steps 30 to 50.',
+    inputs: ['by_start', 'starts', 'cmid_curves'],
+    fn: (by_start, starts, cmid_curves) => by_start.map((b) => {
+      const row = {pair: b.pair, level: b.level};
+      for (const m of ['S', 'L']) {
+        const t = m.toLowerCase();
+        const st = starts.find((s) => s.model === m && s.pair === b.pair);
+        const rref = (seed) => {
+          const c = cmid_curves.find((x) => x.model === m && x.pair === b.pair && Number(x.seed) === seed);
+          return c ? Number(c.r_ref) : null;
+        };
+        row[t + '_p16'] = st ? Number(st.pass16) : null;
+        row[t + '_cmid'] = Number(b[t + '_cmid_fit']);
+        row[t + '_rref0'] = rref(0);
+        row[t + '_rref1'] = rref(1);
+      }
+      return row;
+    }),
+  });
+
+  dash.calc('crossover', {
+    title: 'Where the C_mid laws cross',
+    description: 'The start pass@16 at which the S and L family laws give the same C_mid, and that C_mid in PF.',
+    inputs: ['family'],
+    fn: (family) => {
+      const s = family.find((f) => f.model === 'S');
+      const l = family.find((f) => f.model === 'L');
+      const x = (Number(l.m0) - Number(s.m0)) / (Number(s.m1) - Number(l.m1));
+      return [{p16: 10 ** x, cmid_pf: 10 ** (Number(s.m0) + Number(s.m1) * x)}];
+    },
+  });
+
+  dash.calc('loo_worst', {
+    title: 'Worst held-out start',
+    description: 'The largest leave-one-start-out dev RMSE of each family (PAPER form) and the start it belongs to.',
+    inputs: ['by_start'],
+    fn: (by_start) => ['S', 'L'].map((m) => {
+      const k = m.toLowerCase() + '_loo';
+      const w = by_start.reduce((a, r) => (Number(r[k]) > Number(a[k]) ? r : a));
+      return {model: m, loo: Number(w[k]), level: w.level};
+    }),
+  });
+
+  dash.calc('fit_curves', {
+    title: 'Family fit along each run',
+    description: 'R_ref + (A − R_ref) / (1 + (C_mid / C)^B) with C_mid = 10^(m0 + m1 log10 pass@16), at 48 log-spaced compute values over each run\'s fitted range.',
+    inputs: ['family', 'cmid_curves'],
+    fn: (family, cmid_curves) => cmid_curves.flatMap((c) => {
+      const f = family.find((x) => x.model === c.model);
+      const A = Number(f.A), B = Number(f.B), r = Number(c.r_ref);
+      const cmid = 10 ** (Number(f.m0) + Number(f.m1) * Math.log10(Number(c.pass16)));
+      const lo = Math.log10(Number(c.first_pf)), hi = Math.log10(Number(c.last_pf));
+      return Array.from({length: 48}, (_, i) => {
+        const C = 10 ** (lo + ((hi - lo) * i) / 47);
+        return {model: c.model, pair: c.pair, seed: Number(c.seed), pflops: C, fit: r + Math.max(A - r, 0) / (1 + (cmid / C) ** B)};
+      });
+    }),
+  });
+
+  dash.calc('budget', {
+    title: 'Dev at the same compute',
+    description: 'Each run\'s dev interpolated linearly in compute at 50, 100 and 200 PF, averaged over the seeds of a size that reach that budget.',
+    inputs: ['curves', 'starts'],
+    fn: (curves, starts) => {
+      const runs = new Map();
+      for (const r of curves) {
+        const k = r.model + '|' + r.pair + '|' + r.seed;
+        if (!runs.has(k)) runs.set(k, []);
+        runs.get(k).push([Number(r.pflops), Number(r.dev)]);
+      }
+      for (const p of runs.values()) p.sort((a, b) => a[0] - b[0]);
+      const at = (p, b) => {
+        for (let i = 1; i < p.length; i++) {
+          if (p[i][0] >= b) {
+            const [x0, y0] = p[i - 1];
+            const [x1, y1] = p[i];
+            return x1 > x0 ? y0 + ((y1 - y0) * (b - x0)) / (x1 - x0) : y1;
+          }
+        }
+        return null;
+      };
+      const mean = (model, pair, b) => {
+        const v = [0, 1].map((s) => runs.get(model + '|' + pair + '|' + s)).filter(Boolean).map((p) => at(p, b)).filter((y) => y !== null);
+        return v.length ? [v.reduce((a, y) => a + y, 0) / v.length, v.length] : [null, 0];
+      };
+      const out = [];
+      for (const st of starts.filter((s) => s.model === 'S')) {
+        for (const b of [50, 100, 200]) {
+          const [sd, sn] = mean('S', st.pair, b);
+          const [ld, ln] = mean('L', st.pair, b);
+          if (sn || ln) out.push({pair: st.pair, level: st.level, budget: b, s_dev: sd, l_dev: ld, s_n: sn, l_n: ln});
+        }
+      }
+      return out;
+    },
+  });
+
+  const rowWhere = (rows, where) => {
+    if (!where) return rows[0];
+    const conds = where.split('&').map((p) => p.split('=').map(decodeURIComponent));
+    return rows.find((r) => conds.every(([k, v]) => String(r[k]) === v));
+  };
+
+  dash.draw('val', (el) => {
+    const d = dash.data(el.dataset.source);
+    if (d.status !== 'ok') {
+      el.textContent = '—';
+      if (d.status === 'error') el.classList.remove('dash-skeleton');
+      return;
+    }
+    el.classList.remove('dash-skeleton');
+    const row = Array.isArray(d.data) ? rowWhere(d.data, el.dataset.where) : null;
+    el.textContent = row ? (FMT[el.dataset.fmt] || FMT.text)(row[el.dataset.field]) : '—';
+  });
+
+  dash.draw('table', (tb) => {
+    const table = tb.closest('table');
+    if (!table) return;
+    const src = table.dataset.source;
+    const keys = (table.dataset.rowKey || '').split(',');
+    const d = dash.data(src);
+    if (d.status !== 'ok' || !Array.isArray(d.data)) { tb.replaceChildren(); return; }
+    const ths = [...table.querySelectorAll('thead th')];
+    const keyOf = (r) => keys.map((k) => String(r[k])).join(',');
+    const other = new Map();
+    for (const th of ths) {
+      const s = th.dataset.source;
+      if (s && s !== src && !other.has(s)) {
+        const e = dash.data(s);
+        other.set(s, new Map(e.status === 'ok' && Array.isArray(e.data) ? e.data.map((r) => [keyOf(r), r]) : []));
+      }
+    }
+    tb.replaceChildren(...d.data.map((r) => {
+      const tr = document.createElement('tr');
+      tr.dataset.key = keys.map((k) => encodeURIComponent(String(r[k]))).join(',');
+      for (const th of ths) {
+        const s = th.dataset.source;
+        const row = s && s !== src ? other.get(s).get(keyOf(r)) : r;
+        const f = th.dataset.fmt || 'text';
+        const td = document.createElement('td');
+        td.textContent = (FMT[f] || FMT.text)(row ? row[th.dataset.field] : null);
+        tr.append(td);
+      }
+      return tr;
+    }));
+  });
+
+  let clipSeq = 0;
+  const chartReady = (el, ids) => {
+    const st = ids.map((id) => dash.data(id).status);
+    if (st.every((s) => s === 'ok')) { el.classList.remove('dash-skeleton'); return true; }
+    el.replaceChildren();
+    if (st.includes('error')) {
+      el.classList.remove('dash-skeleton');
+      const p = document.createElement('p');
+      p.className = 'mz-failed';
+      const dot = document.createElement('span');
+      dot.className = 'mz-failed-dot';
+      p.append(dot, document.createTextNode('Failed to load'));
+      el.append(p);
+    } else {
+      el.classList.add('dash-skeleton');
+    }
+    return false;
+  };
+  const legend = (host, items) => {
+    const box = document.createElement('div');
+    box.className = 'mz-legend';
+    for (const [label, color, open] of items) {
+      const it = document.createElement('span');
+      it.className = 'mz-legend-item';
+      const sw = document.createElement('span');
+      sw.className = 'mz-sw';
+      sw.style.borderColor = color;
+      sw.style.background = open ? 'transparent' : color;
+      it.append(sw, document.createTextNode(label));
+      box.append(it);
+    }
+    host.append(box);
+  };
+  const tooltip = (host) => {
+    const t = document.createElement('div');
+    t.className = 'mz-tip';
+    t.hidden = true;
+    host.append(t);
+    return {
+      show(lines, px, py) {
+        t.replaceChildren(...lines.map((text, i) => {
+          const row = document.createElement('div');
+          row.className = i ? 'mz-tip-row' : 'mz-tip-head';
+          row.textContent = text;
+          return row;
+        }));
+        t.hidden = false;
+        const hw = host.clientWidth, tw = t.offsetWidth, th = t.offsetHeight;
+        let left = px + 12;
+        if (left + tw > hw) left = Math.max(0, px - 12 - tw);
+        let top = py - th - 10;
+        if (top < 0) top = py + 14;
+        t.style.left = left + 'px';
+        t.style.top = top + 'px';
+      },
+      hide() { t.hidden = true; },
+    };
+  };
+  const toHost = (host, svgNode, W, sx, sy) => {
+    const hr = host.getBoundingClientRect(), sr = svgNode.getBoundingClientRect(), k = sr.width / W;
+    return [sr.left - hr.left + sx * k, sr.top - hr.top + sy * k];
+  };
+  const measure = (svg, cls, texts) => {
+    const t = svg.append('text').attr('class', cls);
+    const w = d3.max(texts, (s) => { t.text(s); return t.node().getComputedTextLength(); }) || 0;
+    t.remove();
+    return w;
+  };
+
+  dash.draw('cmid', (el) => {
+    if (!chartReady(el, ['cmid_curves', 'family', 'crossover'])) return;
+    el.replaceChildren();
+    const fam = dash.data('family').data;
+    const cross = dash.data('crossover').data[0];
+    const pts = dash.data('cmid_curves').data.map((r) => ({
+      model: r.model, level: r.level, seed: Number(r.seed), p16: Number(r.pass16), cmid: Number(r.cmid_pf),
+      rref: Number(r.r_ref), last: Number(r.last_pf),
+    }));
+    legend(el, fam.map((f) => [`${f.model}, ${f.size} parameters`, colorOf(f.model), false])
+      .concat([['seed 0', 'var(--color-fg-muted)', false], ['seed 1', 'var(--color-fg-muted)', true]]));
+    const W = Math.max(280, el.clientWidth);
+    const H = Math.round(Math.max(260, Math.min(440, W * 0.55)));
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img')
+      .attr('aria-label', 'Per-run C_mid against the start pass@16 on log axes, S and L, with the family laws');
+    const lo = d3.min(pts, (p) => p.cmid) / 1.7, hi = d3.max(pts, (p) => p.cmid) * 1.7;
+    const yTicks = [1, 3, 10, 30, 100, 300, 1000, 3000, 10000].filter((v) => v >= lo && v <= hi);
+    const xTicks = [0.01, 0.03, 0.1, 0.3, 1];
+    const fy = d3.format(',');
+    const m = {t: 26, r: 14, b: 38, l: Math.ceil(measure(svg, 'mz-tick', yTicks.map(fy))) + 12};
+    const x = d3.scaleLog([0.01, 1], [m.l, W - m.r]);
+    const y = d3.scaleLog([lo, hi], [H - m.b, m.t]);
+    const clip = 'mz-clip-' + (++clipSeq);
+    svg.append('clipPath').attr('id', clip).append('rect').attr('x', m.l).attr('y', m.t).attr('width', W - m.l - m.r).attr('height', H - m.t - m.b);
+    svg.append('g').selectAll('line').data(yTicks).join('line').attr('class', 'mz-grid')
+      .attr('x1', m.l).attr('x2', W - m.r).attr('y1', (v) => y(v)).attr('y2', (v) => y(v));
+    svg.append('g').selectAll('line').data(xTicks).join('line').attr('class', 'mz-grid')
+      .attr('x1', (v) => x(v)).attr('x2', (v) => x(v)).attr('y1', m.t).attr('y2', H - m.b);
+    svg.append('line').attr('class', 'mz-axis').attr('x1', m.l).attr('x2', W - m.r).attr('y1', H - m.b).attr('y2', H - m.b);
+    svg.append('g').selectAll('text').data(yTicks).join('text').attr('class', 'mz-tick')
+      .attr('x', m.l - 8).attr('y', (v) => y(v)).attr('dy', '0.32em').attr('text-anchor', 'end').text(fy);
+    svg.append('g').selectAll('text').data(xTicks).join('text').attr('class', 'mz-tick')
+      .attr('x', (v) => x(v)).attr('y', H - m.b + 16).attr('text-anchor', 'middle').text((v) => String(v));
+    svg.append('text').attr('class', 'mz-axis-label').attr('x', W - m.r).attr('y', H - 3).attr('text-anchor', 'end').text('start pass@16');
+    const yl = svg.append('text').attr('class', 'mz-axis-label').attr('x', 0).attr('y', 12);
+    yl.append('tspan').text('C');
+    yl.append('tspan').attr('baseline-shift', 'sub').attr('font-size', '0.8em').text('mid');
+    yl.append('tspan').text(', PF');
+    const plot = svg.append('g').attr('clip-path', `url(#${clip})`);
+    const xs = d3.range(41).map((i) => 10 ** (-2 + (2 * i) / 40));
+    for (const f of fam) {
+      const law = (p) => 10 ** (Number(f.m0) + Number(f.m1) * Math.log10(p));
+      plot.append('path').attr('class', 'mz-law').style('stroke', colorOf(f.model)).attr('d', d3.line()(xs.map((p) => [x(p), y(law(p))])));
+      svg.append('text').attr('class', 'mz-label').style('fill', colorOf(f.model))
+        .attr('x', x(0.0118) + 2).attr('y', Math.max(m.t + 10, y(law(0.0118)) - 8)).text(f.model);
+    }
+    if (cross) {
+      const cx = x(cross.p16), cy = y(cross.cmid_pf);
+      svg.append('circle').attr('class', 'mz-cross').attr('cx', cx).attr('cy', cy).attr('r', 7);
+      svg.append('text').attr('class', 'mz-tick').attr('x', cx + 10).attr('y', cy + 18).text('laws cross');
+    }
+    const dots = svg.append('g');
+    dots.selectAll('path').data(pts.filter((p) => p.cmid > p.last)).join('path').attr('class', 'mz-caret')
+      .style('stroke', (p) => colorOf(p.model))
+      .attr('d', (p) => `M${x(p.p16) - 4},${y(p.cmid) - 8}L${x(p.p16)},${y(p.cmid) - 12}L${x(p.p16) + 4},${y(p.cmid) - 8}`);
+    dots.selectAll('circle').data(pts).join('circle').attr('class', 'mz-pt').attr('r', 4.5)
+      .attr('cx', (p) => x(p.p16)).attr('cy', (p) => y(p.cmid))
+      .style('stroke', (p) => colorOf(p.model)).style('fill', (p) => (p.seed === 0 ? colorOf(p.model) : 'var(--color-panel)'));
+    const tip = tooltip(el);
+    const node = svg.node();
+    svg.on('pointermove', (ev) => {
+      const [mx, my] = d3.pointer(ev, node);
+      let best = null, bd = 18 * 18;
+      for (const p of pts) {
+        const dx = x(p.p16) - mx, dy = y(p.cmid) - my, dd = dx * dx + dy * dy;
+        if (dd < bd) { bd = dd; best = p; }
+      }
+      if (!best) { tip.hide(); return; }
+      const lines = [`${best.model} · ${best.level} start · seed ${best.seed}`, `C_mid ${pfFmt(best.cmid)} PF`,
+        `R_ref ${d3.format('.3f')(best.rref)} · pass@16 ${d3.format('.3f')(best.p16)}`];
+      if (best.cmid > best.last) lines.push(`run ends at ${pfFmt(best.last)} PF`);
+      const [hx, hy] = toHost(el, node, W, x(best.p16), y(best.cmid));
+      tip.show(lines, hx, hy);
+    }).on('pointerleave', () => tip.hide());
+  });
+
+  dash.draw('panels', (el) => {
+    if (!chartReady(el, ['curves', 'fit_curves', 'starts', 'family'])) return;
+    el.replaceChildren();
+    const fam = dash.data('family').data;
+    legend(el, fam.map((f) => [`${f.model}, ${f.size} parameters`, colorOf(f.model), false]));
+    const rows = dash.data('curves').data.filter((r) => Number(r.pflops) > 0).map((r) => ({
+      model: r.model, pair: r.pair, seed: Number(r.seed), step: Number(r.step), pf: Number(r.pflops), dev: Number(r.dev),
+    }));
+    const byPair = d3.group(rows, (r) => r.pair);
+    const fits = d3.group(dash.data('fit_curves').data, (r) => r.pair, (r) => r.model, (r) => Number(r.seed));
+    const starts = dash.data('starts').data;
+    const p16 = new Map(starts.map((s) => [s.model + '|' + s.pair, Number(s.pass16)]));
+    const order = starts.filter((s) => s.model === 'S').sort((a, b) => Number(b.pass16) - Number(a.pass16));
+    const xMax = (d3.max(rows, (r) => r.pf) || 1) * 1.2;
+    const xTicks = [1, 10, 100, 1000].filter((v) => v < xMax);
+    const yTicks = [0, 0.25, 0.5, 0.75, 1];
+    const fy = (v) => d3.format('~g')(v);
+    const f2 = d3.format('.2f');
+    const grid = document.createElement('div');
+    grid.className = 'mz-panels';
+    el.append(grid);
+    const cells = order.map((st) => {
+      const cell = document.createElement('div');
+      cell.className = 'mz-panel';
+      const head = document.createElement('div');
+      head.className = 'mz-panel-head';
+      const title = document.createElement('span');
+      title.className = 'mz-panel-title';
+      title.textContent = `${st.level} start`;
+      const sub = document.createElement('span');
+      sub.className = 'mz-panel-sub';
+      sub.textContent = `pass@16 S ${f2(p16.get('S|' + st.pair))} · L ${f2(p16.get('L|' + st.pair))}`;
+      head.append(title, sub);
+      cell.append(head);
+      grid.append(cell);
+      return [cell, st];
+    });
+    for (const [cell, st] of cells) {
+      const W = Math.max(220, cell.clientWidth);
+      const H = Math.round(Math.max(170, Math.min(260, W * 0.62)));
+      const svg = d3.select(cell).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img')
+        .attr('aria-label', `Dev against compute from the ${st.level} start, S and L, with the family fit`);
+      const m = {t: 8, r: 10, b: 24, l: Math.ceil(measure(svg, 'mz-tick', yTicks.map(fy))) + 10};
+      const x = d3.scaleLog([0.5, xMax], [m.l, W - m.r]);
+      const y = d3.scaleLinear([0, 1], [H - m.b, m.t]);
+      svg.append('g').selectAll('line').data(yTicks).join('line').attr('class', 'mz-grid')
+        .attr('x1', m.l).attr('x2', W - m.r).attr('y1', (v) => y(v)).attr('y2', (v) => y(v));
+      svg.append('g').selectAll('line').data(xTicks).join('line').attr('class', 'mz-grid')
+        .attr('x1', (v) => x(v)).attr('x2', (v) => x(v)).attr('y1', m.t).attr('y2', H - m.b);
+      svg.append('line').attr('class', 'mz-axis').attr('x1', m.l).attr('x2', W - m.r).attr('y1', H - m.b).attr('y2', H - m.b);
+      svg.append('g').selectAll('text').data(yTicks).join('text').attr('class', 'mz-tick')
+        .attr('x', m.l - 6).attr('y', (v) => y(v)).attr('dy', '0.32em').attr('text-anchor', 'end').text(fy);
+      svg.append('g').selectAll('text').data(xTicks).join('text').attr('class', 'mz-tick')
+        .attr('x', (v) => x(v)).attr('y', H - m.b + 15).attr('text-anchor', 'middle').text((v) => String(v));
+      svg.append('text').attr('class', 'mz-axis-label').attr('x', W - m.r).attr('y', H - m.b + 15).attr('text-anchor', 'end').text('PF');
+      const pr = byPair.get(st.pair) || [];
+      const dots = svg.append('g');
+      for (const model of ['S', 'L']) {
+        dots.append('g').style('fill', colorOf(model)).attr('fill-opacity', 0.34)
+          .selectAll('circle').data(pr.filter((r) => r.model === model)).join('circle')
+          .attr('r', 1.7).attr('cx', (r) => x(r.pf)).attr('cy', (r) => y(r.dev));
+      }
+      const fp = fits.get(st.pair);
+      if (fp) {
+        for (const [model, bySeed] of fp) {
+          for (const [seed, pts] of bySeed) {
+            const line = d3.line().x((r) => x(r.pflops)).y((r) => y(r.fit));
+            svg.append('path').attr('class', seed === 0 ? 'mz-fit' : 'mz-fit mz-fit-dashed').style('stroke', colorOf(model))
+              .attr('d', line([...pts].sort((a, b) => a.pflops - b.pflops)));
+          }
+        }
+      }
+      const hl = svg.append('circle').attr('class', 'mz-hl').attr('r', 4).attr('visibility', 'hidden');
+      const tip = tooltip(cell);
+      const node = svg.node();
+      svg.on('pointermove', (ev) => {
+        const [mx, my] = d3.pointer(ev, node);
+        let best = null, bd = 14 * 14;
+        for (const r of pr) {
+          const dx = x(r.pf) - mx, dy = y(r.dev) - my, dd = dx * dx + dy * dy;
+          if (dd < bd) { bd = dd; best = r; }
+        }
+        if (!best) { tip.hide(); hl.attr('visibility', 'hidden'); return; }
+        hl.attr('cx', x(best.pf)).attr('cy', y(best.dev)).style('stroke', colorOf(best.model)).attr('visibility', 'visible');
+        const [hx, hy] = toHost(cell, node, W, x(best.pf), y(best.dev));
+        tip.show([`${best.model} · seed ${best.seed} · step ${best.step}`, `${pfFmt(best.pf)} PF · dev ${d3.format('.3f')(best.dev)}`], hx, hy);
+      }).on('pointerleave', () => { tip.hide(); hl.attr('visibility', 'hidden'); });
+    }
+  });
+</script>
