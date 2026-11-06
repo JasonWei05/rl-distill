@@ -66,9 +66,11 @@ here defaults to it. The one-off helpers (`handoff_*.sh`, `prune_*.sh`, `stage_h
 are not needed.
 
 1. **TailRL fork.** `git clone https://github.com/Zanette-Labs/TailRL ~/TailRL && git -C ~/TailRL checkout 5682c6a`, then
-   `git -C ~/TailRL apply <rl-distill>/rl-distill-scripts/maze/tailrl_text_maze.patch` (11 files: OPD estimator + teacher
+   `git -C ~/TailRL apply <rl-distill>/rl-distill-scripts/maze/tailrl_text_maze.patch` (12 files: OPD estimator + teacher
    reference policy, FLOPs ledger + `MAX_TOTAL_TFLOPS` stop, `ATTN_IMPL` knob, flash-attn-free workers,
-   `sft_pretrain.py --data_seed/--init_seed`, `src/maze_zero_reward.py`, `.uv-constraints.txt`; verified to apply to `5682c6a`).
+   `sft_pretrain.py --data_seed/--init_seed`, `src/maze_zero_reward.py`, `.uv-constraints.txt`, and the opt-in knobs added on
+   federer: `RAY_TEMP_ROOT`, Ray port bands 8-11 and `LOG_PROB_MICRO_BATCH` in `train.sh`, `VERL_VAL_SKIP_BOOTSTRAP=1` in
+   `metric_utils.py`; verified to apply to `5682c6a`).
 2. **Environment** `~/TailRL/.venv` (Python 3.10, built with `uv`): torch 2.8.0 for your CUDA (`.uv-constraints.txt` pins
    `torch==2.8.0`; cu128 here), `experiments/text_maze/requirements.txt`, then pin **transformers 4.57.6** (5.x loads these
    checkpoints silently wrong), ray 2.59.0, and add `torchdata==0.11.0` + `peft==0.21.2` (imported by the vendored verl, absent

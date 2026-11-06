@@ -75,7 +75,7 @@ index bb3468b..c3042bb 100755
  
  CK = sys.argv[1] if len(sys.argv) > 1 else os.path.join(CACHE, "ckpt-3550")
 diff --git a/experiments/text_maze/scripts/train.sh b/experiments/text_maze/scripts/train.sh
-index 6533aec..91d87b5 100755
+index 6533aec..84153b7 100755
 --- a/experiments/text_maze/scripts/train.sh
 +++ b/experiments/text_maze/scripts/train.sh
 @@ -85,6 +85,17 @@ CKPT_STEP=""
@@ -138,7 +138,31 @@ index 6533aec..91d87b5 100755
  echo "[config] suite=${SUITE} method=${METHOD} adv_estimator=${ADVANTAGE_ESTIMATOR}"
  echo "[config] pass_rate=${PASS_RATE_TAG} target_pct=${PASS_RATE_PCT} ckpt=${CKPT_STEP}"
  echo "[config] reward=${REWARD_LABEL}${REWARD_HPARAM_TAG} transform=${REWARD_TRANSFORM} seed=${SEED} G=${N_ROLLOUTS} pass_k=${PASS_K}"
-@@ -582,7 +614,8 @@ python3 -m verl.trainer.main_ppo \
+@@ -479,7 +511,8 @@ RAY_METRICS_PORT=$((7600 + RAY_PORT_INDEX))
+ RAY_DASHBOARD_PORT=$((7700 + RAY_PORT_INDEX))
+ RAY_DASHBOARD_AGENT_HTTP_PORT=$((7800 + RAY_PORT_INDEX))
+ RAY_DASHBOARD_AGENT_GRPC_PORT=$((7900 + RAY_PORT_INDEX))
+-RAY_TEMP_DIR="/tmp/ray_textmaze_p${RAY_PORT_INDEX}_gpu${GPU_TAG}"
++# RAY_TEMP_ROOT moves Ray sessions off /tmp (federer: the root partition is full); keep it short, AF_UNIX paths are <= 107 bytes
++RAY_TEMP_DIR="${RAY_TEMP_ROOT:-/tmp}/ray_textmaze_p${RAY_PORT_INDEX}_gpu${GPU_TAG}"
+ case "$RAY_PORT_INDEX" in
+   0) RAY_MIN_WORKER_PORT=50000; RAY_MAX_WORKER_PORT=50399 ;;
+   1) RAY_MIN_WORKER_PORT=50400; RAY_MAX_WORKER_PORT=50799 ;;
+@@ -489,7 +522,12 @@ case "$RAY_PORT_INDEX" in
+   5) RAY_MIN_WORKER_PORT=54400; RAY_MAX_WORKER_PORT=54799 ;;
+   6) RAY_MIN_WORKER_PORT=54800; RAY_MAX_WORKER_PORT=55199 ;;
+   7) RAY_MIN_WORKER_PORT=55200; RAY_MAX_WORKER_PORT=55599 ;;
+-  *) echo "RAY_PORT_INDEX (default: first GPU id) must be 0..7, got ${RAY_PORT_INDEX} (gpu_ids=${GPU_IDS})" >&2; exit 1 ;;
++  # federer: bands 8-11 so up to 12 RL runs can run at once (several share a card here)
++  8) RAY_MIN_WORKER_PORT=55600; RAY_MAX_WORKER_PORT=55999 ;;
++  9) RAY_MIN_WORKER_PORT=56000; RAY_MAX_WORKER_PORT=56399 ;;
++  10) RAY_MIN_WORKER_PORT=56400; RAY_MAX_WORKER_PORT=56799 ;;
++  11) RAY_MIN_WORKER_PORT=56800; RAY_MAX_WORKER_PORT=57199 ;;
++  *) echo "RAY_PORT_INDEX (default: first GPU id) must be 0..11, got ${RAY_PORT_INDEX} (gpu_ids=${GPU_IDS})" >&2; exit 1 ;;
+ esac
+ 
+ kill_by_pattern() {
+@@ -582,7 +620,8 @@ python3 -m verl.trainer.main_ppo \
    hydra.run.dir="${TAILRL_MAZE_RUN_DIR}/hydra/${EXPERIMENT_NAME}" \
    ray_init.ray_dir="${RAY_TEMP_DIR}" \
    algorithm.adv_estimator="${ADVANTAGE_ESTIMATOR}" \
@@ -148,7 +172,7 @@ index 6533aec..91d87b5 100755
    algorithm.pass_k="${PASS_K}" \
    algorithm.reward_transform="${REWARD_TRANSFORM}" \
    +data.seed="${SEED}" \
-@@ -593,9 +626,11 @@ python3 -m verl.trainer.main_ppo \
+@@ -593,18 +632,20 @@ python3 -m verl.trainer.main_ppo \
    data.max_response_length="${MAX_RESPONSE_LENGTH}" \
    data.apply_chat_template=False \
    actor_rollout_ref.model.path="${MODEL_PATH}" \
@@ -161,7 +185,18 @@ index 6533aec..91d87b5 100755
    actor_rollout_ref.actor.ppo_mini_batch_size="${BATCH_SIZE}" \
    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu="${PPO_MICRO_BATCH:-${BATCH_SIZE}}" \
    actor_rollout_ref.rollout.name=hf \
-@@ -615,7 +650,9 @@ python3 -m verl.trainer.main_ppo \
+   +actor_rollout_ref.rollout.micro_batch_size="${ROLLOUT_MICRO_BATCH_SIZE}" \
+   actor_rollout_ref.rollout.dtype=float16 \
+-  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8192 \
++  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu="${LOG_PROB_MICRO_BATCH:-8192}" \
+   actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
+   actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
+-  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8192 \
++  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu="${LOG_PROB_MICRO_BATCH:-8192}" \
+   actor_rollout_ref.rollout.n="${N_ROLLOUTS}" \
+   actor_rollout_ref.rollout.val_kwargs.n="${VAL_N}" \
+   "${EOS_ARGS[@]}" \
+@@ -615,7 +656,9 @@ python3 -m verl.trainer.main_ppo \
    +reward_model.reward_kwargs.num_processes="${REWARD_NUM_PROCESSES:-4}" \
    +reward_model.reward_kwargs.chunksize=64 \
    "${REWARD_ARGS[@]}" \
@@ -172,7 +207,7 @@ index 6533aec..91d87b5 100755
    trainer.project_name="${PROJECT_NAME}" \
    trainer.experiment_name="${EXPERIMENT_NAME}" \
    trainer.logger=['console','wandb'] \
-@@ -625,7 +662,7 @@ python3 -m verl.trainer.main_ppo \
+@@ -625,7 +668,7 @@ python3 -m verl.trainer.main_ppo \
    trainer.save_freq="${SAVE_FREQ}" \
    trainer.test_freq="${TEST_FREQ}" \
    trainer.total_training_steps="${TOTAL_STEPS}" \
@@ -237,6 +272,30 @@ index b1fa468..9eaf974 100644
 +            pass
 +    advantages = token_level_rewards.clamp(-clamp, clamp) * response_mask
 +    return advantages, advantages
+diff --git a/experiments/text_maze/verl/trainer/ppo/metric_utils.py b/experiments/text_maze/verl/trainer/ppo/metric_utils.py
+index d0cf51f..b4e86fc 100644
+--- a/experiments/text_maze/verl/trainer/ppo/metric_utils.py
++++ b/experiments/text_maze/verl/trainer/ppo/metric_utils.py
+@@ -19,6 +19,8 @@ from collections import defaultdict
+ from functools import partial
+ from typing import Any, Callable, Dict, List
+ 
++import os
++
+ import numpy as np
+ import torch
+ 
+@@ -416,6 +418,10 @@ def process_validation_metrics(data_sources: list[str], sample_inputs: list[str]
+                         ns.append(n)
+                         n *= 2
+                     ns.append(n_resps)
++                    # VERL_VAL_SKIP_BOOTSTRAP=1 (federer, extra-starts runs): skip the best@n/worst@n bootstrap, ~40 s of CPU per
++                    # 1000x16 validation; mean@N / std@N, all the curve extraction reads, are unchanged
++                    if os.environ.get("VERL_VAL_SKIP_BOOTSTRAP") == "1":
++                        ns = []
+ 
+                     for n in ns:
+                         [(bon_mean, bon_std), (won_mean, won_std)] = bootstrap_metric(data=var_vals, subset_size=n, reduce_fns=[np.max, np.min], seed=seed)
 diff --git a/experiments/text_maze/verl/trainer/ppo/ray_trainer.py b/experiments/text_maze/verl/trainer/ppo/ray_trainer.py
 index 36838ab..3b8d44c 100644
 --- a/experiments/text_maze/verl/trainer/ppo/ray_trainer.py
