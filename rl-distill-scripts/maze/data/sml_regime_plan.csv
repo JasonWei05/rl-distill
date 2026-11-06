@@ -1,0 +1,321 @@
+phase,priority,kind,student,teacher,size_ratio,dcap,regime,C_PF,rho,variant,seed,teacher_run,teacher_step,C_T_PF,rho_eff,D_PF,note
+1,0,main,S@0.1%,S@0.3%,1.0,0.465,small,10.0,0.75,opd,0,p03 S0 s0,110,7.13,0.71,2.87,
+1,0,main,S@0.1%,S@0.3%,1.0,0.465,mid,32.0,0.75,opd,0,p03 S0 s0,370,23.93,0.75,8.07,
+1,0,main,S@0.1%,S@0.3%,1.0,0.465,large,128.0,0.75,opd,0,p03 S0 s0,1480,95.83,0.75,32.17,
+1,0,main,S@0.1%,S@0.1%,1.0,0.0,small,10.0,0.75,opd,0,p01 S0 s0,110,7.45,0.75,2.55,
+1,0,main,S@0.1%,S@0.1%,1.0,0.0,mid,32.0,0.75,opd,0,p01 S0 s0,350,23.67,0.74,8.33,
+1,0,main,S@0.1%,S@0.1%,1.0,0.0,large,128.0,0.75,opd,0,p01 S0 s0,1435,95.89,0.75,32.11,
+2,0,main,S@0.1%,M@0.3%,1.85,,small,10.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@0.1%,M@0.3%,1.85,,mid,32.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@0.1%,M@0.3%,1.85,,large,128.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+2,0,main,S@0.1%,M@0.1%,1.85,,small,10.0,0.75,opd,0,p01 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@0.1%,M@0.1%,1.85,,mid,32.0,0.75,opd,0,p01 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@0.1%,M@0.1%,1.85,,large,128.0,0.75,opd,0,p01 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+1,0,main,S@0.1%,L@0.3%,3.41,0.454,small,10.0,0.75,opd,0,p03 L0 s0,30,6.24,0.62,3.76,coarse saves: rerun the first 40 steps saving every step
+1,0,main,S@0.1%,L@0.3%,3.41,0.454,mid,32.0,0.75,opd,0,p03 L0 s0,110,23.0,0.72,9.0,
+1,0,main,S@0.1%,L@0.3%,3.41,0.454,large,128.0,0.75,opd,0,p03 L0 s0,450,95.39,0.75,32.61,
+1,0,main,S@0.1%,L@0.1%,3.41,0.0,small,10.0,0.75,opd,0,p01 L0 s0,35,7.3,0.73,2.7,
+1,0,main,S@0.1%,L@0.1%,3.41,0.0,mid,32.0,0.75,opd,0,p01 L0 s0,115,23.92,0.75,8.08,
+1,0,main,S@0.1%,L@0.1%,3.41,0.0,large,128.0,0.75,opd,0,p01 L0 s0,445,95.68,0.75,32.32,
+1,0,main,S@0.3%,S@1%,1.0,0.472,small,10.0,0.75,opd,0,p1 S0 s0,115,7.46,0.75,2.54,
+1,0,main,S@0.3%,S@1%,1.0,0.472,mid,32.0,0.75,opd,0,p1 S0 s0,370,23.97,0.75,8.03,
+1,0,main,S@0.3%,S@1%,1.0,0.472,large,128.0,0.75,opd,0,p1 S0 s0,1480,95.87,0.75,32.13,
+1,0,main,S@0.3%,S@0.3%,1.0,0.0,small,10.0,0.75,opd,0,p03 S0 s0,110,7.13,0.71,2.87,
+1,0,main,S@0.3%,S@0.3%,1.0,0.0,mid,32.0,0.75,opd,0,p03 S0 s0,370,23.93,0.75,8.07,
+1,0,main,S@0.3%,S@0.3%,1.0,0.0,large,128.0,0.75,opd,0,p03 S0 s0,1480,95.83,0.75,32.17,
+1,1,main,S@0.3%,S@0.1%,1.0,-0.465,small,10.0,0.75,opd,0,p01 S0 s0,110,7.45,0.75,2.55,
+1,1,main,S@0.3%,S@0.1%,1.0,-0.465,mid,32.0,0.75,opd,0,p01 S0 s0,350,23.67,0.74,8.33,
+1,1,main,S@0.3%,S@0.1%,1.0,-0.465,large,128.0,0.75,opd,0,p01 S0 s0,1435,95.89,0.75,32.11,
+2,0,main,S@0.3%,M@1%,1.85,,small,10.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@0.3%,M@1%,1.85,,mid,32.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@0.3%,M@1%,1.85,,large,128.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+2,0,main,S@0.3%,M@0.3%,1.85,,small,10.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@0.3%,M@0.3%,1.85,,mid,32.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@0.3%,M@0.3%,1.85,,large,128.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+2,0,main,S@0.3%,M@0.1%,1.85,,small,10.0,0.75,opd,0,p01 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@0.3%,M@0.1%,1.85,,mid,32.0,0.75,opd,0,p01 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@0.3%,M@0.1%,1.85,,large,128.0,0.75,opd,0,p01 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+1,0,main,S@0.3%,L@1%,3.41,0.452,small,10.0,0.75,opd,0,p1 L0 s0,35,7.27,0.73,2.73,
+1,0,main,S@0.3%,L@1%,3.41,0.452,mid,32.0,0.75,opd,0,p1 L0 s0,115,23.82,0.74,8.18,
+1,0,main,S@0.3%,L@1%,3.41,0.452,large,128.0,0.75,opd,0,p1 L0 s0,460,95.24,0.74,32.76,
+1,0,main,S@0.3%,L@0.3%,3.41,-0.011,small,10.0,0.75,opd,0,p03 L0 s0,30,6.24,0.62,3.76,coarse saves: rerun the first 40 steps saving every step
+1,0,main,S@0.3%,L@0.3%,3.41,-0.011,mid,32.0,0.75,opd,0,p03 L0 s0,110,23.0,0.72,9.0,
+1,0,main,S@0.3%,L@0.3%,3.41,-0.011,large,128.0,0.75,opd,0,p03 L0 s0,450,95.39,0.75,32.61,
+1,0,main,S@0.3%,L@0.1%,3.41,-0.464,small,10.0,0.75,opd,0,p01 L0 s0,35,7.3,0.73,2.7,
+1,0,main,S@0.3%,L@0.1%,3.41,-0.464,mid,32.0,0.75,opd,0,p01 L0 s0,115,23.92,0.75,8.08,
+1,0,main,S@0.3%,L@0.1%,3.41,-0.464,large,128.0,0.75,opd,0,p01 L0 s0,445,95.68,0.75,32.32,
+1,0,main,S@1%,S@3%,1.0,0.393,small,10.0,0.75,opd,0,p3 S0 s0,110,7.17,0.72,2.83,
+1,0,main,S@1%,S@3%,1.0,0.393,mid,32.0,0.75,opd,0,p3 S0 s0,360,23.44,0.73,8.56,
+1,0,main,S@1%,S@3%,1.0,0.393,large,128.0,0.75,opd,0,p3 S0 s0,1460,95.68,0.75,32.32,
+1,0,spot,S@1%,S@3%,1.0,0.393,large,128.0,0.5,opd,0,p3 S0 s0,980,63.93,0.5,64.07,
+1,0,spot,S@1%,S@3%,1.0,0.393,large,128.0,0.9,opd,0,p3 S0 s0,1750,114.89,0.9,13.11,
+1,0,replicate,S@1%,S@3%,1.0,0.393,small,10.0,0.75,opd,1,p3 S0 s1,110,7.16,0.72,2.84,
+1,0,replicate,S@1%,S@3%,1.0,0.393,mid,32.0,0.75,opd,1,p3 S0 s1,360,23.42,0.73,8.58,
+1,0,replicate,S@1%,S@3%,1.0,0.393,large,128.0,0.75,opd,1,p3 S0 s1,1460,95.37,0.75,32.63,
+1,0,main,S@1%,S@1%,1.0,0.0,small,10.0,0.75,opd,0,p1 S0 s0,115,7.46,0.75,2.54,
+1,0,main,S@1%,S@1%,1.0,0.0,mid,32.0,0.75,opd,0,p1 S0 s0,370,23.97,0.75,8.03,
+1,0,main,S@1%,S@1%,1.0,0.0,large,128.0,0.75,opd,0,p1 S0 s0,1480,95.87,0.75,32.13,
+1,0,spot,S@1%,S@1%,1.0,0.0,large,128.0,0.5,opd,0,p1 S0 s0,985,63.81,0.5,64.19,
+1,0,spot,S@1%,S@1%,1.0,0.0,large,128.0,0.9,opd,0,p1 S0 s0,1775,114.95,0.9,13.05,
+1,0,spot,S@1%,S@1%,1.0,0.0,large,128.0,0.75,off,0,p1 S0 s0,1480,95.87,0.75,32.13,
+1,0,replicate,S@1%,S@1%,1.0,0.0,small,10.0,0.75,opd,1,p1 S0 s1,110,7.14,0.71,2.86,
+1,0,replicate,S@1%,S@1%,1.0,0.0,mid,32.0,0.75,opd,1,p1 S0 s1,360,23.41,0.73,8.59,
+1,0,replicate,S@1%,S@1%,1.0,0.0,large,128.0,0.75,opd,1,p1 S0 s1,1460,95.83,0.75,32.17,
+1,1,main,S@1%,S@0.3%,1.0,-0.472,small,10.0,0.75,opd,0,p03 S0 s0,110,7.13,0.71,2.87,
+1,1,main,S@1%,S@0.3%,1.0,-0.472,mid,32.0,0.75,opd,0,p03 S0 s0,370,23.93,0.75,8.07,
+1,1,main,S@1%,S@0.3%,1.0,-0.472,large,128.0,0.75,opd,0,p03 S0 s0,1480,95.83,0.75,32.17,
+1,1,spot,S@1%,S@0.3%,1.0,-0.472,large,128.0,0.5,opd,0,p03 S0 s0,980,63.42,0.5,64.58,
+1,1,spot,S@1%,S@0.3%,1.0,-0.472,large,128.0,0.9,opd,0,p03 S0 s0,1770,114.6,0.9,13.4,
+1,1,replicate,S@1%,S@0.3%,1.0,-0.472,small,10.0,0.75,opd,1,p03 S0 s1,110,7.13,0.71,2.87,
+1,1,replicate,S@1%,S@0.3%,1.0,-0.472,mid,32.0,0.75,opd,1,p03 S0 s1,360,23.35,0.73,8.65,
+1,1,replicate,S@1%,S@0.3%,1.0,-0.472,large,128.0,0.75,opd,1,p03 S0 s1,1470,95.44,0.75,32.56,
+2,0,main,S@1%,M@3%,1.85,,small,10.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@1%,M@3%,1.85,,mid,32.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@1%,M@3%,1.85,,large,128.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+2,0,spot,S@1%,M@3%,1.85,,large,128.0,0.5,opd,0,p3 M0 s0,TBD,TBD,TBD,64.0,teacher run to train
+2,0,spot,S@1%,M@3%,1.85,,large,128.0,0.9,opd,0,p3 M0 s0,TBD,TBD,TBD,12.8,teacher run to train
+2,0,replicate,S@1%,M@3%,1.85,,small,10.0,0.75,opd,1,p3 M0 s1,TBD,TBD,TBD,2.5,teacher run to train
+2,0,replicate,S@1%,M@3%,1.85,,mid,32.0,0.75,opd,1,p3 M0 s1,TBD,TBD,TBD,8.0,teacher run to train
+2,0,replicate,S@1%,M@3%,1.85,,large,128.0,0.75,opd,1,p3 M0 s1,TBD,TBD,TBD,32.0,teacher run to train
+2,0,main,S@1%,M@1%,1.85,,small,10.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@1%,M@1%,1.85,,mid,32.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@1%,M@1%,1.85,,large,128.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+2,0,spot,S@1%,M@1%,1.85,,large,128.0,0.5,opd,0,p1 M0 s0,TBD,TBD,TBD,64.0,teacher run to train
+2,0,spot,S@1%,M@1%,1.85,,large,128.0,0.9,opd,0,p1 M0 s0,TBD,TBD,TBD,12.8,teacher run to train
+2,0,spot,S@1%,M@1%,1.85,,large,128.0,0.75,off,0,p1 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+2,0,replicate,S@1%,M@1%,1.85,,small,10.0,0.75,opd,1,p1 M0 s1,TBD,TBD,TBD,2.5,teacher run to train
+2,0,replicate,S@1%,M@1%,1.85,,mid,32.0,0.75,opd,1,p1 M0 s1,TBD,TBD,TBD,8.0,teacher run to train
+2,0,replicate,S@1%,M@1%,1.85,,large,128.0,0.75,opd,1,p1 M0 s1,TBD,TBD,TBD,32.0,teacher run to train
+2,0,main,S@1%,M@0.3%,1.85,,small,10.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@1%,M@0.3%,1.85,,mid,32.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@1%,M@0.3%,1.85,,large,128.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+2,0,spot,S@1%,M@0.3%,1.85,,large,128.0,0.5,opd,0,p03 M0 s0,TBD,TBD,TBD,64.0,teacher run to train
+2,0,spot,S@1%,M@0.3%,1.85,,large,128.0,0.9,opd,0,p03 M0 s0,TBD,TBD,TBD,12.8,teacher run to train
+2,0,replicate,S@1%,M@0.3%,1.85,,small,10.0,0.75,opd,1,p03 M0 s1,TBD,TBD,TBD,2.5,teacher run to train
+2,0,replicate,S@1%,M@0.3%,1.85,,mid,32.0,0.75,opd,1,p03 M0 s1,TBD,TBD,TBD,8.0,teacher run to train
+2,0,replicate,S@1%,M@0.3%,1.85,,large,128.0,0.75,opd,1,p03 M0 s1,TBD,TBD,TBD,32.0,teacher run to train
+1,0,main,S@1%,L@3%,3.41,0.395,small,10.0,0.75,opd,0,p3 L0 s0,30,6.3,0.63,3.7,coarse saves: rerun the first 40 steps saving every step
+1,0,main,S@1%,L@3%,3.41,0.395,mid,32.0,0.75,opd,0,p3 L0 s0,110,23.28,0.73,8.72,
+1,0,main,S@1%,L@3%,3.41,0.395,large,128.0,0.75,opd,0,p3 L0 s0,440,95.58,0.75,32.42,
+1,0,spot,S@1%,L@3%,3.41,0.395,large,128.0,0.5,opd,0,p3 L0 s0,290,62.6,0.49,65.4,
+1,0,spot,S@1%,L@3%,3.41,0.395,large,128.0,0.9,opd,0,p3 L0 s0,520,113.17,0.88,14.83,
+1,0,replicate,S@1%,L@3%,3.41,0.395,small,10.0,0.75,opd,1,p3 L0 s1,30,6.31,0.63,3.69,coarse saves: rerun the first 40 steps saving every step
+1,0,replicate,S@1%,L@3%,3.41,0.395,mid,32.0,0.75,opd,1,p3 L0 s1,110,23.26,0.73,8.74,
+1,0,replicate,S@1%,L@3%,3.41,0.395,large,128.0,0.75,opd,1,p3 L0 s1,440,95.56,0.75,32.44,
+1,0,main,S@1%,L@1%,3.41,-0.02,small,10.0,0.75,opd,0,p1 L0 s0,35,7.27,0.73,2.73,
+1,0,main,S@1%,L@1%,3.41,-0.02,mid,32.0,0.75,opd,0,p1 L0 s0,115,23.82,0.74,8.18,
+1,0,main,S@1%,L@1%,3.41,-0.02,large,128.0,0.75,opd,0,p1 L0 s0,460,95.24,0.74,32.76,
+1,0,spot,S@1%,L@1%,3.41,-0.02,large,128.0,0.5,opd,0,p1 L0 s0,305,63.13,0.49,64.87,
+1,0,spot,S@1%,L@1%,3.41,-0.02,large,128.0,0.9,opd,0,p1 L0 s0,555,114.94,0.9,13.06,
+1,0,spot,S@1%,L@1%,3.41,-0.02,large,128.0,0.75,off,0,p1 L0 s0,460,95.24,0.74,32.76,
+1,0,replicate,S@1%,L@1%,3.41,-0.02,small,10.0,0.75,opd,1,p1 L0 s1,30,6.23,0.62,3.77,coarse saves: rerun the first 40 steps saving every step
+1,0,replicate,S@1%,L@1%,3.41,-0.02,mid,32.0,0.75,opd,1,p1 L0 s1,110,22.77,0.71,9.23,
+1,0,replicate,S@1%,L@1%,3.41,-0.02,large,128.0,0.75,opd,1,p1 L0 s1,460,95.15,0.74,32.85,
+1,0,main,S@1%,L@0.3%,3.41,-0.483,small,10.0,0.75,opd,0,p03 L0 s0,30,6.24,0.62,3.76,coarse saves: rerun the first 40 steps saving every step
+1,0,main,S@1%,L@0.3%,3.41,-0.483,mid,32.0,0.75,opd,0,p03 L0 s0,110,23.0,0.72,9.0,
+1,0,main,S@1%,L@0.3%,3.41,-0.483,large,128.0,0.75,opd,0,p03 L0 s0,450,95.39,0.75,32.61,
+1,0,spot,S@1%,L@0.3%,3.41,-0.483,large,128.0,0.5,opd,0,p03 L0 s0,300,62.94,0.49,65.06,
+1,0,spot,S@1%,L@0.3%,3.41,-0.483,large,128.0,0.9,opd,0,p03 L0 s0,540,114.62,0.9,13.38,
+1,0,replicate,S@1%,L@0.3%,3.41,-0.483,small,10.0,0.75,opd,1,p03 L0 s1,30,6.24,0.62,3.76,coarse saves: rerun the first 40 steps saving every step
+1,0,replicate,S@1%,L@0.3%,3.41,-0.483,mid,32.0,0.75,opd,1,p03 L0 s1,110,22.75,0.71,9.25,
+1,0,replicate,S@1%,L@0.3%,3.41,-0.483,large,128.0,0.75,opd,1,p03 L0 s1,450,93.98,0.73,34.02,
+1,0,main,S@3%,S@5.5%,1.0,0.181,small,10.0,0.75,opd,0,p5 S0 s0,110,7.2,0.72,2.8,
+1,0,main,S@3%,S@5.5%,1.0,0.181,mid,32.0,0.75,opd,0,p5 S0 s0,360,23.62,0.74,8.38,
+1,0,main,S@3%,S@5.5%,1.0,0.181,large,128.0,0.75,opd,0,p5 S0 s0,1460,95.87,0.75,32.13,
+1,0,main,S@3%,S@3%,1.0,0.0,small,10.0,0.75,opd,0,p3 S0 s0,110,7.17,0.72,2.83,
+1,0,main,S@3%,S@3%,1.0,0.0,mid,32.0,0.75,opd,0,p3 S0 s0,360,23.44,0.73,8.56,
+1,0,main,S@3%,S@3%,1.0,0.0,large,128.0,0.75,opd,0,p3 S0 s0,1460,95.68,0.75,32.32,
+1,1,main,S@3%,S@1%,1.0,-0.393,small,10.0,0.75,opd,0,p1 S0 s0,115,7.46,0.75,2.54,
+1,1,main,S@3%,S@1%,1.0,-0.393,mid,32.0,0.75,opd,0,p1 S0 s0,370,23.97,0.75,8.03,
+1,1,main,S@3%,S@1%,1.0,-0.393,large,128.0,0.75,opd,0,p1 S0 s0,1480,95.87,0.75,32.13,
+2,0,main,S@3%,M@5.5%,1.85,,small,10.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@3%,M@5.5%,1.85,,mid,32.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@3%,M@5.5%,1.85,,large,128.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+2,0,main,S@3%,M@3%,1.85,,small,10.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@3%,M@3%,1.85,,mid,32.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@3%,M@3%,1.85,,large,128.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+2,0,main,S@3%,M@1%,1.85,,small,10.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@3%,M@1%,1.85,,mid,32.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@3%,M@1%,1.85,,large,128.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+1,0,main,S@3%,L@5.5%,3.41,0.174,small,10.0,0.75,opd,0,p5 L0 s0,30,6.32,0.63,3.68,coarse saves: rerun the first 40 steps saving every step
+1,0,main,S@3%,L@5.5%,3.41,0.174,mid,32.0,0.75,opd,0,p5 L0 s0,110,23.35,0.73,8.65,
+1,0,main,S@3%,L@5.5%,3.41,0.174,large,128.0,0.75,opd,0,p5 L0 s0,440,95.73,0.75,32.27,
+1,0,main,S@3%,L@3%,3.41,0.002,small,10.0,0.75,opd,0,p3 L0 s0,30,6.3,0.63,3.7,coarse saves: rerun the first 40 steps saving every step
+1,0,main,S@3%,L@3%,3.41,0.002,mid,32.0,0.75,opd,0,p3 L0 s0,110,23.28,0.73,8.72,
+1,0,main,S@3%,L@3%,3.41,0.002,large,128.0,0.75,opd,0,p3 L0 s0,440,95.58,0.75,32.42,
+1,0,main,S@3%,L@1%,3.41,-0.413,small,10.0,0.75,opd,0,p1 L0 s0,35,7.27,0.73,2.73,
+1,0,main,S@3%,L@1%,3.41,-0.413,mid,32.0,0.75,opd,0,p1 L0 s0,115,23.82,0.74,8.18,
+1,0,main,S@3%,L@1%,3.41,-0.413,large,128.0,0.75,opd,0,p1 L0 s0,460,95.24,0.74,32.76,
+1,0,main,S@5.5%,S@10%,1.0,0.14,small,10.0,0.75,opd,0,p10 S0 s0,110,7.3,0.73,2.7,
+1,0,main,S@5.5%,S@10%,1.0,0.14,mid,32.0,0.75,opd,0,p10 S0 s0,355,23.78,0.74,8.22,
+1,0,main,S@5.5%,S@10%,1.0,0.14,large,128.0,0.75,opd,0,p10 S0 s0,400,26.81,0.21,101.19,"still rising: extend the run to 96 PF (ends at 27 PF, step 400, dev +0.032 over its last 20% of steps)"
+1,0,main,S@5.5%,S@5.5%,1.0,0.0,small,10.0,0.75,opd,0,p5 S0 s0,110,7.2,0.72,2.8,
+1,0,main,S@5.5%,S@5.5%,1.0,0.0,mid,32.0,0.75,opd,0,p5 S0 s0,360,23.62,0.74,8.38,
+1,0,main,S@5.5%,S@5.5%,1.0,0.0,large,128.0,0.75,opd,0,p5 S0 s0,1460,95.87,0.75,32.13,
+1,1,main,S@5.5%,S@3%,1.0,-0.181,small,10.0,0.75,opd,0,p3 S0 s0,110,7.17,0.72,2.83,
+1,1,main,S@5.5%,S@3%,1.0,-0.181,mid,32.0,0.75,opd,0,p3 S0 s0,360,23.44,0.73,8.56,
+1,1,main,S@5.5%,S@3%,1.0,-0.181,large,128.0,0.75,opd,0,p3 S0 s0,1460,95.68,0.75,32.32,
+2,0,main,S@5.5%,M@10%,1.85,,small,10.0,0.75,opd,0,p10 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@5.5%,M@10%,1.85,,mid,32.0,0.75,opd,0,p10 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@5.5%,M@10%,1.85,,large,128.0,0.75,opd,0,p10 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+2,0,main,S@5.5%,M@5.5%,1.85,,small,10.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@5.5%,M@5.5%,1.85,,mid,32.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@5.5%,M@5.5%,1.85,,large,128.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+2,0,main,S@5.5%,M@3%,1.85,,small,10.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@5.5%,M@3%,1.85,,mid,32.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@5.5%,M@3%,1.85,,large,128.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+1,0,main,S@5.5%,L@10%,3.41,0.142,small,10.0,0.75,opd,0,p10 L0 s0,35,7.34,0.73,2.66,
+1,0,main,S@5.5%,L@10%,3.41,0.142,mid,32.0,0.75,opd,0,p10 L0 s0,110,23.03,0.72,8.97,
+1,0,main,S@5.5%,L@10%,3.41,0.142,large,128.0,0.75,opd,0,p10 L0 s0,300,62.73,0.49,65.27,"capped (ends at 63 PF, step 300, dev -0.002 over its last 20% of steps)"
+1,0,main,S@5.5%,L@5.5%,3.41,-0.006,small,10.0,0.75,opd,0,p5 L0 s0,30,6.32,0.63,3.68,coarse saves: rerun the first 40 steps saving every step
+1,0,main,S@5.5%,L@5.5%,3.41,-0.006,mid,32.0,0.75,opd,0,p5 L0 s0,110,23.35,0.73,8.65,
+1,0,main,S@5.5%,L@5.5%,3.41,-0.006,large,128.0,0.75,opd,0,p5 L0 s0,440,95.73,0.75,32.27,
+1,0,main,S@5.5%,L@3%,3.41,-0.178,small,10.0,0.75,opd,0,p3 L0 s0,30,6.3,0.63,3.7,coarse saves: rerun the first 40 steps saving every step
+1,0,main,S@5.5%,L@3%,3.41,-0.178,mid,32.0,0.75,opd,0,p3 L0 s0,110,23.28,0.73,8.72,
+1,0,main,S@5.5%,L@3%,3.41,-0.178,large,128.0,0.75,opd,0,p3 L0 s0,440,95.58,0.75,32.42,
+1,0,main,S@10%,S@10%,1.0,0.0,small,10.0,0.75,opd,0,p10 S0 s0,110,7.3,0.73,2.7,
+1,0,main,S@10%,S@10%,1.0,0.0,mid,32.0,0.75,opd,0,p10 S0 s0,355,23.78,0.74,8.22,
+1,0,main,S@10%,S@10%,1.0,0.0,large,128.0,0.75,opd,0,p10 S0 s0,400,26.81,0.21,101.19,"still rising: extend the run to 96 PF (ends at 27 PF, step 400, dev +0.032 over its last 20% of steps)"
+1,1,main,S@10%,S@5.5%,1.0,-0.14,small,10.0,0.75,opd,0,p5 S0 s0,110,7.2,0.72,2.8,
+1,1,main,S@10%,S@5.5%,1.0,-0.14,mid,32.0,0.75,opd,0,p5 S0 s0,360,23.62,0.74,8.38,
+1,1,main,S@10%,S@5.5%,1.0,-0.14,large,128.0,0.75,opd,0,p5 S0 s0,1460,95.87,0.75,32.13,
+2,0,main,S@10%,M@10%,1.85,,small,10.0,0.75,opd,0,p10 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@10%,M@10%,1.85,,mid,32.0,0.75,opd,0,p10 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@10%,M@10%,1.85,,large,128.0,0.75,opd,0,p10 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+2,0,main,S@10%,M@5.5%,1.85,,small,10.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,2.5,teacher run to train
+2,0,main,S@10%,M@5.5%,1.85,,mid,32.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,8.0,teacher run to train
+2,0,main,S@10%,M@5.5%,1.85,,large,128.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,32.0,teacher run to train
+1,0,main,S@10%,L@10%,3.41,0.002,small,10.0,0.75,opd,0,p10 L0 s0,35,7.34,0.73,2.66,
+1,0,main,S@10%,L@10%,3.41,0.002,mid,32.0,0.75,opd,0,p10 L0 s0,110,23.03,0.72,8.97,
+1,0,main,S@10%,L@10%,3.41,0.002,large,128.0,0.75,opd,0,p10 L0 s0,300,62.73,0.49,65.27,"capped (ends at 63 PF, step 300, dev -0.002 over its last 20% of steps)"
+1,0,main,S@10%,L@5.5%,3.41,-0.146,small,10.0,0.75,opd,0,p5 L0 s0,30,6.32,0.63,3.68,coarse saves: rerun the first 40 steps saving every step
+1,0,main,S@10%,L@5.5%,3.41,-0.146,mid,32.0,0.75,opd,0,p5 L0 s0,110,23.35,0.73,8.65,
+1,0,main,S@10%,L@5.5%,3.41,-0.146,large,128.0,0.75,opd,0,p5 L0 s0,440,95.73,0.75,32.27,
+2,0,main,M@0.1%,M@0.3%,1.0,,small,10.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,0,main,M@0.1%,M@0.3%,1.0,,mid,32.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,0,main,M@0.1%,M@0.3%,1.0,,large,128.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,0,main,M@0.1%,M@0.1%,1.0,,small,10.0,0.75,opd,0,p01 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,0,main,M@0.1%,M@0.1%,1.0,,mid,32.0,0.75,opd,0,p01 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,0,main,M@0.1%,M@0.1%,1.0,,large,128.0,0.75,opd,0,p01 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,0,main,M@0.1%,L@0.3%,1.85,,small,10.0,0.75,opd,0,p03 L0 s0,30,6.24,0.62,3.76,coarse saves: rerun the first 40 steps saving every step; student to train
+2,0,main,M@0.1%,L@0.3%,1.85,,mid,32.0,0.75,opd,0,p03 L0 s0,110,23.0,0.72,9.0,student to train
+2,0,main,M@0.1%,L@0.3%,1.85,,large,128.0,0.75,opd,0,p03 L0 s0,450,95.39,0.75,32.61,student to train
+2,0,main,M@0.1%,L@0.1%,1.85,,small,10.0,0.75,opd,0,p01 L0 s0,35,7.3,0.73,2.7,student to train
+2,0,main,M@0.1%,L@0.1%,1.85,,mid,32.0,0.75,opd,0,p01 L0 s0,115,23.92,0.75,8.08,student to train
+2,0,main,M@0.1%,L@0.1%,1.85,,large,128.0,0.75,opd,0,p01 L0 s0,445,95.68,0.75,32.32,student to train
+2,0,main,M@0.3%,M@1%,1.0,,small,10.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,0,main,M@0.3%,M@1%,1.0,,mid,32.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,0,main,M@0.3%,M@1%,1.0,,large,128.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,0,main,M@0.3%,M@0.3%,1.0,,small,10.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,0,main,M@0.3%,M@0.3%,1.0,,mid,32.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,0,main,M@0.3%,M@0.3%,1.0,,large,128.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,1,main,M@0.3%,M@0.1%,1.0,,small,10.0,0.75,opd,0,p01 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,1,main,M@0.3%,M@0.1%,1.0,,mid,32.0,0.75,opd,0,p01 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,1,main,M@0.3%,M@0.1%,1.0,,large,128.0,0.75,opd,0,p01 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,0,main,M@0.3%,L@1%,1.85,,small,10.0,0.75,opd,0,p1 L0 s0,35,7.27,0.73,2.73,student to train
+2,0,main,M@0.3%,L@1%,1.85,,mid,32.0,0.75,opd,0,p1 L0 s0,115,23.82,0.74,8.18,student to train
+2,0,main,M@0.3%,L@1%,1.85,,large,128.0,0.75,opd,0,p1 L0 s0,460,95.24,0.74,32.76,student to train
+2,0,main,M@0.3%,L@0.3%,1.85,,small,10.0,0.75,opd,0,p03 L0 s0,30,6.24,0.62,3.76,coarse saves: rerun the first 40 steps saving every step; student to train
+2,0,main,M@0.3%,L@0.3%,1.85,,mid,32.0,0.75,opd,0,p03 L0 s0,110,23.0,0.72,9.0,student to train
+2,0,main,M@0.3%,L@0.3%,1.85,,large,128.0,0.75,opd,0,p03 L0 s0,450,95.39,0.75,32.61,student to train
+2,0,main,M@0.3%,L@0.1%,1.85,,small,10.0,0.75,opd,0,p01 L0 s0,35,7.3,0.73,2.7,student to train
+2,0,main,M@0.3%,L@0.1%,1.85,,mid,32.0,0.75,opd,0,p01 L0 s0,115,23.92,0.75,8.08,student to train
+2,0,main,M@0.3%,L@0.1%,1.85,,large,128.0,0.75,opd,0,p01 L0 s0,445,95.68,0.75,32.32,student to train
+2,0,main,M@1%,M@3%,1.0,,small,10.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,0,main,M@1%,M@3%,1.0,,mid,32.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,0,main,M@1%,M@3%,1.0,,large,128.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,0,spot,M@1%,M@3%,1.0,,large,128.0,0.5,opd,0,p3 M0 s0,TBD,TBD,TBD,64.0,teacher run to train; student to train
+2,0,spot,M@1%,M@3%,1.0,,large,128.0,0.9,opd,0,p3 M0 s0,TBD,TBD,TBD,12.8,teacher run to train; student to train
+2,0,replicate,M@1%,M@3%,1.0,,small,10.0,0.75,opd,1,p3 M0 s1,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,0,replicate,M@1%,M@3%,1.0,,mid,32.0,0.75,opd,1,p3 M0 s1,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,0,replicate,M@1%,M@3%,1.0,,large,128.0,0.75,opd,1,p3 M0 s1,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,0,main,M@1%,M@1%,1.0,,small,10.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,0,main,M@1%,M@1%,1.0,,mid,32.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,0,main,M@1%,M@1%,1.0,,large,128.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,0,spot,M@1%,M@1%,1.0,,large,128.0,0.5,opd,0,p1 M0 s0,TBD,TBD,TBD,64.0,teacher run to train; student to train
+2,0,spot,M@1%,M@1%,1.0,,large,128.0,0.9,opd,0,p1 M0 s0,TBD,TBD,TBD,12.8,teacher run to train; student to train
+2,0,spot,M@1%,M@1%,1.0,,large,128.0,0.75,off,0,p1 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,0,replicate,M@1%,M@1%,1.0,,small,10.0,0.75,opd,1,p1 M0 s1,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,0,replicate,M@1%,M@1%,1.0,,mid,32.0,0.75,opd,1,p1 M0 s1,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,0,replicate,M@1%,M@1%,1.0,,large,128.0,0.75,opd,1,p1 M0 s1,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,1,main,M@1%,M@0.3%,1.0,,small,10.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,1,main,M@1%,M@0.3%,1.0,,mid,32.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,1,main,M@1%,M@0.3%,1.0,,large,128.0,0.75,opd,0,p03 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,1,spot,M@1%,M@0.3%,1.0,,large,128.0,0.5,opd,0,p03 M0 s0,TBD,TBD,TBD,64.0,teacher run to train; student to train
+2,1,spot,M@1%,M@0.3%,1.0,,large,128.0,0.9,opd,0,p03 M0 s0,TBD,TBD,TBD,12.8,teacher run to train; student to train
+2,1,replicate,M@1%,M@0.3%,1.0,,small,10.0,0.75,opd,1,p03 M0 s1,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,1,replicate,M@1%,M@0.3%,1.0,,mid,32.0,0.75,opd,1,p03 M0 s1,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,1,replicate,M@1%,M@0.3%,1.0,,large,128.0,0.75,opd,1,p03 M0 s1,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,0,main,M@1%,L@3%,1.85,,small,10.0,0.75,opd,0,p3 L0 s0,30,6.3,0.63,3.7,coarse saves: rerun the first 40 steps saving every step; student to train
+2,0,main,M@1%,L@3%,1.85,,mid,32.0,0.75,opd,0,p3 L0 s0,110,23.28,0.73,8.72,student to train
+2,0,main,M@1%,L@3%,1.85,,large,128.0,0.75,opd,0,p3 L0 s0,440,95.58,0.75,32.42,student to train
+2,0,spot,M@1%,L@3%,1.85,,large,128.0,0.5,opd,0,p3 L0 s0,290,62.6,0.49,65.4,student to train
+2,0,spot,M@1%,L@3%,1.85,,large,128.0,0.9,opd,0,p3 L0 s0,520,113.17,0.88,14.83,student to train
+2,0,replicate,M@1%,L@3%,1.85,,small,10.0,0.75,opd,1,p3 L0 s1,30,6.31,0.63,3.69,coarse saves: rerun the first 40 steps saving every step; student to train
+2,0,replicate,M@1%,L@3%,1.85,,mid,32.0,0.75,opd,1,p3 L0 s1,110,23.26,0.73,8.74,student to train
+2,0,replicate,M@1%,L@3%,1.85,,large,128.0,0.75,opd,1,p3 L0 s1,440,95.56,0.75,32.44,student to train
+2,0,main,M@1%,L@1%,1.85,,small,10.0,0.75,opd,0,p1 L0 s0,35,7.27,0.73,2.73,student to train
+2,0,main,M@1%,L@1%,1.85,,mid,32.0,0.75,opd,0,p1 L0 s0,115,23.82,0.74,8.18,student to train
+2,0,main,M@1%,L@1%,1.85,,large,128.0,0.75,opd,0,p1 L0 s0,460,95.24,0.74,32.76,student to train
+2,0,spot,M@1%,L@1%,1.85,,large,128.0,0.5,opd,0,p1 L0 s0,305,63.13,0.49,64.87,student to train
+2,0,spot,M@1%,L@1%,1.85,,large,128.0,0.9,opd,0,p1 L0 s0,555,114.94,0.9,13.06,student to train
+2,0,spot,M@1%,L@1%,1.85,,large,128.0,0.75,off,0,p1 L0 s0,460,95.24,0.74,32.76,student to train
+2,0,replicate,M@1%,L@1%,1.85,,small,10.0,0.75,opd,1,p1 L0 s1,30,6.23,0.62,3.77,coarse saves: rerun the first 40 steps saving every step; student to train
+2,0,replicate,M@1%,L@1%,1.85,,mid,32.0,0.75,opd,1,p1 L0 s1,110,22.77,0.71,9.23,student to train
+2,0,replicate,M@1%,L@1%,1.85,,large,128.0,0.75,opd,1,p1 L0 s1,460,95.15,0.74,32.85,student to train
+2,0,main,M@1%,L@0.3%,1.85,,small,10.0,0.75,opd,0,p03 L0 s0,30,6.24,0.62,3.76,coarse saves: rerun the first 40 steps saving every step; student to train
+2,0,main,M@1%,L@0.3%,1.85,,mid,32.0,0.75,opd,0,p03 L0 s0,110,23.0,0.72,9.0,student to train
+2,0,main,M@1%,L@0.3%,1.85,,large,128.0,0.75,opd,0,p03 L0 s0,450,95.39,0.75,32.61,student to train
+2,0,spot,M@1%,L@0.3%,1.85,,large,128.0,0.5,opd,0,p03 L0 s0,300,62.94,0.49,65.06,student to train
+2,0,spot,M@1%,L@0.3%,1.85,,large,128.0,0.9,opd,0,p03 L0 s0,540,114.62,0.9,13.38,student to train
+2,0,replicate,M@1%,L@0.3%,1.85,,small,10.0,0.75,opd,1,p03 L0 s1,30,6.24,0.62,3.76,coarse saves: rerun the first 40 steps saving every step; student to train
+2,0,replicate,M@1%,L@0.3%,1.85,,mid,32.0,0.75,opd,1,p03 L0 s1,110,22.75,0.71,9.25,student to train
+2,0,replicate,M@1%,L@0.3%,1.85,,large,128.0,0.75,opd,1,p03 L0 s1,450,93.98,0.73,34.02,student to train
+2,0,main,M@3%,M@5.5%,1.0,,small,10.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,0,main,M@3%,M@5.5%,1.0,,mid,32.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,0,main,M@3%,M@5.5%,1.0,,large,128.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,0,main,M@3%,M@3%,1.0,,small,10.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,0,main,M@3%,M@3%,1.0,,mid,32.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,0,main,M@3%,M@3%,1.0,,large,128.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,1,main,M@3%,M@1%,1.0,,small,10.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,1,main,M@3%,M@1%,1.0,,mid,32.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,1,main,M@3%,M@1%,1.0,,large,128.0,0.75,opd,0,p1 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,0,main,M@3%,L@5.5%,1.85,,small,10.0,0.75,opd,0,p5 L0 s0,30,6.32,0.63,3.68,coarse saves: rerun the first 40 steps saving every step; student to train
+2,0,main,M@3%,L@5.5%,1.85,,mid,32.0,0.75,opd,0,p5 L0 s0,110,23.35,0.73,8.65,student to train
+2,0,main,M@3%,L@5.5%,1.85,,large,128.0,0.75,opd,0,p5 L0 s0,440,95.73,0.75,32.27,student to train
+2,0,main,M@3%,L@3%,1.85,,small,10.0,0.75,opd,0,p3 L0 s0,30,6.3,0.63,3.7,coarse saves: rerun the first 40 steps saving every step; student to train
+2,0,main,M@3%,L@3%,1.85,,mid,32.0,0.75,opd,0,p3 L0 s0,110,23.28,0.73,8.72,student to train
+2,0,main,M@3%,L@3%,1.85,,large,128.0,0.75,opd,0,p3 L0 s0,440,95.58,0.75,32.42,student to train
+2,0,main,M@3%,L@1%,1.85,,small,10.0,0.75,opd,0,p1 L0 s0,35,7.27,0.73,2.73,student to train
+2,0,main,M@3%,L@1%,1.85,,mid,32.0,0.75,opd,0,p1 L0 s0,115,23.82,0.74,8.18,student to train
+2,0,main,M@3%,L@1%,1.85,,large,128.0,0.75,opd,0,p1 L0 s0,460,95.24,0.74,32.76,student to train
+2,0,main,M@5.5%,M@10%,1.0,,small,10.0,0.75,opd,0,p10 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,0,main,M@5.5%,M@10%,1.0,,mid,32.0,0.75,opd,0,p10 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,0,main,M@5.5%,M@10%,1.0,,large,128.0,0.75,opd,0,p10 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,0,main,M@5.5%,M@5.5%,1.0,,small,10.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,0,main,M@5.5%,M@5.5%,1.0,,mid,32.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,0,main,M@5.5%,M@5.5%,1.0,,large,128.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,1,main,M@5.5%,M@3%,1.0,,small,10.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,1,main,M@5.5%,M@3%,1.0,,mid,32.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,1,main,M@5.5%,M@3%,1.0,,large,128.0,0.75,opd,0,p3 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,0,main,M@5.5%,L@10%,1.85,,small,10.0,0.75,opd,0,p10 L0 s0,35,7.34,0.73,2.66,student to train
+2,0,main,M@5.5%,L@10%,1.85,,mid,32.0,0.75,opd,0,p10 L0 s0,110,23.03,0.72,8.97,student to train
+2,0,main,M@5.5%,L@10%,1.85,,large,128.0,0.75,opd,0,p10 L0 s0,300,62.73,0.49,65.27,"capped (ends at 63 PF, step 300, dev -0.002 over its last 20% of steps); student to train"
+2,0,main,M@5.5%,L@5.5%,1.85,,small,10.0,0.75,opd,0,p5 L0 s0,30,6.32,0.63,3.68,coarse saves: rerun the first 40 steps saving every step; student to train
+2,0,main,M@5.5%,L@5.5%,1.85,,mid,32.0,0.75,opd,0,p5 L0 s0,110,23.35,0.73,8.65,student to train
+2,0,main,M@5.5%,L@5.5%,1.85,,large,128.0,0.75,opd,0,p5 L0 s0,440,95.73,0.75,32.27,student to train
+2,0,main,M@5.5%,L@3%,1.85,,small,10.0,0.75,opd,0,p3 L0 s0,30,6.3,0.63,3.7,coarse saves: rerun the first 40 steps saving every step; student to train
+2,0,main,M@5.5%,L@3%,1.85,,mid,32.0,0.75,opd,0,p3 L0 s0,110,23.28,0.73,8.72,student to train
+2,0,main,M@5.5%,L@3%,1.85,,large,128.0,0.75,opd,0,p3 L0 s0,440,95.58,0.75,32.42,student to train
+2,0,main,M@10%,M@10%,1.0,,small,10.0,0.75,opd,0,p10 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,0,main,M@10%,M@10%,1.0,,mid,32.0,0.75,opd,0,p10 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,0,main,M@10%,M@10%,1.0,,large,128.0,0.75,opd,0,p10 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,1,main,M@10%,M@5.5%,1.0,,small,10.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,2.5,teacher run to train; student to train
+2,1,main,M@10%,M@5.5%,1.0,,mid,32.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,8.0,teacher run to train; student to train
+2,1,main,M@10%,M@5.5%,1.0,,large,128.0,0.75,opd,0,p5 M0 s0,TBD,TBD,TBD,32.0,teacher run to train; student to train
+2,0,main,M@10%,L@10%,1.85,,small,10.0,0.75,opd,0,p10 L0 s0,35,7.34,0.73,2.66,student to train
+2,0,main,M@10%,L@10%,1.85,,mid,32.0,0.75,opd,0,p10 L0 s0,110,23.03,0.72,8.97,student to train
+2,0,main,M@10%,L@10%,1.85,,large,128.0,0.75,opd,0,p10 L0 s0,300,62.73,0.49,65.27,"capped (ends at 63 PF, step 300, dev -0.002 over its last 20% of steps); student to train"
+2,0,main,M@10%,L@5.5%,1.85,,small,10.0,0.75,opd,0,p5 L0 s0,30,6.32,0.63,3.68,coarse saves: rerun the first 40 steps saving every step; student to train
+2,0,main,M@10%,L@5.5%,1.85,,mid,32.0,0.75,opd,0,p5 L0 s0,110,23.35,0.73,8.65,student to train
+2,0,main,M@10%,L@5.5%,1.85,,large,128.0,0.75,opd,0,p5 L0 s0,440,95.73,0.75,32.27,student to train

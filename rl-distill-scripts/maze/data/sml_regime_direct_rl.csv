@@ -1,0 +1,43 @@
+student,seed,regime,C_PF,step,PF,dev_mean16,note
+S@0.1%,0,small,10.0,145,9.77,0.049,
+S@0.1%,0,mid,32.0,470,31.82,0.062,
+S@0.1%,0,large,128.0,1920,127.89,0.08,
+S@0.3%,0,small,10.0,150,9.71,0.106,
+S@0.3%,0,mid,32.0,490,31.69,0.17,
+S@0.3%,0,large,128.0,1970,127.55,0.291,
+S@1%,0,small,10.0,150,9.72,0.405,
+S@1%,0,mid,32.0,490,31.73,0.485,
+S@1%,0,large,128.0,1975,127.87,0.587,
+S@1%,1,small,10.0,150,9.75,0.392,
+S@1%,1,mid,32.0,490,31.84,0.512,
+S@1%,1,large,128.0,1930,127.5,0.541,
+S@3%,0,small,10.0,150,9.77,0.523,
+S@3%,0,mid,32.0,490,31.93,0.741,
+S@3%,0,large,128.0,1940,127.45,0.846,
+S@5.5%,0,small,10.0,150,9.82,0.677,
+S@5.5%,0,mid,32.0,480,31.49,0.804,
+S@5.5%,0,large,128.0,1940,127.46,0.912,
+S@10%,0,small,10.0,150,9.98,0.823,
+S@10%,0,mid,32.0,400,26.81,0.882,"still rising: extend the run to 32 PF (ends at 27 PF, step 400, dev +0.032 over its last 20% of steps)"
+S@10%,0,large,128.0,400,26.81,0.882,"still rising: extend the run to 128 PF (ends at 27 PF, step 400, dev +0.032 over its last 20% of steps)"
+M@0.1%,0,small,10.0,TBD,TBD,TBD,student run to train
+M@0.1%,0,mid,32.0,TBD,TBD,TBD,student run to train
+M@0.1%,0,large,128.0,TBD,TBD,TBD,student run to train
+M@0.3%,0,small,10.0,TBD,TBD,TBD,student run to train
+M@0.3%,0,mid,32.0,TBD,TBD,TBD,student run to train
+M@0.3%,0,large,128.0,TBD,TBD,TBD,student run to train
+M@1%,0,small,10.0,TBD,TBD,TBD,student run to train
+M@1%,0,mid,32.0,TBD,TBD,TBD,student run to train
+M@1%,0,large,128.0,TBD,TBD,TBD,student run to train
+M@1%,1,small,10.0,TBD,TBD,TBD,student run to train
+M@1%,1,mid,32.0,TBD,TBD,TBD,student run to train
+M@1%,1,large,128.0,TBD,TBD,TBD,student run to train
+M@3%,0,small,10.0,TBD,TBD,TBD,student run to train
+M@3%,0,mid,32.0,TBD,TBD,TBD,student run to train
+M@3%,0,large,128.0,TBD,TBD,TBD,student run to train
+M@5.5%,0,small,10.0,TBD,TBD,TBD,student run to train
+M@5.5%,0,mid,32.0,TBD,TBD,TBD,student run to train
+M@5.5%,0,large,128.0,TBD,TBD,TBD,student run to train
+M@10%,0,small,10.0,TBD,TBD,TBD,student run to train
+M@10%,0,mid,32.0,TBD,TBD,TBD,student run to train
+M@10%,0,large,128.0,TBD,TBD,TBD,student run to train
