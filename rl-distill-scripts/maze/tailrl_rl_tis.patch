@@ -1,0 +1,1045 @@
+diff --git a/experiments/text_maze/scripts/sft_pretrain.py b/experiments/text_maze/scripts/sft_pretrain.py
+index 3efc2a7..f48bda8 100644
+--- a/experiments/text_maze/scripts/sft_pretrain.py
++++ b/experiments/text_maze/scripts/sft_pretrain.py
+@@ -127,6 +127,39 @@ class MazeSFTDataset(Dataset):
+         return self.examples[idx]["full_sequence"]
+ 
+ 
++class MazeTokenCache(Dataset):
++    """Pre-tokenized training set written by rl-distill maze/tokenize_maze_sft.py (a directory: tokens.npy uint8 ids
++    concatenated, offsets.npy, path_start.npy, meta.json); the tokens are memory-mapped. Items equal MazeSFTDataset's:
++    labels are -100 up to and including PATH_START. Training items only (no prompt / sequence strings). Refuses a cache
++    built from a different source file (byte size), sequence cap or tokenizer (vocabulary + a re-encoded probe item)."""
++
++    def __init__(self, path: str, source: str, tokenizer, max_length: int):
++        start_time = time.time()
++        with open(os.path.join(path, "meta.json")) as f:
++            meta = json.load(f)
++        assert meta["max_length"] == max_length, (meta["max_length"], max_length)
++        assert meta["source_bytes"] == os.path.getsize(source), \
++            f"{path} was built from a {meta['source_bytes']}-byte file, {source} has {os.path.getsize(source)} bytes"
++        assert meta["vocab"] == tokenizer.get_vocab(), "tokenizer vocabulary differs from the one the cache was built with"
++        probe = meta["probe"]
++        assert tokenizer.encode(probe["text"], add_special_tokens=False)[:max_length] == probe["ids"], \
++            "tokenizer encodes differently from the one the cache was built with"
++        self.tokens = np.load(os.path.join(path, "tokens.npy"), mmap_mode="r")
++        self.offsets = np.load(os.path.join(path, "offsets.npy"))
++        self.path_start = np.load(os.path.join(path, "path_start.npy"))
++        logger.info(f"Loaded {len(self)} pre-tokenized examples from {path} in {time.time() - start_time:.2f}s "
++                    f"(built {meta['built']} from {os.path.basename(meta['source'])})")
++
++    def __len__(self):
++        return len(self.offsets) - 1
++
++    def __getitem__(self, idx):
++        ids = torch.from_numpy(np.array(self.tokens[self.offsets[idx]:self.offsets[idx + 1]], dtype=np.int64))
++        labels = ids.clone()
++        labels[: int(self.path_start[idx]) + 1] = -100
++        return {"input_ids": ids, "labels": labels, "attention_mask": torch.ones_like(ids)}
++
++
+ def collate_fn(batch: List[Dict], pad_token_id: int = 0) -> Dict[str, torch.Tensor]:
+     """Collate function for DataLoader"""
+     max_len = max(item["input_ids"].size(0) for item in batch)
+@@ -387,7 +420,12 @@ class MazeSFTTrainer:
+         # 加载数据集
+         logger.info("Loading datasets...")
+         dataset_load_start = time.time()
+-        self.train_dataset = MazeSFTDataset(args.train_data, self.tokenizer, args.max_length)
++        if args.train_cache and os.path.exists(args.train_cache):   # pre-tokenized copy of --train_data
++            self.train_dataset = MazeTokenCache(args.train_cache, args.train_data, self.tokenizer, args.max_length)
++        else:
++            if args.train_cache:
++                logger.warning(f"--train_cache {args.train_cache} not found: tokenizing {args.train_data} instead")
++            self.train_dataset = MazeSFTDataset(args.train_data, self.tokenizer, args.max_length)
+         self.val_dataset = MazeSFTDataset(args.val_data, self.tokenizer, args.max_length)
+         dataset_load_time = time.time() - dataset_load_start
+         logger.info(f"All datasets loaded in {dataset_load_time:.2f}s")
+@@ -746,10 +784,14 @@ class MazeSFTTrainer:
+     def save_checkpoint(self, step: int):
+         """保存checkpoint"""
+         path = os.path.join(self.args.output_dir, f"ckpt-{step}")
+-        os.makedirs(path, exist_ok=True)
+-        
+-        self.model.save_pretrained(path)
+-        self.tokenizer.save_pretrained(path)
++        tmp = path + ".tmp"   # write then rename: checkpoint watchers never see a half-written directory
++        os.makedirs(tmp, exist_ok=True)
++        self.model.save_pretrained(tmp)
++        self.tokenizer.save_pretrained(tmp)
++        if os.path.isdir(path):
++            import shutil
++            shutil.rmtree(path)
++        os.replace(tmp, path)
+         
+         logger.info(f"Saved checkpoint to {path}")
+     
+@@ -840,6 +882,12 @@ class MazeSFTTrainer:
+                     if self.use_wandb:
+                         wandb.finish()
+                     return
++                if self.args.stop_file and os.path.exists(self.args.stop_file):   # e.g. a screening watcher saw enough
++                    logger.info(f"Stop file {self.args.stop_file} found at step {self.global_step}.")
++                    self.save_checkpoint(self.global_step)
++                    if self.use_wandb:
++                        wandb.finish()
++                    return
+                 if self.args.max_steps > 0 and self.global_step >= self.args.max_steps:
+                     logger.info(
+                         f"Reached max_steps={self.args.max_steps} at step {self.global_step}."
+@@ -867,6 +915,7 @@ def main():
+     
+     parser.add_argument("--model_path", type=str, default=None, help="Path to pretrained model (if omitted, trains from scratch)")
+     parser.add_argument("--train_data", type=str, required=True, help="Path to training data")
++    parser.add_argument("--train_cache", type=str, default=None, help="Pre-tokenized --train_data (directory from tokenize_maze_sft.py); used if it exists")
+     parser.add_argument("--val_data", type=str, required=True, help="Path to validation data")
+     parser.add_argument("--output_dir", type=str, required=True, help="Output directory")
+ 
+@@ -899,6 +948,7 @@ def main():
+     parser.add_argument("--eval_ub", type=int, default=60, help="UB for the continuous-reward eval metric (matches judge_maze_continuous).")
+     parser.add_argument("--early_stop_pass1", type=float, default=0.0, help="If > 0, exit when eval/pass@1 reaches this value.")
+     parser.add_argument("--max_steps", type=int, default=0, help="If > 0, exit training once global_step reaches this value.")
++    parser.add_argument("--stop_file", type=str, default=None, help="Exit (saving a final checkpoint) as soon as this file exists.")
+     parser.add_argument("--seed", type=int, default=0, help="Seed for python/numpy/torch RNG (deterministic shuffling).")
+     parser.add_argument("--data_seed", type=int, default=None, help="Seed of the train-loader shuffle only (default: --seed). Same value => same batch order for any model size.")
+     parser.add_argument("--init_seed", type=int, default=None, help="Seed of the from-scratch weight init only (default: --seed).")
+diff --git a/experiments/text_maze/scripts/train.sh b/experiments/text_maze/scripts/train.sh
+index 84153b7..3ad3900 100755
+--- a/experiments/text_maze/scripts/train.sh
++++ b/experiments/text_maze/scripts/train.sh
+@@ -78,7 +78,7 @@ TRAIN_PARQUET_DIR="${TAILRL_MAZE_DATA_DIR}/main_parquet"
+ # data/eval1000/, which every published number was measured on. It lives with
+ # the source, not in $TAILRL_MAZE_DATA_DIR, so pointing that at scratch for the
+ # 5 GB training corpus does not move the eval set out from under you.
+-VAL_PARQUET_DIR="${EXP_ROOT}/data/eval1000"
++VAL_PARQUET_DIR="${VAL_PARQUET_DIR:-${EXP_ROOT}/data/eval1000}"  # override: e.g. a 500-maze subset of eval1000
+ VAL_PROMPTS=1000
+ VAL_N=512
+ CKPT_STEP=""
+@@ -445,7 +445,9 @@ if [ "$DRY_RUN" = "1" ]; then
+   exit 0
+ fi
+ 
+-export CUDA_VISIBLE_DEVICES="${GPU_IDS}"
++# PHYS_GPU_IDS: the physical GPU(s) to run on when --gpu-ids is kept fixed (e.g. 0) so the experiment name, checkpoint
++# dir and Ray band do not change when a packed run moves between the GPUs of one machine
++export CUDA_VISIBLE_DEVICES="${PHYS_GPU_IDS:-${GPU_IDS}}"
+ unset ROCR_VISIBLE_DEVICES
+ unset HIP_VISIBLE_DEVICES
+ export RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES=1
+@@ -527,7 +529,9 @@ case "$RAY_PORT_INDEX" in
+   9) RAY_MIN_WORKER_PORT=56000; RAY_MAX_WORKER_PORT=56399 ;;
+   10) RAY_MIN_WORKER_PORT=56400; RAY_MAX_WORKER_PORT=56799 ;;
+   11) RAY_MIN_WORKER_PORT=56800; RAY_MAX_WORKER_PORT=57199 ;;
+-  *) echo "RAY_PORT_INDEX (default: first GPU id) must be 0..11, got ${RAY_PORT_INDEX} (gpu_ids=${GPU_IDS})" >&2; exit 1 ;;
++  # 12..59: dense packing (many small runs per GPU); 200 worker ports each from 57200 up (service ports stay 7000+idx)
++  1[2-9]|[2-5][0-9]) RAY_MIN_WORKER_PORT=$((57200 + 200 * (RAY_PORT_INDEX - 12))); RAY_MAX_WORKER_PORT=$((RAY_MIN_WORKER_PORT + 199)) ;;
++  *) echo "RAY_PORT_INDEX (default: first GPU id) must be 0..59, got ${RAY_PORT_INDEX} (gpu_ids=${GPU_IDS})" >&2; exit 1 ;;
+ esac
+ 
+ kill_by_pattern() {
+@@ -628,7 +632,7 @@ python3 -m verl.trainer.main_ppo \
+   data.train_files="${TRAIN_DATA}" \
+   data.val_files="${VAL_DATA}" \
+   data.train_batch_size="${BATCH_SIZE}" \
+-  data.max_prompt_length=320 \
++  data.max_prompt_length="${MAX_PROMPT_LENGTH:-320}" \
+   data.max_response_length="${MAX_RESPONSE_LENGTH}" \
+   data.apply_chat_template=False \
+   actor_rollout_ref.model.path="${MODEL_PATH}" \
+@@ -671,7 +675,8 @@ python3 -m verl.trainer.main_ppo \
+   trainer.max_actor_ckpt_to_keep="${MAX_ACTOR_CKPT_TO_KEEP}" \
+   trainer.default_local_dir="${CHECKPOINT_DIR}/${PROJECT_NAME}/${EXPERIMENT_NAME}" \
+   "${VAL_ONLY_ARGS[@]}" \
+-  trainer.total_epochs=100 ; } 2>&1 | { [ -n "${VAL_OUT}" ] && tee "${VAL_OUT}" || cat ; }
++  trainer.total_epochs=100 \
++  ${EXTRA_HYDRA_ARGS:-} ; } 2>&1 | { [ -n "${VAL_OUT}" ] && tee "${VAL_OUT}" || cat ; }
+ EXIT_CODE=${PIPESTATUS[0]}
+ set -e
+ 
+diff --git a/experiments/text_maze/verl/trainer/ppo/core_algos.py b/experiments/text_maze/verl/trainer/ppo/core_algos.py
+index 9eaf974..57bd07b 100644
+--- a/experiments/text_maze/verl/trainer/ppo/core_algos.py
++++ b/experiments/text_maze/verl/trainer/ppo/core_algos.py
+@@ -185,6 +185,7 @@ class AdvantageEstimator(str, Enum):
+     PKPO = "pkpo"
+     PKPO_CONTINUOUS = "pkpo_continuous"
+     REINFORCE = "reinforce"
++    REINFORCE_BATCH = "reinforce_batch"  # one sample per prompt, advantage normalized across the whole batch
+     TAILRL = "tailrl"
+     OPD_TOKEN = "opd_token"  # on-policy distillation, policy-gradient form (PG-k1)
+ 
+@@ -947,6 +948,51 @@ def compute_policy_loss(
+         )
+ 
+ 
++@register_policy_loss("tis")
++def compute_policy_loss_tis(old_log_prob, log_prob, advantages, response_mask, loss_agg_mode="token-mean", config=None):
++    """Token-level truncated importance sampling for one update per rollout batch (no old-log-prob recompute).
++
++    old_log_prob is the rollout engine's log-prob of each sampled token (behaviour policy); log_prob is the trainer's at the
++    current weights, which are the weights that generated the batch (single update), so their ratio is the train-inference
++    mismatch alone. Each token's policy-gradient term -A * log pi is weighted by w = min(pi_train / pi_rollout, C) (detached),
++    C = actor.policy_loss.tis_cap (default 2.0). Returns (pg_loss, frac of tokens with ratio > C, mean log(pi_rollout /
++    pi_train) [the k1 mismatch estimate], frac of tokens with ratio < 1 / C).
++    """
++    cap = float(config.policy_loss.get("tis_cap", 2.0)) if config is not None else 2.0
++    log_ratio = torch.clamp(log_prob.detach() - old_log_prob, min=-20.0, max=20.0)
++    ratio = torch.exp(log_ratio)
++    weight = torch.clamp(ratio, max=cap)
++    pg_losses = -advantages * weight * log_prob
++    pg_loss = agg_loss(loss_mat=pg_losses, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
++    frac_capped = verl_F.masked_mean(torch.gt(ratio, cap).float(), response_mask)
++    mismatch_kl = verl_F.masked_mean(-log_ratio, response_mask)
++    frac_low = verl_F.masked_mean(torch.lt(ratio, 1.0 / cap).float(), response_mask)
++    return pg_loss, frac_capped, mismatch_kl, frac_low
++
++
++@register_policy_loss("icepop")
++def compute_policy_loss_icepop(old_log_prob, log_prob, advantages, response_mask, loss_agg_mode="token-mean", config=None):
++    """IcePop: token-level train-inference masking for one update per rollout batch (no old-log-prob recompute).
++
++    As "tis", but the detached weight w = pi_train / pi_rollout is kept as is inside [L, U] and zeroed outside it (the token
++    drops out of the policy gradient) instead of being capped: L = actor.policy_loss.icepop_low (default 0.5),
++    U = actor.policy_loss.icepop_high (default 5.0). Returns (pg_loss, frac of tokens masked above U, mean log(pi_rollout /
++    pi_train) [the k1 mismatch estimate], frac of tokens masked below L).
++    """
++    low = float(config.policy_loss.get("icepop_low", 0.5)) if config is not None else 0.5
++    high = float(config.policy_loss.get("icepop_high", 5.0)) if config is not None else 5.0
++    log_ratio = torch.clamp(log_prob.detach() - old_log_prob, min=-20.0, max=20.0)
++    ratio = torch.exp(log_ratio)
++    keep = (ratio >= low) & (ratio <= high)
++    weight = torch.where(keep, ratio, torch.zeros_like(ratio))
++    pg_losses = -advantages * weight * log_prob
++    pg_loss = agg_loss(loss_mat=pg_losses, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
++    frac_high = verl_F.masked_mean(torch.gt(ratio, high).float(), response_mask)
++    mismatch_kl = verl_F.masked_mean(-log_ratio, response_mask)
++    frac_low = verl_F.masked_mean(torch.lt(ratio, low).float(), response_mask)
++    return pg_loss, frac_high, mismatch_kl, frac_low
++
++
+ @register_policy_loss("clip_cov")
+ def compute_policy_loss_clip_cov(
+     old_log_prob,
+@@ -1279,6 +1325,25 @@ def compute_reinforce_outcome_advantage(
+     return advantages, advantages
+ 
+ 
++@register_adv_est(AdvantageEstimator.REINFORCE_BATCH)
++def compute_reinforce_batch_outcome_advantage(
++    token_level_rewards: torch.Tensor,
++    response_mask: torch.Tensor,
++    epsilon: float = 1e-6,
++    **kwargs,
++):
++    """
++    REINFORCE without groups (rollout.n = 1): every prompt has one sample, and the outcome reward is normalized across the
++    whole batch, A_i = (r_i - mean_batch(r)) / (std_batch(r) + epsilon), with the unbiased std as in GRPO; broadcast over the
++    response tokens. If every reward in the batch is equal, all advantages are 0.
++    """
++    scores = token_level_rewards.sum(dim=-1)
++    with torch.no_grad():
++        std = scores.std() if scores.numel() > 1 else torch.ones((), device=scores.device)
++        advantages = ((scores - scores.mean()) / (std + epsilon)).unsqueeze(-1) * response_mask
++    return advantages, advantages
++
++
+ @register_adv_est(AdvantageEstimator.TAILRL)
+ def compute_tailrl_outcome_advantage(
+     token_level_rewards: torch.Tensor,
+diff --git a/experiments/text_maze/verl/trainer/ppo/ray_trainer.py b/experiments/text_maze/verl/trainer/ppo/ray_trainer.py
+index 3b8d44c..8405e17 100644
+--- a/experiments/text_maze/verl/trainer/ppo/ray_trainer.py
++++ b/experiments/text_maze/verl/trainer/ppo/ray_trainer.py
+@@ -1,3 +1,4 @@
++import contextlib
+ # Copyright 2024 Bytedance Ltd. and/or its affiliates
+ # Copyright 2023-2024 SGLang Team
+ # Copyright 2025 ModelBest Inc. and/or its affiliates
+@@ -422,6 +423,7 @@ class RayPPOTrainer:
+             AdvantageEstimator.PKPO,
+             AdvantageEstimator.PKPO_CONTINUOUS,
+             AdvantageEstimator.REINFORCE,
++            AdvantageEstimator.REINFORCE_BATCH,
+             AdvantageEstimator.TAILRL,
+             AdvantageEstimator.OPD_TOKEN,
+         ]:
+@@ -694,6 +696,13 @@ class RayPPOTrainer:
+         per_ds_mv_correct = defaultdict(float)
+         per_ds_mv_total = defaultdict(int)
+ 
++        import os as _os, time as _time
++        _vprof, _vt = _os.environ.get("VERL_ROLLOUT_PROFILE") == "1", [_time.perf_counter()]
++
++        def _vmark(label):  # VERL_ROLLOUT_PROFILE=1: seconds spent in each validation stage
++            if _vprof:
++                now = _time.perf_counter(); print(f"[val-prof] {label} {now - _vt[0]:.3f}s", flush=True); _vt[0] = now
++
+         for test_data in self.val_dataloader:
+             test_batch_original = DataProto.from_single_dict(test_data)
+ 
+@@ -1042,14 +1051,17 @@ class RayPPOTrainer:
+                 continue
+                 
+             print("validation generation end")
++            _vmark("generate")
+             # TODO: Can we keep special tokens except for padding tokens?
+             input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
+             sample_inputs.extend(input_texts)
++            _vmark("decode_inputs")
+ 
+             # Store generated outputs
+             output_ids = test_output_gen_batch.batch["responses"]
+             output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
+             sample_outputs.extend(output_texts)
++            _vmark("decode_outputs")
+ 
+             test_batch = test_batch.union(test_output_gen_batch)
+ 
+@@ -1059,6 +1071,7 @@ class RayPPOTrainer:
+             reward_tensor = result["reward_tensor"]
+             scores = reward_tensor.sum(-1).cpu().tolist()
+             sample_scores.extend(scores)
++            _vmark("reward")
+ 
+             reward_extra_infos_dict["reward"].extend(scores)
+             print(f"len reward_extra_infos_dict['reward']: {len(reward_extra_infos_dict['reward'])}")
+@@ -1125,6 +1138,7 @@ class RayPPOTrainer:
+                     per_ds_mv_correct[ds] += float(acc) * n
+                     per_ds_mv_total[ds] += n
+ 
++        _vmark("loop_rest")
+         self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
+ 
+         # dump generations
+@@ -1284,6 +1298,7 @@ class RayPPOTrainer:
+         except Exception as agg_err:
+             print(f"[maze_aggregate_metrics] val skipped: {agg_err}")
+ 
++        _vmark("metrics")
+         return metric_dict
+ 
+     def init_workers(self):
+@@ -1555,6 +1570,81 @@ class RayPPOTrainer:
+         global_balance_stats = log_seqlen_unbalance(seqlen_list=global_seqlen_lst, partitions=global_partition_lst, prefix=logging_prefix)
+         metrics.update(global_balance_stats)
+ 
++    # ---- early stopping + best checkpoint (trainer.early_stop_patience > 0) ------------------------------------------
++    # best.json under default_local_dir holds {metric, best_value, best_step, since_best, history}; it survives resumes.
++    # A new best (strictly greater dev metric) triggers a checkpoint at this step (if the save schedule did not already
++    # write one) and a copy of its HF export to <default_local_dir>/best_hf. patience = validations in a row without a
++    # new best; the run then stops (COMPLETE.json reason "early_stop"); otherwise it runs to total_training_steps.
++    def _best_state_path(self):
++        return os.path.join(self.config.trainer.default_local_dir, "best.json")
++
++    def _load_best_state(self):
++        import json
++        path = self._best_state_path()
++        if os.path.exists(path):
++            with open(path) as f:
++                return json.load(f)
++        return {"metric": self.config.trainer.get("early_stop_metric", "val-aux/maze_17/goal_reached/mean@16"),
++                "best_value": None, "best_step": None, "since_best": 0, "history": []}
++
++    def _write_json(self, path, obj):
++        import json
++        os.makedirs(os.path.dirname(path), exist_ok=True)
++        with open(path + ".tmp", "w") as f:
++            json.dump(obj, f, indent=1)
++        os.replace(path + ".tmp", path)
++
++    def _update_best(self, val_metrics, saved_this_step):
++        """Returns True when the run should stop early."""
++        import shutil
++        st = self._best_state
++        key = st["metric"]
++        if key not in val_metrics:
++            print(f"[early-stop] metric {key} missing from validation metrics; keys: {sorted(val_metrics)[:20]}")
++            return False
++        value = float(val_metrics[key])
++        st["history"].append([int(self.global_steps), value])
++        if st["best_value"] is None or value > st["best_value"]:
++            st.update(best_value=value, best_step=int(self.global_steps), since_best=0)
++            if self.global_steps == 0:
++                # the starting model is the best so far: best_hf = a copy of it (step 0), so every run has a best checkpoint
++                src = self.config.actor_rollout_ref.model.path
++                dst = os.path.join(self.config.trainer.default_local_dir, "best_hf")
++                if not os.path.exists(os.path.join(dst, "best_step.json")):
++                    shutil.rmtree(dst + ".tmp", ignore_errors=True)
++                    shutil.copytree(src, dst + ".tmp", symlinks=False)
++                    self._write_json(os.path.join(dst + ".tmp", "best_step.json"), {"step": 0, "metric": key, "value": value})
++                    shutil.rmtree(dst, ignore_errors=True)
++                    os.replace(dst + ".tmp", dst)
++            if self.global_steps > 0:
++                if not saved_this_step:
++                    self._save_checkpoint()
++                    self.flops_ledger.save(os.path.join(self.config.trainer.default_local_dir, f"global_step_{self.global_steps}", "flops_ledger.json"))
++                src = os.path.join(self.config.trainer.default_local_dir, f"global_step_{self.global_steps}", "actor", "huggingface")
++                dst = os.path.join(self.config.trainer.default_local_dir, "best_hf")
++                tmp = dst + ".tmp"
++                shutil.rmtree(tmp, ignore_errors=True)
++                shutil.copytree(src, tmp)
++                ledger = os.path.join(self.config.trainer.default_local_dir, f"global_step_{self.global_steps}", "flops_ledger.json")
++                if os.path.exists(ledger):
++                    shutil.copy(ledger, os.path.join(tmp, "flops_ledger.json"))
++                self._write_json(os.path.join(tmp, "best_step.json"), {"step": int(self.global_steps), "metric": key, "value": value})
++                shutil.rmtree(dst, ignore_errors=True)
++                os.replace(tmp, dst)
++            print(f"[early-stop] new best {key}={value:.5f} at step {self.global_steps}")
++        else:
++            st["since_best"] += 1
++        self._write_json(self._best_state_path(), st)
++        patience = int(self.config.trainer.get("early_stop_patience", 0))
++        return patience > 0 and st["since_best"] >= patience
++
++    def _write_complete(self, reason):
++        st = self._best_state
++        self._write_json(os.path.join(self.config.trainer.default_local_dir, "COMPLETE.json"),
++                         {"reason": reason, "last_step": int(self.global_steps) - 1, "best_step": st.get("best_step"),
++                          "best_value": st.get("best_value"), "metric": st.get("metric"),
++                          "flops_total_tflops": float(self.flops_ledger.cumulative.get("total", 0.0))})
++
+     def fit(self):
+         """
+         The training loop of PPO.
+@@ -1585,6 +1675,9 @@ class RayPPOTrainer:
+                 os.path.join(self.config.trainer.default_local_dir, f"global_step_{self.global_steps}", "flops_ledger.json")
+             )
+ 
++        self._best_state = self._load_best_state()
++        early_stopped = False
++
+         # see if there is a custom global steps from which we want to restart training
+         if isinstance(self.config.resume_training_parameters.resume_global_steps, int):
+             self.global_steps = self.config.resume_training_parameters.resume_global_steps
+@@ -1613,6 +1706,8 @@ class RayPPOTrainer:
+             assert val_metrics, f"{val_metrics=}"
+             pprint(f"Initial validation metrics: {val_metrics}")
+             logger.log(data=val_metrics, step=self.global_steps)
++            if int(self.config.trainer.get("early_stop_patience", 0)) > 0 and self._best_state["best_value"] is None:
++                self._update_best(val_metrics, saved_this_step=False)
+             if self.config.trainer.get("val_only", False):
+                 # flush before exiting: wandb only commits the last history row on
+                 # finish(), so a bare `return` here loses this validation entirely.
+@@ -1715,8 +1810,21 @@ class RayPPOTrainer:
+                         else:
+                             reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn)
+ 
+-                    # recompute old_log_probs
+-                    with marked_timer("old_log_prob", timing_raw, color="blue"):
++                    # recompute old_log_probs (algorithm.skip_old_log_prob: with one update per batch and token-level TIS
++                    # against the rollout engine's log-probs, the recompute is not needed: rollout_log_probs stand in)
++                    skip_old = bool(self.config.algorithm.get("skip_old_log_prob", False))
++                    if "rollout_entropys" in batch.batch.keys():  # sampling-distribution entropy from the rollout logits
++                        rollout_entropy = batch.batch.pop("rollout_entropys")
++                        if skip_old:  # the recompute path logs actor/entropy itself
++                            metrics["actor/entropy"] = agg_loss(loss_mat=rollout_entropy, loss_mask=batch.batch["response_mask"],
++                                                                loss_agg_mode=self.config.actor_rollout_ref.actor.loss_agg_mode).item()
++                    if skip_old:
++                        assert "rollout_log_probs" in batch.batch.keys(), "skip_old_log_prob needs actor_rollout_ref.rollout.return_log_probs=True"
++                        batch.batch["old_log_probs"] = batch.batch["rollout_log_probs"]
++                        # compute_log_prob normally stamps the sampling temperature that update_actor reads
++                        batch.meta_info["temperature"] = self.config.actor_rollout_ref.rollout.temperature
++                    with marked_timer("old_log_prob", timing_raw, color="blue") if not skip_old else contextlib.nullcontext():
++                      if not skip_old:
+                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
+                         self.flops_ledger.record_forward("old_log_prob", batch.meta_info["global_token_num"])
+                         entropys = old_log_prob.batch["entropys"]
+@@ -1959,6 +2067,7 @@ class RayPPOTrainer:
+                         and self.config.trainer.get("val_on_last_step", True)
+                     )
+ 
++                    validated_this_step = False
+                     if (
+                         self.val_reward_fn is not None 
+                         and self.config.trainer.test_freq > 0 
+@@ -1969,14 +2078,32 @@ class RayPPOTrainer:
+                     ):
+                         with marked_timer("testing", timing_raw, color="green"):
+                             val_metrics: dict = self._validate()
++                            validated_this_step = True
+                             if is_last_step:
+                                 last_val_metrics = val_metrics
+                         metrics.update(val_metrics)
+ 
++                    saved_this_step = False
+                     if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
+                         with marked_timer("save_checkpoint", timing_raw, color="green"):
+                             self._save_checkpoint()
+                             self.flops_ledger.save(os.path.join(self.config.trainer.default_local_dir, f"global_step_{self.global_steps}", "flops_ledger.json"))
++                            saved_this_step = True
++
++                    if validated_this_step and int(self.config.trainer.get("early_stop_patience", 0)) > 0:
++                        with marked_timer("best_ckpt", timing_raw, color="green"):
++                            if self._update_best(val_metrics, saved_this_step=saved_this_step):
++                                print(f"[early-stop] {self._best_state['since_best']} validations without a new best "
++                                      f"(best {self._best_state['best_value']:.5f} at step {self._best_state['best_step']}); stopping at step {self.global_steps}")
++                                if not saved_this_step:
++                                    self._save_checkpoint()
++                                    self.flops_ledger.save(os.path.join(self.config.trainer.default_local_dir, f"global_step_{self.global_steps}", "flops_ledger.json"))
++                                early_stopped = True
++                                last_val_metrics = val_metrics
++                                is_last_step = True
++                        metrics["early_stop/best_value"] = self._best_state["best_value"]
++                        metrics["early_stop/best_step"] = self._best_state["best_step"]
++                        metrics["early_stop/since_best"] = self._best_state["since_best"]
+ 
+                 # training metrics
+                 metrics.update(
+@@ -2010,6 +2137,9 @@ class RayPPOTrainer:
+ 
+                 if is_last_step:
+                     pprint(f"Final validation metrics: {last_val_metrics}")
++                    _budget = self.config.trainer.get("max_total_tflops", None)
++                    self._write_complete("early_stop" if early_stopped else (
++                        "flops_budget" if _budget and self.flops_ledger.cumulative["total"] >= float(_budget) else "max_steps"))
+                     progress_bar.close()
+                     # flush before exiting: wandb only commits the last history row on
+                     # finish(). Without this the end-of-training validation (the number
+diff --git a/experiments/text_maze/verl/workers/actor/dp_actor.py b/experiments/text_maze/verl/workers/actor/dp_actor.py
+index b31c48b..7f1bd6c 100644
+--- a/experiments/text_maze/verl/workers/actor/dp_actor.py
++++ b/experiments/text_maze/verl/workers/actor/dp_actor.py
+@@ -39,6 +39,7 @@ from verl.utils.seqlen_balancing import get_reverse_idx, rearrange_micro_batches
+ from verl.utils.torch_functional import logprobs_from_logits
+ from verl.utils.ulysses import gather_outpus_and_unpad, ulysses_pad, ulysses_pad_and_slice_inputs
+ from verl.workers.actor import BasePPOActor
++from verl.workers.actor.prefix_forward import prefix_shared_logits
+ 
+ if is_cuda_available:
+     try:
+@@ -71,6 +72,11 @@ class DataParallelPPOActor(BasePPOActor):
+ 
+         self.ulysses_sequence_parallel_size = self.config.ulysses_sequence_parallel_size
+         self.use_ulysses_sp = self.ulysses_sequence_parallel_size > 1
++        # actor.prefix_shared_forward (maze study): one forward per distinct prompt + response-only forwards (prefix_forward.py)
++        self.prefix_shared_forward = self.config.get("prefix_shared_forward", False)
++        if self.prefix_shared_forward:
++            assert not (self.use_remove_padding or self.use_fused_kernels or self.use_ulysses_sp), \
++                "prefix_shared_forward replaces the plain padded forward only"
+ 
+         if self.config.entropy_from_logits_with_chunking:
+             entropy_from_logits = verl_F.entropy_from_logits_with_chunking
+@@ -229,6 +235,18 @@ class DataParallelPPOActor(BasePPOActor):
+                     entropy = full_entropy.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
+                 log_probs = full_log_probs.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
+ 
++            elif self.prefix_shared_forward:
++                # same log-probs as the padded forward, over the longest real response, zero-padded back to response_length
++                assert not multi_modal_inputs, "prefix_shared_forward is text-only"
++                logits, r_eff = prefix_shared_logits(self.actor_module, input_ids, attention_mask, position_ids,
++                                                     response_length)
++                logits.div_(temperature)
++                lp = logprobs_from_logits(logits, micro_batch["responses"][:, :r_eff])
++                log_probs = torch.cat([lp, lp.new_zeros(batch_size, response_length - r_eff)], 1)
++                if calculate_entropy:
++                    ent = verl_F.entropy_from_logits(logits)
++                    entropy = torch.cat([ent, ent.new_zeros(batch_size, response_length - r_eff)], 1)
++
+             else:  # not using rmpad and no ulysses sp
+                 extra_args = {}
+                 if self.use_fused_kernels:
+diff --git a/experiments/text_maze/verl/workers/actor/prefix_forward.py b/experiments/text_maze/verl/workers/actor/prefix_forward.py
+new file mode 100644
+index 0000000..6eba483
+--- /dev/null
++++ b/experiments/text_maze/verl/workers/actor/prefix_forward.py
+@@ -0,0 +1,35 @@
++"""Shared-prompt training forward (actor.prefix_shared_forward, maze study).
++
++Same logits as one forward over prompt + response per row, computed with less work when rows share prompts (the 16
++samples of a GRPO group): each distinct prompt in the micro-batch (tokens, mask and positions) is run once with its KV
++cache kept for autograd, every row then runs only its response tokens against its group's prompt cache, and the response
++is trimmed to the longest real response in the micro-batch. Gradients reach the shared prompt computation summed over the
++group's rows, which equals the per-row computation. Any row order works.
++"""
++
++import torch
++
++
++def prefix_shared_logits(module, input_ids, attention_mask, position_ids, response_length):
++    """Logits predicting each response token, (B, R', vocab) for the first R' response positions (R' = longest real
++    response in the batch, at least 1; later positions are padding). Equals
++    module(input_ids, attention_mask, position_ids).logits[:, -R-1:-1][:, :R']."""
++    B, S = input_ids.shape
++    P = S - response_length
++    r_eff = max(int(attention_mask[:, P:].sum(1).max().item()), 1)
++    # group on tokens + mask + positions: identical tokens under a different mask must not share a cache
++    key = torch.cat([input_ids[:, :P], attention_mask[:, :P], position_ids[:, :P]], 1)
++    uniq, inv = torch.unique(key, dim=0, return_inverse=True)
++    ids_p, mask_p, pos_p = uniq.split(P, dim=1)
++    out_p = module(input_ids=ids_p, attention_mask=mask_p, position_ids=pos_p, use_cache=True, logits_to_keep=1)
++    assert out_p.past_key_values is not None, "prefix_shared_forward needs the KV cache: turn gradient checkpointing off"
++    last = out_p.logits[:, -1][inv]  # (B, V): predicts the first response token
++    if r_eff == 1:
++        return last[:, None], r_eff
++    cache = out_p.past_key_values
++    cache.batch_select_indices(inv)  # one prompt cache per row (a differentiable gather)
++    r = r_eff - 1  # response tokens whose next-token logits are needed (the last one predicts nothing)
++    out_r = module(input_ids=input_ids[:, P:P + r], attention_mask=attention_mask[:, :P + r],
++                   position_ids=position_ids[:, P:P + r], past_key_values=cache, use_cache=True,
++                   cache_position=torch.arange(P, P + r, device=input_ids.device))
++    return torch.cat([last[:, None], out_r.logits], 1), r_eff
+diff --git a/experiments/text_maze/verl/workers/rollout/graph_decode.py b/experiments/text_maze/verl/workers/rollout/graph_decode.py
+new file mode 100644
+index 0000000..f83aaf4
+--- /dev/null
++++ b/experiments/text_maze/verl/workers/rollout/graph_decode.py
+@@ -0,0 +1,51 @@
++"""CUDA-graph sampling decode for small models (rollout.graph_generate, maze study).
++
++A drop-in for model.generate(do_sample=True, top_k=0, top_p=1, return_dict_in_generate=True, output_logits=True) on
++unpadded prompts: prefill once, then one-token decode steps on a StaticCache with the step captured as a CUDA graph
++(torch.compile mode="reduce-overhead"). Returns .sequences (prompt + generated, pad after EOS like HF) and .logits
++(raw per-step logits, as HF's output_logits). The per-token cost of HF generate for a 4-layer model is almost all
++kernel-launch / Python overhead, which the graph removes.
++"""
++
++from types import SimpleNamespace
++
++import torch
++from transformers import StaticCache
++
++
++class GraphDecoder:
++    def __init__(self, model, max_new_tokens):
++        self.model = model
++        self.max_new = max_new_tokens
++        self.caches = {}  # (batch, prompt length) -> StaticCache
++        self.step = torch.compile(self._step, mode="reduce-overhead", fullgraph=False)
++
++    def _step(self, ids, pos, cache):
++        return self.model(input_ids=ids, cache_position=pos, past_key_values=cache, use_cache=True).logits[:, -1]
++
++    @torch.no_grad()
++    def generate(self, input_ids, temperature, eos_ids, pad_id, num_return_sequences=1, want_logits=True):
++        x = input_ids.repeat_interleave(num_return_sequences, 0) if num_return_sequences > 1 else input_ids
++        B, L = x.shape
++        key = (B, L)
++        if key not in self.caches:
++            self.caches[key] = StaticCache(config=self.model.config, max_batch_size=B, max_cache_len=L + self.max_new,
++                                           device=x.device, dtype=next(self.model.parameters()).dtype)
++        cache = self.caches[key]
++        cache.reset()
++        eos = torch.tensor(eos_ids, device=x.device)
++        logits = self._step(x, torch.arange(L, device=x.device), cache).float()
++        done = torch.zeros(B, dtype=torch.bool, device=x.device)
++        toks, all_logits = [], []
++        for t in range(self.max_new):
++            if want_logits:
++                all_logits.append(logits)
++            nxt = torch.multinomial(torch.softmax(logits / max(float(temperature), 1e-6), -1), 1).squeeze(1)
++            nxt = torch.where(done, torch.full_like(nxt, pad_id), nxt)
++            toks.append(nxt)
++            done |= (nxt[:, None] == eos).any(1)  # not torch.isin: its sort path (many eos ids) syncs, which breaks capture
++            if t % 8 == 7 and bool(done.all()):  # one host sync per 8 tokens
++                break
++            if t + 1 < self.max_new:
++                logits = self.step(nxt[:, None].clone(), torch.tensor([L + t], device=x.device), cache).float().clone()
++        return SimpleNamespace(sequences=torch.cat([x, torch.stack(toks, 1)], 1), logits=tuple(all_logits) if want_logits else None)
+diff --git a/experiments/text_maze/verl/workers/rollout/hf_rollout.py b/experiments/text_maze/verl/workers/rollout/hf_rollout.py
+index 1d49a95..4abc6d3 100644
+--- a/experiments/text_maze/verl/workers/rollout/hf_rollout.py
++++ b/experiments/text_maze/verl/workers/rollout/hf_rollout.py
+@@ -20,6 +20,8 @@ to perform generation.
+ 
+ import contextlib
+ import logging
++import os
++import time
+ 
+ import torch
+ import torch.distributed
+@@ -45,10 +47,38 @@ class HFRollout(BaseRollout):
+         super().__init__()
+         self.config = config
+         self.module = module
++        self._gen_model = None
++        self._graph = None
++        self._path_logged = False
++
++    def _sync_plain_model(self):
++        """rollout.plain_generate: generate with a plain (non-FSDP) copy of the policy, synced from the FSDP actor once per
++        generate_sequences call. Skips FSDP's per-layer forward hooks on every decode step and the per-chunk
++        summon + parameter-stats logging; the copy holds the same full-precision weights the summoned module does."""
++        with FSDP.summon_full_params(self.module, writeback=False, recurse=True):
++            params = {n.replace("_fsdp_wrapped_module.", ""): p.detach() for n, p in self.module.named_parameters()}
++            if self._gen_model is None:
++                from transformers import AutoModelForCausalLM
++                inner = self.module.module
++                from verl.utils.torch_dtypes import PrecisionType
++                # rollout.graph_generate keeps the copy in the rollout dtype (the static KV cache must match the weights)
++                dtype = (PrecisionType.to_dtype(self.config.get("dtype", "bfloat16")) if self.config.get("graph_generate", False)
++                         else next(iter(params.values())).dtype)
++                self._gen_model = AutoModelForCausalLM.from_config(
++                    inner.config, torch_dtype=dtype,
++                    attn_implementation=inner.config._attn_implementation).to(next(iter(params.values())).device).eval()
++            missing, unexpected = self._gen_model.load_state_dict(params, strict=False)
++            assert not unexpected and all("lm_head" in k for k in missing), (missing, unexpected)
+ 
+     def generate_sequences(self, prompts: DataProto) -> DataProto:
+         batch_size = prompts.batch.batch_size[0]  # 当前卡处理的batch数（单卡）
+         is_validate = prompts.meta_info.get("validate", False)
++        prof = os.environ.get("VERL_ROLLOUT_PROFILE") == "1"
++        t0 = time.perf_counter()
++        if self.config.get("plain_generate", False) and isinstance(self.module, FSDP):
++            self._sync_plain_model()
++        if prof:
++            torch.cuda.synchronize(); print(f"[rollout-prof] sync {time.perf_counter() - t0:.3f}s", flush=True)
+         
+         # micro_batch_size永远表示sample level
+         # 在validation阶段：val_kwargs.n已经提前展平，所以batch_size已经是sample level
+@@ -182,7 +212,8 @@ class HFRollout(BaseRollout):
+         self.module.eval()
+         param_ctx = contextlib.nullcontext()
+ 
+-        is_fsdp = isinstance(self.module, FSDP)
++        plain = self._gen_model is not None and self.config.get("plain_generate", False)
++        is_fsdp = isinstance(self.module, FSDP) and not plain
+         print(f"[HFRollout] Module is FSDP: {is_fsdp}", flush=True)
+         
+         if is_fsdp:
+@@ -195,15 +226,16 @@ class HFRollout(BaseRollout):
+         torch_dtype = PrecisionType.to_dtype(self.config.get("dtype", "bfloat16"))
+         
+         with param_ctx, torch.autocast(device_type=get_device_name(), dtype=torch_dtype):
+-            # Log parameter stats after entering summon context
+-            total_params = sum(p.numel() for p in self.module.parameters())
+-            non_zero_params = sum((p != 0).sum().item() for p in self.module.parameters())
+-            first_param = next(self.module.parameters())
+-            print(f"[HFRollout] Inside param context - total_params: {total_params:,}, "
+-                  f"non_zero_params: {non_zero_params:,}, "
+-                  f"first_param shape: {first_param.shape}, "
+-                  f"first_param mean: {first_param.mean().item():.6f}, "
+-                  f"first_param std: {first_param.std().item():.6f}", flush=True)
++            # Log parameter stats after entering summon context (dozens of host syncs per chunk: skipped on the plain path)
++            if not plain:
++                total_params = sum(p.numel() for p in self.module.parameters())
++                non_zero_params = sum((p != 0).sum().item() for p in self.module.parameters())
++                first_param = next(self.module.parameters())
++                print(f"[HFRollout] Inside param context - total_params: {total_params:,}, "
++                      f"non_zero_params: {non_zero_params:,}, "
++                      f"first_param shape: {first_param.shape}, "
++                      f"first_param mean: {first_param.mean().item():.6f}, "
++                      f"first_param std: {first_param.std().item():.6f}", flush=True)
+             
+             print(f"[HFRollout] Starting generate with eos_token_id={eos_token_id}, "
+                   f"pad_token_id={pad_token_id}, max_new_tokens={response_length}, "
+@@ -211,20 +243,60 @@ class HFRollout(BaseRollout):
+             
+             # NOTE: Do NOT pass position_ids - HuggingFace generate computes them automatically
+             # Passing explicit position_ids can cause issues with generation
+-            output = self.module.generate(
+-                input_ids=idx,
+-                attention_mask=attention_mask,
+-                # position_ids=position_ids,  # Removed: causes generation issues
+-                do_sample=do_sample,
+-                max_new_tokens=response_length,
+-                eos_token_id=eos_token_id,
+-                pad_token_id=pad_token_id,
+-                generation_config=generation_config,
+-                output_scores=False,  # this is potentially very large
+-                return_dict_in_generate=True,
+-                use_cache=True,
+-            )
++            # graph decode needs every row to share the same left padding (maze prompts all have one length): strip it
++            lead = int((attention_mask.sum(0) == 0).sum())
++            use_graph = (plain and self.config.get("graph_generate", False) and do_sample
++                         and bool(attention_mask[:, lead:].all()) and bool((attention_mask[:, :lead] == 0).all())
++                         and kwargs.get("top_k", 0) in (0, None) and kwargs.get("top_p", 1.0) >= 1.0)
++            prefix_decode = self.config.get("prefix_decode", False)
++            if self.config.get("plain_generate", False) and not self._path_logged:
++                graph_path = "prefix-shared cuda-graph" if prefix_decode else "cuda-graph"
++                path = graph_path if use_graph else ("plain HF generate" if plain else "FSDP HF generate")
++                print(f"[HFRollout] decode path: {path}", flush=True)
++                self._path_logged = True
++            prof = os.environ.get("VERL_ROLLOUT_PROFILE") == "1"
++            if prof:
++                torch.cuda.synchronize(); t_gen = time.perf_counter()
++            if use_graph:
++                if self._graph is None:
++                    if prefix_decode:  # shared prompt cache per group + finished-row compaction
++                        from .prefix_decode import PrefixSharedDecoder
++                        self._graph = PrefixSharedDecoder(self._gen_model, response_length)
++                    else:
++                        from .graph_decode import GraphDecoder
++                        self._graph = GraphDecoder(self._gen_model, response_length)
++                assert response_length == self._graph.max_new, (response_length, self._graph.max_new)
++                n_ret = kwargs.get("num_return_sequences", 1)
++                eos_list = list(eos_token_id) if isinstance(eos_token_id, (list, tuple)) else [eos_token_id]
++                # per-step logits only where the HF path returns them too (rollout.return_log_probs, train rollouts)
++                want_logits = bool(self.config.get("return_log_probs", False)) and not is_validate
++                output = self._graph.generate(idx[:, lead:], kwargs["temperature"], eos_list, pad_token_id, n_ret,
++                                              want_logits=want_logits)
++                if lead:  # put the shared left padding back so shapes match HF generate's output
++                    pad_cols = idx[:, :lead].repeat_interleave(n_ret, 0) if n_ret > 1 else idx[:, :lead]
++                    output.sequences = torch.cat([pad_cols, output.sequences], 1)
++            else:
++                output = (self._gen_model if plain else self.module).generate(
++                    input_ids=idx,
++                    attention_mask=attention_mask,
++                    # position_ids=position_ids,  # Removed: causes generation issues
++                    do_sample=do_sample,
++                    max_new_tokens=response_length,
++                    eos_token_id=eos_token_id,
++                    pad_token_id=pad_token_id,
++                    generation_config=generation_config,
++                    output_scores=False,  # this is potentially very large
++                    # rollout.return_log_probs: also return the raw logits per generated step, from which the log-prob of
++                    # every sampled token under the rollout's own forward (KV cache, rollout dtype) is taken below; the
++                    # trainer uses them as the behaviour policy (token-level TIS). Train rollouts only.
++                    output_logits=bool(self.config.get("return_log_probs", False)) and not is_validate,
++                    return_dict_in_generate=True,
++                    use_cache=True,
++                )
+ 
++        if prof:
++            torch.cuda.synchronize(); t_post = time.perf_counter()
++            print(f"[rollout-prof] decode {t_post - t_gen:.3f}s batch {idx.shape[0]} steps {len(output.logits) if getattr(output, 'logits', None) else '-'}", flush=True)
+         # TODO: filter out the seq with no answers like ds-chat
+         seq = output.sequences
+         generated_batch_size = seq.size(0)  # bs * num_return_sequences
+@@ -263,16 +335,31 @@ class HFRollout(BaseRollout):
+         response_attention_mask = get_response_mask(response_id=response, eos_token=eos_token_id, dtype=attention_mask.dtype)
+         attention_mask = torch.cat((attention_mask, response_attention_mask), dim=-1)
+ 
+-        batch = TensorDict(
+-            {
+-                "prompts": prompt,
+-                "responses": response,
+-                "input_ids": seq,
+-                "attention_mask": attention_mask,
+-                "position_ids": position_ids,
+-            },
+-            batch_size=generated_batch_size,
+-        )
++        tensors = {
++            "prompts": prompt,
++            "responses": response,
++            "input_ids": seq,
++            "attention_mask": attention_mask,
++            "position_ids": position_ids,
++        }
++        if getattr(output, "logits", None) is not None:
++            # log pi_rollout(token) at the sampling temperature (top-p 1 / top-k 0 here, so sampling = softmax(logits / T));
++            # positions past the generated length (and masked tokens) get 0
++            steps = len(output.logits)
++            logits = torch.stack(output.logits, dim=1).float() / max(float(temperature), 1e-6)  # (bs, steps, vocab)
++            logp_all = torch.log_softmax(logits, dim=-1)
++            lp = logp_all.gather(-1, response[:, :steps].unsqueeze(-1)).squeeze(-1)
++            rollout_log_probs = torch.zeros(response.shape, dtype=torch.float32, device=response.device)
++            rollout_log_probs[:, :steps] = lp
++            tensors["rollout_log_probs"] = rollout_log_probs * response_attention_mask.to(torch.float32)
++            # entropy of the sampling distribution per response token (actor/entropy when the old-log-prob pass is skipped)
++            rollout_entropys = torch.zeros(response.shape, dtype=torch.float32, device=response.device)
++            rollout_entropys[:, :steps] = -(logp_all.exp() * logp_all).sum(-1)
++            tensors["rollout_entropys"] = rollout_entropys * response_attention_mask.to(torch.float32)
++            del logits, logp_all, lp
++        batch = TensorDict(tensors, batch_size=generated_batch_size)
++        if prof:
++            torch.cuda.synchronize(); print(f"[rollout-prof] post {time.perf_counter() - t_post:.3f}s", flush=True)
+ 
+         # empty cache before compute old_log_prob
+         get_torch_device().empty_cache()
+diff --git a/experiments/text_maze/verl/workers/rollout/prefix_decode.py b/experiments/text_maze/verl/workers/rollout/prefix_decode.py
+new file mode 100644
+index 0000000..1463686
+--- /dev/null
++++ b/experiments/text_maze/verl/workers/rollout/prefix_decode.py
+@@ -0,0 +1,195 @@
++"""Shared-prompt sampling decode for small models (rollout.prefix_decode, maze study).
++
++A drop-in for GraphDecoder.generate (model.generate(do_sample=True, top_k=0, top_p=1) on unpadded prompts of one length):
++the same sampling distribution and outputs (.sequences, .logits = raw per-step logits, or None with want_logits=False),
++computed with less work; it runs outside autocast (the plain copy is already in the rollout dtype).
++- Rows that share a prompt (the n samples of a train prompt, or the consecutive repeated rows of validation) form a group
++  with one copy of the prompt's KV cache; each decode step reads it once per group instead of once per row (the 654-token
++  25x25 prompt is ~70% of the context). The prompt is prefilled once per group.
++- Each row's own cache holds only its generated tokens; attention reads them up to the end of the current segment.
++- Decoding runs in segments of SEG tokens. At each segment boundary the layout drops finished rows (and groups whose rows
++  have all finished) when that removes >= 25% of the rows, so the batch shrinks as rows finish instead of running every
++  row to the longest one. Within a segment the shapes are fixed: the first step runs eagerly on a side stream (the
++  CUDA-graph warm-up), the step is captured once, and the remaining steps replay the graph, sampling included (Gumbel-max,
++  i.e. a draw from softmax(logits / T)). All-finished is checked every 8 tokens. The layout stays rectangular (groups x
++  rows), so one group with every row alive holds compaction back; a ragged layout would compact earlier.
++Prompt and response scores share one fp32 softmax, so each step equals ordinary attention over prompt + generated tokens
++up to fp16 rounding. Layers reuse the model's own modules (norms, projections, rotary, MLP).
++"""
++
++from types import SimpleNamespace
++
++import torch
++from transformers.models.qwen2.modeling_qwen2 import apply_rotary_pos_emb
++
++SEG = 32  # tokens per segment (one graph capture each)
++COMPACT_KEEP_FRAC = 0.75  # compact when the kept layout is at most this fraction of the current one (None: never)
++assert SEG % 8 == 0  # every segment boundary follows an all-finished check, so _compact always has an unfinished row
++
++
++class PrefixSharedDecoder:
++    def __init__(self, model, max_new_tokens, use_graphs=True):
++        cfg = model.config
++        assert cfg.model_type == "qwen2", cfg.model_type
++        self.model, self.max_new, self.use_graphs = model, max_new_tokens, use_graphs
++        self.h, self.kvh = cfg.num_attention_heads, cfg.num_key_value_heads
++        self.d = getattr(cfg, "head_dim", None) or cfg.hidden_size // cfg.num_attention_heads
++        self.rep = self.h // self.kvh
++        self.scale = self.d ** -0.5
++        self._side = None  # one side stream for warm-up + capture: a new stream per segment costs a cuBLAS workspace each
++
++    @staticmethod
++    def _sample(logits, T):
++        """A draw from softmax(logits / T) per row (Gumbel-max: capturable, no host sync)."""
++        gumbel = -torch.empty_like(logits).exponential_().clamp_min_(1e-30).log()
++        return torch.argmax(logits / T + gumbel, -1)
++
++    def _forward(self, tok, pos, t, W, st):
++        """Logits (G*n, vocab, float32) after tokens tok (G*n,) at position pos (device (1,)); their K/V go to response
++        slot t (device (1,)); attention covers the prompt and response slots [0, t] of the first W."""
++        m, G, n, kvh, rep, d = self.model.model, st["G"], st["n"], self.kvh, self.rep, self.d
++        B = G * n
++        x = m.embed_tokens(tok[:, None])  # (B, 1, H)
++        cos, sin = m.rotary_emb(x[:1], pos.view(1, 1))
++        future = (torch.arange(W, device=tok.device) > t).view(1, 1, 1, 1, W)
++        for li, layer in enumerate(m.layers):
++            attn = layer.self_attn
++            hs = layer.input_layernorm(x)
++            q = attn.q_proj(hs).view(B, 1, self.h, d).transpose(1, 2)  # (B, h, 1, d)
++            k = attn.k_proj(hs).view(B, 1, kvh, d).transpose(1, 2)  # (B, kvh, 1, d)
++            v = attn.v_proj(hs).view(B, 1, kvh, d).transpose(1, 2)
++            q, k = apply_rotary_pos_emb(q, k, cos, sin)
++            Kp, Vp, Kr, Vr = st["Kp"][li], st["Vp"][li], st["Kr"][li], st["Vr"][li]
++            # (G, kvh, n, ...) layout: query head j uses kv head j // rep, as HF's repeat_kv
++            Kr.index_copy_(3, t, k.view(G, n, kvh, 1, d).transpose(1, 2))
++            Vr.index_copy_(3, t, v.view(G, n, kvh, 1, d).transpose(1, 2))
++            qg = (q * self.scale).view(G, n, kvh, rep, d).transpose(1, 2)  # (G, kvh, n, rep, d); scaled first (fp16)
++            L = Kp.shape[2]
++            sp = torch.matmul(qg.reshape(G, kvh, n * rep, d), Kp.transpose(-1, -2)).view(G, kvh, n, rep, L)
++            kr, vr = Kr[:, :, :, :W], Vr[:, :, :, :W]  # (G, kvh, n, W, d)
++            sr = torch.matmul(qg, kr.transpose(-1, -2)).float().masked_fill(future, float("-inf"))  # (G,kvh,n,rep,W)
++            p = torch.softmax(torch.cat([sp.float(), sr], -1), -1).to(q.dtype)
++            op = torch.matmul(p[..., :L].reshape(G, kvh, n * rep, L), Vp).view(G, kvh, n, rep, d)
++            o = op.float() + torch.matmul(p[..., L:], vr).float()  # partial sums added in fp32
++            o = o.to(q.dtype).transpose(1, 2).reshape(B, 1, self.h * d)
++            x = x + attn.o_proj(o)
++            x = x + layer.mlp(layer.post_attention_layernorm(x))
++        return self.model.lm_head(m.norm(x))[:, 0].float()
++
++    def _token_step(self, st, W, Lp, T, pad_id, eos):
++        """Record the current logits, sample the next token of every row, mark finished rows, then compute the logits
++        after that token. Mutates st in place (static shapes within a segment)."""
++        t = st["t"]
++        idx = (st["flat"], t.expand(st["flat"].numel()))
++        if st["logits_out"] is not None:
++            st["logits_out"].index_put_(idx, st["logits"])
++        done = st["done"].view(-1)
++        nxt = torch.where(done, pad_id, self._sample(st["logits"], T))
++        st["toks_out"].index_put_(idx, nxt)
++        done |= (nxt[:, None] == eos).any(1)  # not torch.isin: its sort path (many eos ids) syncs, which breaks capture
++        st["logits"].copy_(self._forward(nxt, Lp + t, t, W, st))
++        t += 1
++
++    def _compact(self, st, t):
++        """Keep the unfinished rows (fewest columns that hold them) of the groups that still have one, if the kept layout
++        is at most COMPACT_KEEP_FRAC of the current one. t = response slots filled so far."""
++        done, G, n = st["done"], st["G"], st["n"]
++        cnt = (~done).sum(1)
++        keep = (cnt > 0).nonzero().squeeze(1)
++        n_new = int(cnt.max())
++        if COMPACT_KEEP_FRAC is None or keep.numel() * n_new > COMPACT_KEEP_FRAC * G * n:
++            return
++        sel = torch.argsort(done.int(), dim=1, stable=True)[keep, :n_new]  # unfinished rows first
++        gi = keep[:, None]
++        st["rows"], st["done"] = st["rows"][gi, sel], done[gi, sel].clone()
++        st["logits"] = st["logits"].view(G, n, -1)[gi, sel].reshape(keep.numel() * n_new, -1)
++        st["Kp"], st["Vp"] = [k[keep] for k in st["Kp"]], [v[keep] for v in st["Vp"]]
++        for key in ("Kr", "Vr"):
++            for li, c in enumerate(st[key]):  # (G, kvh, n, R, d); one layer at a time
++                full = c.new_zeros(keep.numel(), self.kvh, n_new, self.max_new, self.d)  # zeros: 0 x garbage can be NaN
++                full[:, :, :, :t] = c[:, :, :, :t].permute(0, 2, 1, 3, 4)[gi, sel].permute(0, 2, 1, 3, 4)
++                st[key][li] = full
++        st["G"], st["n"] = keep.numel(), n_new
++
++    @torch.no_grad()
++    def generate(self, input_ids, temperature, eos_ids, pad_id, num_return_sequences=1, want_logits=True):
++        with torch.autocast("cuda", enabled=False):  # copy is in the rollout dtype
++            return self._generate(input_ids, temperature, eos_ids, pad_id, num_return_sequences, want_logits)
++
++    def _generate(self, input_ids, temperature, eos_ids, pad_id, num_return_sequences, want_logits):
++        dev = input_ids.device
++        if num_return_sequences > 1:  # train: every input row is a prompt with n samples
++            prompts, n0 = input_ids, num_return_sequences
++            G0 = prompts.shape[0]
++            rows = torch.arange(G0 * n0, device=dev).view(G0, n0)
++            x_full = input_ids.repeat_interleave(n0, 0)
++        else:  # validation: rows arrive repeated (interleaved); group runs of identical consecutive rows
++            x_full = input_ids
++            new = torch.ones(input_ids.shape[0], dtype=torch.bool, device=dev)
++            new[1:] = (input_ids[1:] != input_ids[:-1]).any(1)
++            gid = torch.cumsum(new.long(), 0) - 1
++            starts = new.nonzero().squeeze(1)
++            G0, n0 = starts.numel(), int(torch.bincount(gid).max())
++            prompts = input_ids[starts]
++            slot = torch.arange(input_ids.shape[0], device=dev) - starts[gid]
++            rows = torch.full((G0, n0), -1, dtype=torch.long, device=dev)
++            rows[gid, slot] = torch.arange(input_ids.shape[0], device=dev)
++        B, Lp = x_full.shape
++        nl = len(self.model.model.layers)
++        out = self.model(input_ids=prompts, use_cache=True, logits_to_keep=1)  # prefill once per prompt
++        Kp = [layer.keys for layer in out.past_key_values.layers]
++        Vp = [layer.values for layer in out.past_key_values.layers]
++        first = out.logits[:, -1].float()  # (G0, V)
++        del out
++        V = first.shape[-1]
++        st = {
++            "G": G0, "n": n0, "rows": rows, "done": rows < 0,  # empty slots count as finished
++            "Kp": [k.contiguous() for k in Kp], "Vp": [v.contiguous() for v in Vp],
++            "Kr": [Kp[0].new_zeros(G0, self.kvh, n0, self.max_new, self.d) for _ in range(nl)],
++            "logits": first[:, None].expand(G0, n0, V).reshape(G0 * n0, V).clone(),
++            "toks_out": torch.full((B + 1, self.max_new), pad_id, dtype=torch.long, device=dev),  # row B: empty slots
++            "logits_out": torch.zeros(B + 1, self.max_new, V, device=dev) if want_logits else None,
++            "t": torch.zeros(1, dtype=torch.long, device=dev),
++        }
++        st["Vr"] = [torch.zeros_like(c) for c in st["Kr"]]  # unfilled slots get weight 0, and must not hold NaN/inf
++        eos = torch.tensor(eos_ids, device=dev)
++        T = max(float(temperature), 1e-6)
++        pool = torch.cuda.graph_pool_handle() if self.use_graphs else None
++        t, finished, graphs = 0, False, []  # graphs share one pool, so all stay alive until the call ends
++        while t < self.max_new and not finished:
++            if t > 0:
++                self._compact(st, t)
++            st["flat"] = torch.where(st["rows"] < 0, B, st["rows"]).view(-1)
++            end = min(t + SEG, self.max_new)  # response slots [0, end) cover every step of this segment
++            graph = None
++            while t < end:
++                if graph is not None:
++                    graph.replay()
++                elif self.use_graphs and end - t > 2:
++                    if self._side is None:
++                        self._side = torch.cuda.Stream()
++                    side = self._side  # warm-up (a real step) on the side stream, then capture the same step
++                    side.wait_stream(torch.cuda.current_stream())
++                    with torch.cuda.stream(side):
++                        self._token_step(st, end, Lp, T, pad_id, eos)
++                    torch.cuda.current_stream().wait_stream(side)
++                    graph = torch.cuda.CUDAGraph()
++                    graphs.append(graph)
++                    # raw capture: torch.cuda.graph() runs gc.collect() + empty_cache() on entry (~0.1 s a segment)
++                    with torch.cuda.stream(side):  # thread_local: CUDA calls from other threads can't fail the capture
++                        graph.capture_begin(pool=pool, capture_error_mode="thread_local")
++                        try:
++                            self._token_step(st, end, Lp, T, pad_id, eos)
++                        finally:
++                            graph.capture_end()
++                    torch.cuda.current_stream().wait_stream(side)
++                else:
++                    self._token_step(st, end, Lp, T, pad_id, eos)
++                t += 1
++                if t % 8 == 0 and bool(st["done"].all()):
++                    finished = True
++                    break
++        steps = t
++        seq = torch.cat([x_full, st["toks_out"][:B, :steps]], 1)
++        lg = tuple(st["logits_out"][:B, s] for s in range(steps)) if want_logits else None
++        return SimpleNamespace(sequences=seq, logits=lg)
