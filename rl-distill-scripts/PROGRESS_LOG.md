@@ -12,6 +12,829 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-11-12 — Code review of the maze RL / pretraining additions (ml-code-reviewer × 4), fixes and tests
+
+**Scope.** Four parallel reviews:
+1. the shared-prompt decoder (TailRL `rollout/prefix_decode.py` + `hf_rollout` dispatch);
+2. the shared-prompt update (`actor/prefix_forward.py` + `dp_actor` hook);
+3. the pre-tokenized pretraining data (`tokenize_maze_sft.py` + `sft_pretrain` `MazeTokenCache` + run-file);
+4. the RL run / pack / launch scripts.
+
+All fixes are in `maze/tailrl_rl_tis.patch` and the maze scripts (`0a1a1a2f`).
+
+**Correctness confirmed by running code:**
+- Decoder: graph replay == eager, compaction == none, validation layout == train layout (all bitwise), accuracy equal to
+  HF fp16.
+- Update: logits and gradients equal the padded forward in fp32, including all edge cases and 2-rank FSDP FULL_SHARD.
+- Cache: items, kept set and shuffled batch order (0 / 4 workers) equal MazeSFTDataset.
+- 1-GPU pack: run-dir naming, Ray-band kill and LPT packing are correct.
+
+**Bugs fixed:**
+- **4-GPU runs (critical).** `push_state` probed `model_world_size_1_rank_0.pt`, so 4-GPU runs never got a resume pointer
+  and a finished run killed its pod. The micro-batch cap ignored the per-GPU split (verl assertion for small batches on 4 GPUs).
+- **Decoder.**
+  - `torch.isin` under CUDA-graph capture syncs with many eos ids and poisons the CUDA RNG → replaced by an `==` / `any`.
+  - A new side stream per segment cost a ~32 MiB cuBLAS workspace each: about 64 MiB per call, up to ~1 GB per process once
+    PyTorch's 32-stream pool is used → one reused stream.
+  - The graph decoders ignored `rollout.return_log_probs`.
+- **Update.**
+  - Rows with identical prompt tokens under different masks could share a cache → group on tokens + mask + positions.
+  - The flag silently did nothing with `use_remove_padding` / fused kernels → it now asserts.
+- **Cache.**
+  - A stale cache (data regenerated) went undetected → the source byte size and a probe item's encoding are checked.
+  - A missing cache silently tokenized for ~35 min → warning plus a `MAZE_PT_NO_CACHE` pod-log line.
+  - Builder: None / all-dropped inputs, and the uint8 check now tests the largest id.
+- **Scripts.**
+  - RUN_ALL_GPUS forces one run at a time.
+  - Transient S3 errors in the reap path no longer end the pod (3 retries).
+  - A resume from another world size's checkpoint is refused.
+  - Launcher grid variables are no longer inherited from the caller's environment.
+  - A missing packing cost and an empty plan now fail clearly.
+  - A stale `pods/<TAG>.COMPLETE` blocks a relaunch with a message.
+  - `PREFIX_DECODE` without `FAST_DECODE` is an error.
+  - The decode bench log uploads on failure.
+  - Header docs updated.
+
+**Tests** (`tests/special_standalone/`):
+
+| File | Device | Tests | Covers |
+|---|---|---|---|
+| `test_rl_distill_maze_prefix_forward.py` | CPU | 12 | edge cases, grouping, sensitivity, gradient checkpointing, 2-rank FSDP |
+| `test_rl_distill_maze_prefix_decode.py` | GPU | 14 | graph == eager, compaction, layouts, HF accuracy, early finish, segment edges, many eos ids, want_logits, temperature, memory |
+| `test_rl_distill_maze_token_cache.py` | CPU | 6 | edge-set equality, batch order, stale / mismatched cache, all-dropped |
+
+All pass. Run them with the repo `.venv` and `TAILRL_ROOT=<patched TailRL checkout>`.
+
+**End-to-end.** Two 40-step ScaleTrain pods on `0a1a1a2f` (`smoke_review_v1`) finished cleanly:
+- 1 GPU packed, PREFIX_DECODE + PREFIX_FORWARD;
+- 4 GPUs RUN_ALL_GPUS, b64: 4 shards + resume pointer on S3; the per-GPU micro-batch passes verl.
+
+The 25×25 token cache was rebuilt in the new format (probe + source size) and re-uploaded.
+
+## 2026-11-12 — 25×25 pretraining of two smaller sizes, 2XS (1.0M) and 3XS (0.55M), LR 1e-4 recipe (running)
+
+**Ask.** Even smaller models than the 2.2M small one. Pretrain them exactly like the most recent pretraining of the other sizes
+(the 11-11 LR 1e-4 re-pretraining, `/tmp/jw_maze/launch_lr1e4_pt.sh`).
+
+**Sizes** (`maze_pt_pipeline.py` `ARCH`, `76a49928`): the same 4-layer shape as XS / S (4 heads, 2 KV heads, FFN = 4 × hidden),
+narrower.
+
+| Size | Hidden | Head dim | Parameters |
+|---|---|---|---|
+| 2XS | 128 | 32 | 0.99M |
+| 3XS | 96 | 24 | 0.56M |
+
+**Recipe** (identical to the LR 1e-4 runs):
+- Data: 25×25 ε = 0.5 SFT data (`data/dfs25_eps05/sft/train.json`, 1.3M mazes); dev eval1000.
+- Batch 128, constant LR 1e-4, sequence cap 1024, generation cap 300, `SCREEN_MAX_SEQS=512`.
+- 5 init seeds (0–4); checkpoints every 25 steps; train + screen only (`NO_TUNE`).
+- Stop once the median of the last 4 screens is ≥ 0.14, else at 40,000 steps.
+- One dedicated 4-GPU pod per size.
+- Launcher `/tmp/jw_maze/launch_lr1e4_pt_small.sh`; supervisors `rl-maze-e25lr-{2xs,3xs}`.
+- Output `s3://scale-ml/genai/rl-distill/maze/pt_dfs25_eps05_lr1e4_v1/{2XS,3XS}`; W&B `tailrl-text-maze-dfs25-eps05`.
+
+**Page:** https://claude.ai/artifact/WPeshx1wZQEt3MujiDNbAe (`report_shortest.py --sizes 3XS,2XS,XS,S,L`). Rebuilt every
+20 min by `/tmp/jw_maze/lr1e4_report_loop.sh`; events from `/tmp/jw_maze/watch_lr1e4.sh`.
+
+**Plan:** exact-tune every run to 1%, 3% and 10% (`exact_tune.py`, tune3), then pick seeds with close pass@k curves.
+
+**Risk:** the 10% level may be out of reach for 3XS. The 2.2M model needed ~20k steps at LR 5e-4 to reach 10–14%.
+
+**Incidents and fixes (11-12):**
+- **No S3 sync.** In `run_maze_pretrain_st.sh` (since `1c2b2072`) the `GPUS` / `SYNC_SECONDS` defaults sat inside a comment, so
+  the S3 sync sidecar died (`SYNC_SECONDS: unbound variable`). The 11-11 LR 1e-4 XS / S / L runs never synced either.
+  Fixed in `9f1b062a` and relaunched at 19:41.
+- **8-GPU pods never scheduled.** They stayed queued > 30 min, so each size runs on a 4-GPU pod (seeds 0 and 4 share GPU 0).
+- **Slow startup.** Each trainer tokenized the 4.9 GB train.json itself (~35 min with 5 per pod).
+  - Now pre-tokenized once: `maze/tokenize_maze_sft.py` writes `s3://.../maze/data/dfs25_eps05/sft/train.tok-L1024/`
+    (uint8 tokens, offsets, PATH_START positions, meta).
+  - `sft_pretrain.py --train_cache` memory-maps it (load < 1 s); the run-file passes it automatically (`263d6de3`).
+  - Check: 2,000 random examples equal `MazeSFTDataset._process_sequence`; 3,002 cached items equal its `__getitem__`.
+  - The running pods predate it.
+- **Speed:** 2XS trains at ~12.5 steps/s per seed, so 40k steps take ~55 min.
+
+**LR 1e-4 stays on the pre-solving plateau.** Val loss vs the LR 5e-4 v1 XS / S runs:
+
+| Run | 2k | 5k | 20k | ~30k |
+|---|---|---|---|---|
+| XS, LR 5e-4 (v1) | 0.504 | 0.124 | 0.085 | – |
+| 2XS, LR 1e-4 | 0.766 | 0.711 | 0.601 | 0.578–0.593 |
+| 3XS, LR 1e-4 | 0.95 | 0.92 | 0.85–0.87 (at ~21k) | – |
+
+XS at 5e-4 drops through the solving transition between 2k and 5k steps; 2XS / 3XS at 1e-4 never do.
+
+**11-12 21:40 UTC: 2XS / 3XS relaunched at LR 5e-4 from scratch** (user: run alongside the 1e-4 runs).
+- Recipe otherwise unchanged: 5 seeds, `SAVE_STEPS=25`, `NO_TUNE`, 40k cap / `STOP_AT=0.14`, dedicated 4-GPU pods, pre-tokenized data.
+- Output `s3://.../maze/pt_dfs25_eps05_v1/{2XS,3XS}`, next to the v1 XS / S / L bases.
+- Launcher `/tmp/jw_maze/launch_lr5e4_pt_small.sh`; supervisors `rl-maze-e25-{2xs,3xs}`; code `3ace50d3`.
+- Shown on the 25×25 bases page (https://claude.ai/artifact/LoL3qUU48oaQj4xNNv7RCK, `--sizes 3XS,2XS,XS,S,L`).
+- Plan: exact-tune to 1% / 3% / 10%, then pick 3 of 5 seeds per size with the closest pass@k curves.
+
+## 2026-11-12 — 25×25 GRPO + TIS RL from the per-seed bases: small and medium × 3 seeds (running)
+
+**Ask.** RL on the three 25×25 seed bases (`tune3`) of small and medium, with the TIS objective from `rl-distill-math` and
+one policy update per step. Grid: {1%, 3%, 10%} × prompts per step {16, 64, 256} (small) / {8, 32, 128} (medium) × seeds
+{0, 1, 2}; run seed i starts from base seed i. Train longer: 10k steps max, stop only after 1,000 steps without a new best.
+
+**Objective.** Per token −Â · min(π_train / π_rollout, 2) · log π_train, with the weight detached (TailRL loss `tis`).
+- π_rollout is the rollout's own log-prob of the sampled token.
+- With one optimizer step per batch, the PPO ratio is exactly 1, so the PPO clip and the old-log-prob recompute both
+  drop out (`skip_old_log_prob`).
+- GRPO group 16, std-normalized. No KL or entropy bonus.
+- Measured train/inference mismatch on the earlier grids: k1 ≈ 3e-6 (17×17) to 2e-5 (25×25), so the cap of 2 essentially
+  never binds.
+
+**Config.**
+- lr 1e-5 constant after a 20-step warmup.
+- Validation every 20 steps (500 dev mazes × 16 samples); patience 50 validations; MAX_STEPS 10000.
+- Reward 1 only for a shortest path. Prompt 654 tokens, response cap 300.
+- Code `85e58f0b`: `GRID=t3s` / `t3m NPODS=7 GPUS=1 FAST_DECODE=1 launch_rl_small_grid.sh`.
+- 14 one-GPU borrowing pods, 2–5 runs each. Stray killer: `/tmp/jw_maze/stray_killer_t3.sh`.
+- Bases: `s3://.../maze/rl_{small,medium}_dfs25_tis3s_v1/bases/<level>_s<seed>`, copied from
+  `pt_dfs25_eps05_v1/<size>_is<seed>_a11090115/tune3-<level>/best`.
+- Runs `st3-*` / `mt3-*`; W&B `tailrl-text-maze-dfs25-eps05`.
+- Page: https://claude.ai/artifact/4reYVz7fi84wQ1tCaj7S16 (`maze/report_tis3.py`, rebuilt every 15 min by
+  `/tmp/jw_maze/tis3_report_loop.sh`).
+
+**Speedups made for this grid** (none change the algorithm):
+- **Shared-prompt decoder** (`rollout.prefix_decode`, TailRL `verl/workers/rollout/prefix_decode.py`, in
+  `tailrl_rl_tis.patch`):
+  - one prompt KV cache per group, read once per group;
+  - finished rows dropped every 32 tokens;
+  - attention only over filled response slots;
+  - CUDA-graph segments with Gumbel-max sampling inside;
+  - one generate call per batch (`ROLLOUT_MICRO_BATCH_SIZE=8000`).
+- **Decoder check** (`maze/bench_prefix_decode.py`, 1 H100): teacher-forced per-token |Δlog p| vs the HF forward is
+  8.5e-4 (small) / 6.4e-4 (medium), vs 7.2e-4 / 4.5e-4 for the old CUDA-graph decoder (fp16 level); |k1| ≤ 2e-5.
+- **Decoder speed** (seconds per rollout, old → new):
+
+  | Batch | Small | Medium |
+  |---|---|---|
+  | 256 rows | 0.42 → 0.27 | 0.44 → 0.32 |
+  | 1,024 rows | 1.46 → 0.40 | 1.63 → 0.45 |
+  | 4,096 rows | 5.81 → 0.66 | 6.50 → 0.74 |
+  | Validation, 8,000 rows | 16.2 → 0.98 | 17.2 → 1.10 |
+
+- **Update micro-batch:** capped at 512 (small) / 256 (medium) samples (`PPO_MICRO_SAMPLES`). Before, every update ran 16
+  micro-batches. 1,024 OOMed with 4 heavy runs on one GPU (two 40-step smoke pods, `smoke_tis3s_v1`).
+- **Validation every 20 steps** instead of 10; **4 reward workers** instead of 2.
+- **Measured step times** (60-step smoke `smoke_tis3s_v2`, 4 heavy runs on one GPU, validation amortized):
+
+  | Run | Before (IcePop 25×25 grid) | Now |
+  |---|---|---|
+  | Small, 256 prompts | 16.9 s | 8.3 s |
+  | Small, 64 prompts | 10.2 s | 4.3 s |
+  | Medium, 128 prompts | – | 5.2 s |
+  | Medium, 32 prompts | – | 2.8 s |
+
+  The update is now the largest cost on big batches (5.0 s small b256). Max reserved memory is 18 GB per run.
+- Expected wall clock: about 1 day (small b256 at 10k steps); worst case about 160 GPU-hours.
+
+**11-12 07:35 UTC: early stopping turned off (user).** The first 4 runs to finish (medium 8 prompts: p1 s2 at step 5,240, p10 s0/s1/s2
+at 4,600–4,760) had plateaued. Their best validations were 1.2–1.7 SD noise spikes above the local trend, and the last-1,500-step
+slopes were within ±0.004 per 1k steps. All 14 pods were stopped and relaunched with `PATIENCE_OVERRIDE=1000`
+(`launch_rl_small_grid.sh`; supervisors `*-20261112-p2`), so every run goes to 10,000 steps. The finished runs resume from their
+last checkpoint; their receipts were renamed to `COMPLETE.early_stop_p50.json`. The page's seed-mean chart is now validation vs
+log essential FLOPs (`rl_flops_curves.py`, geometric mean of the seeds' FLOPs at shared validation steps).
+
+**11-12 15:45 UTC: cap raised to 20,000 steps (user: runs had not fully plateaued).** At that point 37 runs were at 10k:
+all of medium 8 / 32, small 16 / 64, and medium 128 seed 2 at 1%. Most of them set their best after step 8,000.
+
+Seed-mean best at 10k (range across seeds):
+
+| Size, prompts per step | 1% start | 3% start | 10% start |
+|---|---|---|---|
+| Medium, 8 | 0.113 (0.103–0.130) | 0.197 (0.189–0.203) | 0.370 (0.332–0.416) |
+| Small, 16 | 0.146 (0.108–0.169) | 0.209 (0.206–0.212) | 0.389 (0.375–0.410) |
+| Medium, 32 | 0.152 (0.131–0.181) | 0.229 (0.218–0.241) | 0.399 (0.343–0.469) |
+| Small, 64 | 0.194 (0.156–0.229) | 0.247 (0.233–0.260) | 0.417 (0.406–0.431) |
+
+What was done:
+- The 14 `-p2` supervisors were stopped and their 13 live jobs cancelled by ID.
+- The run receipts were renamed to `COMPLETE.max_steps_10k.json`, and the pod marker `maze-rl-t3m-r1-g2.COMPLETE` to `.10k`.
+- Relaunched with `MAX_STEPS=20000 PATIENCE_OVERRIDE=2000 SUP_TAG=-p3` on the same code `85e58f0b`. Every run resumes from its
+  latest S3 checkpoint; the finished runs resume from step 10,000.
+- The learning rate is constant, so the schedule is unaffected.
+
+**11-12 16:30 UTC: next batch rung added (user):** small 1,024 and medium 512 prompts per step, the same 3 levels × 3 seeds
+(run seed i from base seed i), to 20,000 steps.
+- 16,384 / 8,192 samples per step; one run per one-GPU borrowing pod (9 + 9 pods).
+- `GRID=t3sx` / `t3mx` (`launch_rl_small_grid.sh`, `4ccfad14`; pod code `85e58f0b`). Same S3 grids, run names (`st3-*-b1024-*`,
+  `mt3-*-b512-*`) and W&B id suffixes as t3s / t3m, so they appear on the same page.
+- Update micro-batch ≤ 1,024 (small) / 512 (medium), 12 reward workers, `ROLLOUT_MICRO_BATCH_SIZE=16384`, job deadline 168 h.
+- The RL set has 1.3M prompts, so 1,024 × 20k steps is about 16 epochs (the trainer caps at 100).
+
+**11-12 17:30–18:30 UTC: speedups 2 and 3** (code `8159ba26`, launcher `8f80f138`):
+- **Shared-prompt update** (`PREFIX_FORWARD=1` → TailRL `actor.prefix_shared_forward`, `verl/workers/actor/prefix_forward.py`):
+  - each distinct prompt in a micro-batch runs once with its KV cache kept for autograd;
+  - each sample runs only its response tokens, trimmed to the longest real response;
+  - gradient checkpointing is turned off (HF drops `use_cache` under it).
+- **Shared-prompt update check:** log-probs are bit-identical to the standard forward. Gradients differ by 7.7e-3 relative L2
+  (cosine 0.99997). Against fp32 the shared path is 3.5e-2 vs 3.7e-2 for standard fp16, i.e. equal up to fp16 rounding.
+  A wrong grouping shifts log-probs by 1.18, so the check can catch errors.
+- **Data-parallel run over all pod GPUs** (`RUN_ALL_GPUS=1`).
+- **Test pods** (`smoke_tis3s_v4`, seconds per step):
+
+  | Run | Before | After |
+  |---|---|---|
+  | Small 1,024 prompts, 4 GPUs | 19 | 8.1–8.3 |
+  | Medium 512 prompts, 4 GPUs | 10.5 | 4.4–4.9 |
+  | Small 64 prompts, 1-GPU packed | 4.3 | 1.6 |
+  | Small 256 prompts, 1-GPU packed | 8.3 | 4.4 |
+
+- **Memory:** without checkpointing, 4 heavy runs on one GPU OOM (20–25 GB reserved each), so update-heavy runs go one per GPU.
+
+**11-12 18:30–18:40 UTC: the 20k extension was cancelled and then all RL stopped (user).** Final state, reported at a 10k-step
+budget (page bests and curves use validations ≤ 10,000):
+- 41 runs at ≥ 10k got receipts `COMPLETE.json` (reason `max_steps`), with the best over validations ≤ 10k.
+- Unfinished: small 256 prompts (9 runs, 5.8k–6.8k steps) and 4 medium 128-prompt runs (~9.5k).
+- The 1,024 / 512 rung never trained on 4 GPUs. Its partial 1-GPU runs (~400 steps) are under
+  `runs_aborted_1gpu/` in both grids.
+- Every supervisor is stopped and every job cancelled by ID. The stray killer (`stray-t3`) still runs to catch re-queued jobs.
+
+## 2026-11-11 — 25×25 seed bases: pass@k alignment across 3 sizes × seeds; re-pretrain at LR 1e-4 with 5 seeds (running)
+
+**Ask.** Standardize on 25×25. Three separately pretrained seeds per model size whose shortest-path pass@k curves are very
+close, at 1%, 3% and 10% (25% was also asked for; see the ceiling below).
+
+**Bases from the existing runs (LR 5e-4, 3 seeds).** All 27 tuned at temperature 1 with `exact_tune.py`:
+- Averaging: 5 checkpoints 100 steps apart (`--ckpt-stride 100 --half-window 200 --center-step 100`), interpolation to
+  exact pass@1 within 0.3%.
+- Output: `<run>/tune3-<level>` on S3 (`s3://.../maze/pt_dfs25_eps05_v1`); the old `tune-*` bases used by RL are untouched.
+- Shown on the 25×25 page (`report_shortest.py --tune-name tune3 --levels p1,p3,p10`, linear pass@k axis).
+
+Spread (max − min over the 9 bases):
+
+| Level | pass@16 | pass@64 | pass@256 | pass@1024 | pass@1024 without medium |
+|---|---|---|---|---|---|
+| 1% | 0.009 | 0.033 | 0.070 | 0.093 | 0.086 |
+| 3% | 0.024 | 0.065 | 0.109 | 0.128 | 0.064 |
+| 10% | 0.029 | 0.046 | 0.041 | 0.026 | 0.010 |
+
+- Medium is the main outlier at 3%: seed 2 is high (0.727 at pass@1024), seeds 0 and 1 are low (0.60 and 0.63).
+- At 1%, every size has a 0.04–0.07 seed range.
+- Moving each base along training to fit the whole curve (`/tmp/jw_kube/tune25/align_check.py`) barely helps:
+  0.128 → 0.102 at 3%.
+
+**25% is out of reach with this data.** Demonstrations are 23.4% shortest, so an imitation model at temperature 1 tops
+out around 23%. Runs end at 10–14% at step 20k: val loss 0.084–0.095 vs the 0.071 floor. A 25% level needs lower-ε data.
+
+**Re-pretraining at LR 1e-4** (user decision; dedicated pods, borrowing false):
+- 5 init seeds (0–4) × XS / S / L, 4 GPUs per size.
+- `MAX_STEPS=40000`; stop once the median of the last 4 screens is ≥ 0.14.
+- Checkpoints every 25 steps; every 100th mirrored. Train + screen only (`NO_TUNE`).
+- Code `1c2b2072`; launcher `/tmp/jw_maze/launch_lr1e4_pt.sh`; supervisors `rl-maze-e25lr-{xs,s,l}`.
+- Output: `s3://scale-ml/genai/rl-distill/maze/pt_dfs25_eps05_lr1e4_v1/{XS,S,L}`. W&B `tailrl-text-maze-dfs25-eps05`.
+
+Plan: when trained, `exact_tune.py` every run at 1%, 3% and 10%, then pick 3 of 5 seeds per size with the closest
+curves to a shared reference.
+
+## 2026-11-09 — Maze REINFORCE variant of the IcePop grids (no groups, batch-normalized advantage)
+
+**Ask.** Run a REINFORCE version of every IcePop run with everything else the same. There are no groups: each prompt
+gets one output, and advantages are normalized across the whole batch update. Decisions: keep **samples per step**
+equal to the GRPO grid, and run **all three grids**.
+
+**Objective** (`tailrl_rl_tis.patch` → TailRL adv estimator `reinforce_batch`; `rl_tis_run.sh RL_ADV=reinforce_batch`):
+- rollout.n = 1, and A_i = (r_i − mean_batch r) / (std_batch r + 1e-6), using the unbiased std as GRPO does.
+- TailRL's existing `reinforce` uses a per-group mean baseline, which is all zeros at n = 1.
+- The PPO micro-batch is prompts / 16 samples, so memory per micro-batch matches GRPO.
+- IcePop [0.5, 5], LR 1e-5, patience 50, the 5k cap and 500 × 16 validation are unchanged.
+- The GRPO runs use std-normalized group advantages: `norm_adv_by_std_in_grpo` defaults to True.
+
+**Smoke test.** 17×17 small p1, 256 prompts × 1, 4 steps: `adv_estimator=reinforce_batch`, G = 1, micro-batch 16,
+`advantage/fraction_zero` 0.
+
+**Grids** (code `dd06b584`; 1-GPU packs, dedicated + borrowing raced):
+
+| GRID | Model / maze | Runs | Prompts (= samples) per step | Pods | S3 / W&B suffix |
+|---|---|---|---|---|---|
+| `eri` | small 17×17 | 60 | 64 256 1024 4096 | 8 | `rl_small_dfs_eps05_ice_reinf_v1` / `eri` (`sri-*`) |
+| `mdr` | medium 17×17 | 20 | 32 128 512 2048 | 5 | `rl_medium_dfs_eps05_ice_reinf_v1` / `mdr` (`smr-*`) |
+| `e25r` | small 25×25 | 60 | 64 256 1024 4096 | 12 | `rl_small_dfs25_eps05_ice_reinf_v1` / `e25r` (`sri25-*`) |
+
+Bases are the same as the IcePop grids.
+
+**Status / changes (19:15 UTC).**
+- *Borrowing.* Per user, all REINFORCE (and all future RL) jobs run with borrowing on, as a single copy. Dedicated duplicates
+  were stopped and their jobs cancelled.
+- *Pod OOM.* Pods packing about 8 runs, with verl's default 8 data-loader workers each, OOM-killed a data-loader worker at
+  around step 1500. This hit 4 runs on 3 pods: `sri-p01-b64-s1`, `sri-p10-b64-s0`, `sri-p1-b256-s2` and `smr-p1-b32-s0`.
+  The run's retries then fail immediately.
+- *Fix* (`59ccd151`): `rl_tis_run.sh` sets `+data.dataloader_num_workers=${DATALOADER_WORKERS:-2}`. A local smoke test
+  passed. All 25 REINFORCE pods were moved onto it as borrowing copies tagged `gKn`. Cancelling a job sends SIGTERM, which
+  pushes final checkpoints, so each run loses at most about 10 steps.
+- *Correction (20:40 UTC): the "OOM" failures were a run-directory bug, not memory.*
+  - `run_maze_rl_pack_st.sh` hardcoded the GRPO experiment name (`..._grpo_binary_..._G16_...`) in `run_dir`.
+  - REINFORCE writes `..._reinforce_batch_binary_..._G1_...`. So finished runs' `COMPLETE.json` was never found, and the
+    data-loader kill at shutdown was logged as `RUN_FAILED`. Retries then early-stopped again at once.
+  - Worse, every pod restart downloaded the checkpoint into the unused directory, so the trainer silently trained from
+    scratch (`Training from scratch`, despite `RESUME ... from step 1130`) and overwrote the S3 state and W&B history.
+  - With the fixed runner, pod memory was flat at about 46 GiB (small) and about 27 GiB (medium) of process memory,
+    far below the 192 GiB limit. The `DATALOADER_WORKERS=2` change is harmless but wasn't the fix.
+  - Fix in `82a9ab55`. REINFORCE was restarted cleanly into new prefixes `*_ice_reinf_v2` with W&B suffixes
+    `eri2` / `mdr2` / `e25r2`. It runs under an 8-GPU cap (`reinf_gpu_cap.sh`: small 17×17, then medium, then 25×25).
+  - The `*_reinf_v1` data is corrupted by these restarts. Use only its pre-restart histories, as the early read below does.
+- *Early read* (matched steps, before any run finished): REINFORCE leads GRPO at the same samples per step in 44/49 pairs,
+  by up to about 1.4×. It has lower validation jitter in 36/45 pairs (0.72 vs 0.91 × eval noise), and the difference is
+  largest at small batch. Compute is not matched.
+
+**Small 17×17 REINFORCE v2: DONE 11-10 08:50 UTC** (60/60). Each cell is the mean best of 3 seeds (min–max) [runs that hit
+the 5k cap] · ratio to the GRPO cell with the same samples per step (GRPO prompts × 16):
+
+| Start | 64 samples | 256 | 1024 | 4096 |
+|---|---|---|---|---|
+| 0.1% | 0.024 (0.021–0.026) · 1.10× | 0.028 (0.025–0.030) · 1.08× | 0.032 (0.027–0.036) · 1.00× | 0.046 (0.045–0.047) · 1.17× |
+| 0.3% | 0.042 (0.040–0.045) · 1.25× | 0.047 (0.045–0.049) · 1.12× | 0.053 (0.050–0.057) · 1.05× | 0.064 (0.058–0.074) [1] · 1.06× |
+| 1% | 0.074 (0.071–0.077) · 1.20× | 0.081 (0.074–0.087) · 1.07× | 0.096 (0.081–0.107) · 1.13× | 0.113 (0.107–0.121) · 0.97× |
+| 3% | 0.153 (0.143–0.168) · 1.09× | 0.204 (0.195–0.210) [1] · 1.21× | 0.261 (0.250–0.269) [2] · 1.09× | 0.299 (0.290–0.306) [1] · 1.07× |
+| 10% | 0.251 (0.241–0.258) · 1.01× | 0.357 (0.348–0.364) [3] · 1.11× | 0.427 (0.425–0.432) [3] · 1.11× | 0.468 (0.467–0.470) [2] · 1.01× |
+
+**Medium 17×17 REINFORCE v2: DONE 11-10 11:55 UTC** (20/20, 1 seed). Each cell is REINFORCE best vs medium GRPO best at
+the same samples per step (GRPO prompts × 16) · ratio; † = hit the 5k cap:
+
+| Start | 32 samples | 128 | 512 | 2048 |
+|---|---|---|---|---|
+| 0.1% | 0.022 vs 0.008 · 2.58× | 0.035 vs 0.024 · 1.47× | 0.035 vs 0.030 · 1.18× | 0.040 vs 0.036 · 1.10× |
+| 0.3% | 0.038 vs 0.039 · 0.98× | 0.066 vs 0.052 · 1.28× | 0.061 vs 0.075 · 0.82× | 0.090 vs 0.078 · 1.16× |
+| 1% | 0.072 vs 0.062 · 1.17× | 0.111 vs 0.089 · 1.25× | 0.147 vs 0.134 · 1.10× | 0.170† vs 0.138 · 1.23× |
+| 3% | 0.107 vs 0.108 · 0.99× | 0.178 vs 0.127 · 1.40× | 0.230† vs 0.197 · 1.17× | 0.307† vs 0.247 · 1.24× |
+| 10% | 0.267 vs 0.209 · 1.28× | 0.347 vs 0.308 · 1.13× | 0.394 vs 0.364 · 1.08× | 0.437 vs 0.430 · 1.02× |
+
+REINFORCE is ahead by > 3% in 16/20 cells (median 1.17×), within ±3% in 3, and behind in 1 (0.3% × 512: 0.82×). The
+medium gap is larger than small's (median 1.17× vs 1.09×); with one seed per cell, single cells are noisy. The biggest
+win is at 0.1% × 32 samples, where GRPO has only 2 prompts per step and almost every group is all-wrong.
+
+**Small 25×25 REINFORCE v2: STOPPED by the user 11-11 22:10 UTC at 54/60.**
+- Stopped: the last 4 pods (g8–g11), their supervisors and jobs (cancelled by ID), the GPU-cap scheduler, the stray killer,
+  the pointer-repair loop and the maze RL janitors.
+- Of the 54 finished runs, 52 beat the GRPO 3-seed mean at the same samples per step, and 53 are within 3% of it or above. The gap was widest at low
+  starts and small batches (≈5× at 0.3% × 64, 1.4–1.7× at 0.1%), and ~±3% at the 10% start.
+- Results are on the 25×25 page; the 6 unfinished runs keep their partial histories on S3.
+
+**GRPO vs REINFORCE at matched samples per step (small 17×17, all 20 cells, 3 seeds each;** `/tmp/jw_kube/cmp/compare17.py`):
+- *Best.* REINFORCE is higher in 18/20 cells, by 9.5% on average; the gap is largest at small batch and mid starts (up to
+  1.25×). The other two cells are an exact tie (0.1% × 1024: 0.032 both) and a GRPO lead (1% × 4096: 0.97×), both within seed spread.
+- *Stability* (in units of the eval standard error, 500 × 16): second-half wiggle 0.72 vs 0.89 (lower in 15/20),
+  post-peak drop 1.7 vs 2.2 (15/20), worst single dip below the running best 5.5 vs 6.8 (14/20). The advantage is
+  concentrated at 64 samples per step (e.g. 10% start: worst dip 8.3 vs 20.5); by 1024+ both are smooth.
+- *Seed spread* of the best: 0.0049 vs 0.0056.
+- *Compute.* In essential FLOPs REINFORCE costs a median 7× more per step and 8× more to its best checkpoint: GRPO skips
+  training on all-same-reward groups (most groups at low starts) and prefills each prompt once per 16 samples. The gap is
+  ~10–15× at 0.1–0.3% starts and ~3× at 10%. Per FLOP GRPO is ahead at low starts; at 3% and 10% the curves nearly
+  coincide (best-vs-FLOPs scatter on the 17×17 page).
+
+## 2026-11-09 — Maze RL redone with IcePop (train/inference token masking [0.5, 5.0]); medium 17×17 sweep added
+
+**Ask.** Stop all maze RL and redo it with IcePop instead of TIS (the objective used in `rl-distill-math`). Everything else
+stays the same. Rerun the 3-seed small grids (17×17 and 25×25) and the 1-seed medium 17×17 sweep at half the batch sizes.
+
+**Objective** (`maze/tailrl_rl_tis.patch` → TailRL `core_algos.py`, policy loss `icepop`; `maze/rl_tis_run.sh RL_LOSS=icepop`):
+- Per token, w = π_train / π_rollout (detached). w is kept when 0.5 ≤ w ≤ 5.0 and set to 0 otherwise.
+- The loss is −A · w · log π_train.
+- Logged as `actor/pg_clipfrac` (w > 5), `actor/pg_clipfrac_lower` (w < 0.5) and `actor/ppo_kl` (mean −log w).
+- TIS used min(w, 2).
+- A local 3-step smoke on the 17×17 p1 small base ran clean (`loss_mode: icepop`, low 0.5, high 5.0).
+
+**Unchanged.** Reward 1 only for a shortest path, GRPO group 16, LR 1e-5, patience 50, MAX_STEPS 5000, FAST_DECODE,
+validation every 10 steps on 500 mazes × 16 samples.
+
+**Grids** (`maze/launch_rl_small_grid.sh`, code `714db834`; 1-GPU pack pods, dedicated + borrowing copies raced):
+
+| GRID | Model / maze | Runs | Prompts per step | Pods | S3 / W&B suffix |
+|---|---|---|---|---|---|
+| `epi` | small 17×17 | 5 levels × 4 × 3 seeds = 60 | 4 16 64 256 | 8 | `rl_small_dfs_eps05_ice_v1` / `epi` (runs `spi-*`) |
+| `mdi` | medium (3.9M) 17×17 | 5 × 4 × 1 seed = 20 | 2 8 32 128 | 5 | `rl_medium_dfs_eps05_ice_v1` / `mdi` (runs `smi-*`) |
+| `e25i` | small 25×25 | 60 | 4 16 64 256 | 12 | `rl_small_dfs25_eps05_ice_v1` / `e25i` (runs `spi25-*`) |
+
+**Bases.**
+- The small grids use the same bases as the TIS grids (`bases.json` copied).
+- Medium uses `S_is0` `align-<level>/best`, whose pass@k curve was aligned to the small base:
+
+  | Level | max\|Δpass@k\| (k ≤ 1024) |
+  |---|---|
+  | p01 | 0.007 |
+  | p03 | 0.004 |
+  | p1 | 0.007 |
+  | p3 | 0.008 |
+  | p10 | 0.020 |
+
+**Medium 17×17 IcePop sweep: DONE 12:37 UTC** (20/20). Best validation is_shortest (500 mazes × 16 samples) by start level
+and prompts per step. Each cell is step-0 → best (best step). † marks the two runs that hit the 5k-step cap; the rest
+stopped early (patience 50).
+
+| Start | 2 | 8 | 32 | 128 |
+|---|---|---|---|---|
+| 0.1% | 0.0013 → 0.0084 (560) | 0.0010 → 0.0235 (1360) | 0.0018 → 0.0297 (1510) | 0.0020 → 0.0365 (1810) |
+| 0.3% | 0.0031 → 0.0393 (2830) | 0.0045 → 0.0517 (2090) | 0.0040 → 0.0746 (4100) | 0.0029 → 0.0779 (1580) |
+| 1% | 0.0077 → 0.0619 (1590) | 0.0086 → 0.0890 (1910) | 0.0081 → 0.1339 (3310) | 0.0079 → 0.1379 (1740) |
+| 3% | 0.0319 → 0.1079 (1860) | 0.0307 → 0.1273 (1710) | 0.0320 → 0.1969 (4930)† | 0.0319 → 0.2475 (4600)† |
+| 10% | 0.1017 → 0.2091 (450) | 0.1020 → 0.3078 (2160) | 0.1021 → 0.3640 (2280) | 0.1016 → 0.4304 (3820) |
+
+At every level, more prompts per step gives a higher best.
+
+**Small 17×17 IcePop GRPO grid: DONE 19:25 UTC** (60/60). Each cell is the mean of 3 seeds (min–max) [runs that hit the
+5k-step cap]:
+
+| Start | 4 prompts | 16 | 64 | 256 |
+|---|---|---|---|---|
+| 0.1% | 0.021 (0.020–0.022) | 0.026 (0.026–0.027) | 0.032 (0.029–0.035) | 0.039 (0.033–0.044) |
+| 0.3% | 0.034 (0.032–0.037) | 0.042 (0.040–0.044) | 0.050 (0.047–0.054) | 0.061 (0.056–0.069) |
+| 1% | 0.062 (0.051–0.069) | 0.076 (0.072–0.080) | 0.085 (0.081–0.090) | 0.117 (0.112–0.123) [1] |
+| 3% | 0.141 (0.125–0.153) | 0.168 (0.151–0.189) | 0.240 (0.233–0.247) [2] | 0.278 (0.267–0.287) [1] |
+| 10% | 0.249 (0.236–0.257) | 0.322 (0.321–0.323) [2] | 0.385 (0.362–0.402) [1] | 0.462 (0.457–0.465) [3] |
+
+At every start level, more prompts per step gives a higher best. The cap binds mostly at the 3% and 10% starts with
+large batches.
+
+**Small 25×25 IcePop GRPO grid: DONE 11-10 10:25 UTC** (60/60). Same format as above.
+
+| Start | 4 prompts | 16 | 64 | 256 |
+|---|---|---|---|---|
+| 0.1% | 0.003 (0.002–0.003) | 0.024 (0.020–0.032) [1] | 0.045 (0.043–0.050) [1] | 0.065 (0.062–0.069) |
+| 0.3% | 0.011 (0.008–0.012) | 0.059 (0.057–0.062) | 0.081 (0.074–0.091) [1] | 0.106 (0.099–0.116) [1] |
+| 1% | 0.040 (0.030–0.051) | 0.078 (0.064–0.089) [1] | 0.106 (0.099–0.115) [1] | 0.162 (0.162–0.162) [3] |
+| 3% | 0.113 (0.101–0.123) | 0.149 (0.132–0.164) | 0.217 (0.216–0.218) [2] | 0.261 (0.250–0.266) [1] |
+| 10% | 0.342 (0.336–0.346) | 0.373 (0.366–0.379) | 0.395 (0.390–0.403) | 0.409 (0.400–0.416) |
+
+As at 17×17, more prompts per step gives a higher best at every start. At the lowest starts, 4 prompts per step barely
+moves (0.1%: 0.003). At 10%, the batch-size effect is much flatter than at 17×17 (0.34 → 0.41 vs 0.25 → 0.46).
+
+**Caveat on medium vs small: the bases are confounded by temperature.**
+- `align_passk.py` matched each medium base's pass@k to small's by solving a logit scale β per level, with no constraint.
+- The resulting temperatures (1/β) were 1.02, 1.17, 1.15, 0.96 and 1.02 for p01, p03, p1, p3 and p10. Small's bases are at
+  temperature 1.
+- Medium beats small exactly where its base was flattened (p03, p1), and loses at p3, where its base has 20% lower
+  rollout entropy.
+- Temperature-1 medium bases (`tune-<lvl>/best`, seed 0) match small's pass@k about as well: within 0.02, versus 0.008
+  for the aligned bases.
+- Proposed: rerun medium at p03 and p1 from temperature-1 bases, and check rollout entropy first.
+
+**Infra incident: S3 checkpoint pointer race.**
+- *Cause.* `push_state` (`run_maze_rl_pack_st.sh`) synced the step it read and then copied the trainer's
+  `latest_checkpointed_iteration.txt`. By then that file could name a newer, never-uploaded checkpoint.
+- *What happened.* A preemption inside that window made every resume crash with `FileNotFoundError`. The failed run's
+  push then aborted the whole pack pod with exit 1 and no message. Pod `epi` g1 died twice this way, and 7 runs stalled
+  for about 1.5 h.
+- *Fix for future launches* (`31ab0407`). Push the verified step instead of copying the file.
+  `maze/repair_latest_ckpt_pointer.py` repoints a stale pointer (> 3 min untouched) at the newest complete checkpoint.
+- *Running pods.* They are pinned to `714db834`. A devbox loop runs the repair on the three IcePop prefixes every
+  2 min. It repaired 4 runs on 11-09 and resumed g1 cleanly after its 12:29 preemption.
+
+**Infra incident 2: duplicate pods after preemption (≈15:00 UTC).**
+- *Cause.* ScaleTrain re-queued two preempted jobs under their original IDs after the supervisor had already submitted
+  replacements: `epi` g6 `job_dbomrtqo384g07hnuu7g` and `epi` g1 `job_dboregao384g07hnuug0`. Both came back Running
+  alongside the dedicated copies `g6e` and `g1e`.
+- *Impact.* The g6 stray trained `spi-p1-b256-s0` (steps 2700→2831) and `spi-p10-b256-s2` (2130→2235) in parallel with
+  `g6e`. Forked trajectories were pushed to the same S3 prefix and W&B run for about 100 steps. `g6e` continues those runs.
+  `spi-p10-b64-s1` was already complete (14:44) and is untouched. The g1 stray was cancelled 38 s after start.
+- *Fix.* I cancelled both jobs by ID. `stray_killer_ice.sh` now runs every 3 min and cancels any IcePop pod whose supervisor
+  is STOPped or whose job isn't the supervisor's newest. A fallback loop gives any pod queued > 60 min a raced dedicated copy.
+
+**Status: DONE.** Launched 11-09 06:52 UTC; medium finished 11-09 12:37, small 17×17 11-09 19:25, small 25×25 11-10 10:25
+(140/140 runs). The TIS grids `rl_small_dfs_eps05_v1` / `rl_small_dfs25_eps05_v1` were
+stopped part-way and are kept on the pages as superseded.
+
+## 2026-11-09 — pass@k-aligned bases (k = 1..1024) across sizes; RL on both small grids capped at 5k steps
+
+**Ask.** Small / medium / large bases should match on the whole shortest-path pass@k curve, not only on pass@1. RL keeps
+early stopping and is also capped at 5k steps. Launch the same small-model RL sweep on the 25×25 study.
+
+**Method** (`maze/align_passk.py`, `d0f303b1`, `5075dddd`):
+- Reference: the small (XS) base at each level. It stays unchanged, so the running 17×17 RL stays valid.
+- Medium and large get two knobs:
+  - the training point: SWA centers plus weight interpolation;
+  - a logit scale β on the final RMSNorm weight (= sampling at temperature 1/β; tied embeddings untouched).
+- One forward pass caches the logits along every shortest path. For any β, solve pass@1 = target exactly and score
+  max_k |pass@k − ref|.
+- Search: scan centers (crossing −500 … +250, step 50; wider windows where needed), then golden-section on the
+  interpolation weight.
+- Before alignment the gaps reached 0.07–0.10 at pass@1024.
+
+**Max |pass@k − small| over k = 1..1024 (pass@1 within 1.5% of target everywhere):**
+
+| | 0.1% | 0.3% | 1% | 3% | 10% |
+|---|---|---|---|---|---|
+| 17×17 S | 0.007 | 0.004 | 0.007 | 0.008 | 0.020 |
+| 17×17 L | 0.006 | 0.004 | 0.011 | 0.007 | 0.028 |
+| 25×25 S | 0.002 | 0.004 | 0.004 | 0.005 | 0.021 |
+| 25×25 L | 0.003 | 0.004 | 0.049 (rerunning with an earlier window) | 0.017 | 0.004 |
+
+At 10%, the medium and large curves cross the small one instead of lying on it. The one-knob family bottoms out at
+~0.02–0.03.
+
+**RL.**
+- `MAX_STEPS` defaults to 5000 (`4273c00f`).
+- 17×17 eps1 restart:
+  - 4-GPU pods could not be placed for ~40 min.
+  - The 1-GPU fallbacks packed 14–17 runs per GPU and OOMed.
+  - 5 runs had S3 `latest` pointing at a checkpoint whose upload had failed. Fix in `4cb5d9f1`: push "latest" only after
+    the checkpoint is fully on S3. The markers were repaired (−10–40 steps each).
+  - Relaunched at 06:01 as 8 one-GPU pods of 7–9 runs (dedicated + borrowing copies raced). They resume from S3.
+- 25×25 small-model RL (`GRID=e25`, `4cb5d9f1`):
+  - Prompt cap 660, response cap 300 (TailRL `train.sh` prompt cap made configurable in `tailrl_rl_tis.patch`).
+  - The RL train parquet was rewritten in 20k-row groups. The 3 GB single-group nested column could not be read back
+    by pyarrow / HF datasets.
+  - Local smoke on 654-token prompts: OK.
+  - Launched at 06:07 on bases `p01.s0 p03.s0 p1.s0 p3.s0 p10.s0` (worst 1.04% off) as 12 one-GPU pods of 3–6 runs.
+  - Runs `spe25-*`, S3 `.../maze/rl_small_dfs25_eps05_v1`, W&B `tailrl-text-maze-dfs25-eps05`.
+
+---
+
+## 2026-11-09 — Exact (sampling-free) base tuning; 17×17 bases done; small-model RL launched (04:39 UTC)
+
+**Why.** Sampled level tuning took ~2.3 h per level:
+- 28 SWA candidates at k=64.
+- At least two 2048-sample screens on 1000 mazes.
+- 3 seeds × 5 levels per size, on shared GPUs.
+- The user asked for this to be made fast "at all costs".
+
+**Method** (`maze/exact_pass.py`, `maze/exact_tune.py`, `375b443a`):
+- Shortest-path pass@1 = Σ over a maze's shortest paths of the model's teacher-forced path probability. There are
+  ~3.5 paths per maze at 17×17 and ~14 at 25×25.
+- It is bracketed by P(DONE) after the path; the gap is < 0.02% relative.
+- pass@k = mean over mazes of 1 − (1 − p_m)^k, exactly.
+
+| | Cost | 17×17 XS s0 1% base |
+|---|---|---|
+| Exact | 9 s per checkpoint | 1.0023% |
+| Sampled, 2048 per maze | ~30 min per screen | 1.0007% / 1.0125% (two runs) |
+
+Per-maze correlation between exact and sampled is 0.999.
+
+`exact_tune.py`:
+- Walks 25-step SWA centers to a bracketing pair, then interpolates with a secant method inside an alpha bracket, to
+  within 0.25%.
+- One level takes ~1–6 min on one devbox GPU.
+- vLLM is slower than HF generate for these tiny models (113 s vs 38 s for 64k samples), so faster sampling is not the
+  lever.
+
+**Policy change:** one base per level (RL uses the closest seed per level). Each size is marked COMPLETE as soon as every
+level has a confirmed base (`/tmp/jw_maze/finalize_sizes.sh`).
+
+**17×17 bases (closest seed per level, % vs target):**
+
+| size | 0.1% | 0.3% | 1% | 3% | 10% |
+|---|---|---|---|---|---|
+| XS (sampled) | s1 +0.83 | s0 −0.65 | s0 +1.25 | s2 −0.24 | s0 −0.33 |
+| S | s2 −0.49 | s1 −0.37 | s2 +0.50 | s0 +0.55 | s0 +0.23 (exact) |
+| L (exact) | s0 −0.14 | s0 +0.20 | s0 +0.21 | s0 +0.24 | s0 +0.06 |
+
+**RL (GRID=eps1)** on the XS bases `p01.s1 p03.s0 p1.s0 p3.s2 p10.s0`:
+- Auto-launched at 04:39 on 4 four-GPU pods. Dedicated copies won all 4 races; the borrowing copies were cancelled.
+- Runs `spe-*`, S3 `s3://.../maze/rl_small_dfs_eps05_v1`, W&B `tailrl-text-maze-dfs-eps05`.
+
+**25×25:** exact tuning on one run per size (XS s0, S s0, L s1) on devbox GPUs 2 and 5.
+- S's run was never CKPTS_SYNCED (its pod was cancelled first), so S interpolates between raw every-100th checkpoints.
+- The first secant version re-tried the same alpha when an interpolated model beat both endpoints (S p01 stuck at
+  +19%). Fixed to keep an alpha bracket; S is being re-tuned.
+
+---
+
+## 2026-11-09 — Text-maze at 25×25: depth-first 0–20% knockout + ε = 0.5 noisy demonstrations, small / medium / large bases (ScaleTrain, running)
+
+**Goal.** The 17×17 ε = 0.5 study (below) at 25×25. Shortest paths are ~1.7× longer: mean 66, p95 140. Sequences are
+2–3× longer. Same three model sizes, same 5 shortest-path pass@1 levels × 3 seeds.
+
+**Data** (`build_dfs_eps_data.py --size 25 --seed-base 60000000`, `829e9643`).
+- Mazes: 1.3M, 25×25 depth-first with 0–20% knockout, one ε = 0.5 demonstration each.
+- Demonstrations: 23.4% are shortest paths. Longest sequence 908 tokens; prompt 654 tokens.
+- Judge check: 20k sampled items, 0 mismatches.
+- Loss floor (the demonstrator's own NLL): 0.0711 train, 0.0714 val.
+- Location: `s3://scale-ml/genai/rl-distill/maze/data/dfs25_eps05/`. The eval sets were written separately from the same
+  seeds so pretraining could start before the RL parquet finished.
+- ε for 25×25 (simulation, 400 mazes × 4): demonstrations are > 10% shortest for any ε ≤ 0.9.
+  - 0.3 → 38.6%
+  - 0.5 → 24.2%
+  - 0.7 → 16.4%
+  - 0.9 → 11.6%
+
+**Config.** The 17×17 pipeline, with these changes:
+- Trainer sequence cap and `max_position_embeddings` 1024 (`MAX_LENGTH`).
+- Generation cap 300 tokens (`MAZE_MAX_NEW_TOKENS`).
+- `SCREEN_MAX_SEQS=512`: large peaks at 7.5 GiB per generate process at 512, 15 GiB at 1024.
+- `MAX_STEPS=20000`, in case 10k steps (1 epoch) does not reach the 10% level.
+- 4 GPUs per size.
+- Local smoke: the large trainer at 1024 runs at ~7 steps/s.
+
+**Faster level tuning, 03:00 UTC (`a848dd63`).** A level took ~2.3 h:
+- 28 averaged candidates at k=64 plus 4 at 256: ~45 min.
+- Search at 256: ~10 min.
+- 2048 correction: ~30 min.
+- 2048 fresh-seed confirm: ~30 min.
+
+Changes:
+- `--fine-mode confirm` (`TUNE_FINE_MODE`): the 2048 correction stage is skipped. The closest search point is confirmed
+  directly with a fresh seed. Only on a miss (> max(1%, 1 SE)) is a Newton step taken, then a next-seed confirm; the last
+  confirm is reported. This saves one 2048 run per level when the search lands close.
+- `CENTER_STEP=25` (default 10): fewer averaged candidates.
+- 4 GPUs per pod.
+
+Rollout:
+- 17×17 pods restarted at 03:00 on it (all 9 runs already CKPTS_SYNCED, 11 bases confirmed and kept):
+  `TUNE_FINE_MODE=confirm`, center step kept at 10 so the in-progress selections stay valid.
+- L's 4-GPU dedicated job queued, so a borrowing copy is raced (`/tmp/jw_maze/race_eps_l.sh`).
+- 25×25 (below) switches per size via `/tmp/jw_maze/restart_e25_when_synced.sh` as soon as all 3 runs of the size are
+  CKPTS_SYNCED (restarting earlier would retrain). Settings: `CENTER_STEP=25`, confirm mode.
+
+**Launch (01:14 UTC).**
+- Dedicated pods started at once; the borrowing copies were cancelled by ID.
+- Jobs: XS `job_dbohso2o384g088nds1g`, S `job_dbohso2o384g088nds10`, L `job_dbohso38qm1g08as6ma0`. Supervisors `rl-maze-e25-{xs,s,l}`.
+- Outputs: `s3://.../maze/pt_dfs25_eps05_v1/{XS,S,L}`.
+- W&B: `tailrl-text-maze-dfs25-eps05`.
+- Page: https://claude.ai/artifact/LoL3qUU48oaQj4xNNv7RCK.
+
+---
+
+## 2026-11-08 — Text-maze, depth-first mazes + ε = 0.5 noisy demonstrations: re-pretrain small / medium / large, bases at 5 levels (ScaleTrain, running)
+
+**Goal.** A harder maze task with a simple paper story. Mazes are 17×17 depth-first (recursive backtracker) with a uniform
+0–20% wall knockout, which gives long winding corridors plus loops and tied shortest paths. Pretraining shows
+noisy demonstrations, not only optimal paths. The RL reward is binary: 1 only for a shortest path. Bases are matched
+at shortest-path pass@1 ∈ {0.1, 0.3, 1, 3, 10}% for 3 init seeds per size, with matching pass@k curves.
+
+**Data** (`maze/build_dfs_eps_data.py`, `6198b10c`). All splits come from one distribution and use disjoint seed
+ranges (base 50,000,000).
+- Pretraining items: one demonstration per maze from an ε-noisy shortest-path solver, ε = 0.5. At each step the solver
+  takes a random move with probability ε, otherwise a shortest-path move. Both choices are restricted to moves that
+  don't revisit a cell and keep the goal reachable.
+- Demonstrations, 1.3M mazes: 42.5% are shortest paths; mean +7.4 extra steps; p90 +22, p99 +46.
+- Mean shortest path 39.7 steps; longest demonstration 120 moves (432 tokens, under the 512 cap).
+- Shortest-path share by knockout: 74% at 0–5%, 44% at 5–10%, 30% at 10–15%, 22% at 15–20%.
+- Judge check: 50k sampled items plus the full 5k pilot all agree with TailRL's judge (goal reached, `is_shortest`
+  iff L = L*).
+- Splits:
+  - `sft/train.json`: 1.3M items.
+  - `sft/test.json`: 256 mazes, for validation loss.
+  - `eval1000`: dev mazes for screening, tuning and confirmation.
+  - `eval500`: the first 500 dev mazes, for RL validation.
+  - `test1000`: held-out final test.
+  - `main_parquet/train.parquet`: RL prompts on the pretraining mazes.
+- Location: `s3://scale-ml/genai/rl-distill/maze/data/dfs_eps05/`.
+
+**Config.** The same pipeline as the shortest-path-only study below: batch 128, LR 5e-4 constant, init seeds 0/1/2, stop
+rule median of last 4 screens ≥ 20% is_shortest, max 10k steps, level tasks → fresh-seed confirmation at 1000 × 2048. Changes:
+- The run-file takes `DATA_S3` / `TRAIN_JSON` / `EVAL_S3`.
+- Screening and tuning read `$MAZE_EVAL_PARQUET` (the new dev mazes), set by `EVAL_S3`.
+- The supervisor forwards `EXTRA_ENVS`.
+
+Smoke check: screening an old Prim-trained 10% base with the new dev mazes gives 2.7% shortest. The override works, and
+the old base is much weaker on depth-first mazes.
+
+**Launch (23:33 UTC).**
+- Supervisors `rl-maze-eps-{xs,s,l}`, dedicated (borrowing false), 2 GPUs each. The borrowing copies (`-b`) started at
+  the same time and were cancelled by ID once the dedicated pods were Running.
+- Jobs: XS `job_dbogdnb8qm1g07mnqoa0`, S `job_dbogdnao384g07hnut3g`, L `job_dbogdnb8qm1g07mnqoag`.
+- Outputs: `s3://scale-ml/genai/rl-distill/maze/pt_dfs_eps05_v1/{XS,S,L}`.
+- W&B: `rl-distill/tailrl-text-maze-dfs-eps05`.
+- Page: https://claude.ai/artifact/83kPyhxS7pAXBFJNr1nGhd (`report_shortest.py` with `--demo-shortest 0.425`).
+- Loss floor (the demonstrator's own NLL): 0.0649 train, 0.0686 val. At 10k steps all sizes are at 0.078–0.088.
+- Small seed 0, 1000 dev mazes:
+
+  | checkpoint | greedy shortest | T=1 shortest | T=1 goal |
+  |---|---|---|---|
+  | step 2.5k | 10% | 3% | — |
+  | step 10k | 56% | 29% | 76% |
+  | ε = 0.5 demonstrator | 100% | 42.5% | — |
+
+  So pretraining does not saturate the task: the model's mode is not yet the optimal move at junctions.
+- RL on the small bases (`GRID=eps1`, `2a07e3ac`) is the sp2 recipe with the new prompts and validation mazes.
+  `/tmp/jw_maze/autolaunch_eps_rl.sh` launches it once XS, S and L are all COMPLETE and every closest-seed base is within ±5% of
+  its target.
+  - Pods: 4 borrowing + dedicated copies, raced.
+  - Runs: `spe-*`.
+  - S3: `s3://.../maze/rl_small_dfs_eps05_v1`.
+
+---
+
+## 2026-11-08 — Text-maze shortest-path task: re-pretrain small / medium / large on optimal paths only (ScaleTrain, running)
+
+**Goal.** Make the maze task harder: reward 1 only for a shortest path (TailRL judge field `is_shortest`), 0 otherwise.
+The goal-reached bases reach shortest paths at only ~20–60% of their goal pass@1, and continuing their pretraining tops out
+at ~5–9% shortest within 20k steps. So all three sizes are retrained from scratch, with the same maze configs, on shortest
+paths only. Then bases are matched at is_shortest pass@1 ∈ {0.1, 0.3, 1, 3, 10}% for 3 init seeds per size.
+
+**Data.** `maze/build_optimal_sft.py`: one BFS-optimal path per maze, drawn uniformly among the tied optimal paths
+(91.5% of mazes have more than one). The test split is the same as `to_sft_json`. 1,299,736 train items; every one is scored
+`is_shortest` by the judge. Stored at `s3://scale-ml/genai/rl-distill/maze/data/sft_optimal/`.
+
+**Config.**
+- Model: the old recipe (Qwen2 architecture, tied embeddings, AdamW betas 0.9/0.95, weight decay 0.01, grad clip 1.0, bf16).
+- Optimization: batch 128 (micro 128); LR 5e-4, constant, no warmup; data_seed 0; init seeds 0/1/2.
+- Checkpoints: every 5 steps, at most 10k steps.
+- Screening: every 25th checkpoint at k=16.
+- Stop rule: training stops when the median of the last 4 screens is ≥ 20% is_shortest.
+- Levels: `level_task.py` runs select (SWA-averaged candidates) → endpoints → `tune_pass1.py`. The tuned base is confirmed with a
+  fresh sampling seed on 256 test mazes × 2048 samples. If no candidate pair brackets the target, the window is widened on
+  both sides.
+- Compute: one 2-GPU ScaleTrain job per size (`maze/start_maze_pt_supervisor.sh` → `maze/run_maze_pretrain_st.sh` →
+  `maze/maze_pt_pipeline.py`). Trainers, screeners and level tasks run asynchronously across both GPUs under CUDA MPS.
+- Code: jiahaoz `c2bf7633`. Outputs: `s3://scale-ml/genai/rl-distill/maze/pt_shortest_v1/{XS,S,L}`.
+- W&B: `rl-distill/tailrl-text-maze-shortest`.
+
+**Smoke (local, small, 1 seed).**
+- Speed: ~22 steps/s; loading the data takes ~17 min (tokenizing).
+- Under optimal-only data, shortest ≈ goal.
+- Steps where is_shortest pass@1 reaches each level: 0.1% ≈ step 600, 1% ≈ 875, 3% ≈ 1200, 35.8% at step 2600.
+- 10% level confirmed at 9.93%. 3% and 0.1% complete through `level_task.py` (0.1% needed one widening).
+
+**Results page.** https://claude.ai/artifact/Wa9b1WEBaQZmxYHw7c4G2y (`maze/report_shortest.py`; pass@k from k = 1 to 1024).
+
+**Status.** Dedicated jobs launched 2026-11-08 04:21 UTC; they sat in the queue, so at 04:46 borrowing copies were launched, and those started first. The dedicated jobs are cancelled. At 05:10 the level tasks were OOMing: each generate call ran up to 8192 sequences, on GPUs also holding the trainers and screeners. The fix (`881ef154`) caps each call at `SCREEN_MAX_SEQS=2048` and retries a failed level task twice. All three jobs were restarted at 05:11 UTC on borrowing (supervisors `rl-maze-pt-{xs,s,l}-b`):
+- XS: `job_dbo092b8qm1g08as6jig`
+- S: `job_dbo092b8qm1g08as6jj0`
+- L: `job_dbo0kgr8qm1g08as6jl0`. Restarted at 05:36 on `33de350b`, because at a 2048-sequence cap L still OOMed (~14 GB per generate process; 2 trainers, 2 screeners and 2 tasks per GPU). That commit sets the cap to 1024 and allows up to 5 retries with a growing delay. XS and S peak at ~47 GB and kept running on `881ef154`.
+
+**Faster level tuning (06:05 restart on `f6117816`).**
+- The interpolation search now runs at 256 samples per maze (`--search-k`). The chosen model is then re-measured at 2048
+  and Newton-corrected on log pass@1 until it is within 2% (or 1 SE) of the target. The fresh-seed 2048 confirm is still
+  what gets reported. This is about half the samples per level.
+- The judge scores each distinct response once per maze.
+- A CUDA-graph decode was tried and dropped. At batch 1024 it was no faster than HF generate, which is attention-bound
+  over the 310-token prompt, and it shifted L's pass@1 by ~7% relative (bf16 numerics through the static cache).
+- New job IDs: in the supervisor state dirs `.scale_train_supervisors/maze-pt-{xs,s,l}-b-20261108`.
+- 06:50 restart on `243e7b58`, which changes two things:
+  - Level tasks per GPU go from 2 to 4: once training ended, the GPUs were ~40% busy at 2.
+  - A trained run's needed checkpoints (up to SCREEN_UNTIL + 250) are mirrored to S3 and marked CKPTS_SYNCED. A
+    preempted borrowing pod's relaunch then reuses the run and its finished levels instead of retraining.
+
+**Tuning fixes during the run (08:20–11:45).**
+- `54012d42`: CKPTS_SYNCED only for runs trained on the pod itself.
+- `6cf3cd1b`: interpolate between the tightest bracketing pair measured at 256 samples, re-measuring 4 finalists. A noisy
+  k=64 neighbour had left XS_is1 p01 unbracketed at alpha 1.5, −6.2%. tune_pass1 also resets its cache when the
+  endpoints change.
+- `1f5eee2a`: correction tolerance 1% (was 2%), up to 3 Newton steps.
+- Infra: a borrowing preemption at 08:12. XS was then rejected for ~1 h by a broken node (`i-05390b4ff9c7f5ad4`, GPU
+  device plugin "unable to get device link information"). It resumed from S3 at 11:17 without retraining.
+
+**First confirmed bases (fresh-seed, 1000 × 2048).**
+- S s0: p01 +0.8%, p03 −3.0%, p1 −0.5%, p3 −2.1%.
+- XS: s0 p3 +0.4%, s2 p1 +2.2%, s1 p01 −6.2% (old picker).
+
+**XS bases done 14:22 UTC.** All 15 confirmed. Per level, the closest seed (used for RL):
+
+| level | seed | confirmed pass@1 | vs target |
+|---|---|---|---|
+| 0.1% | s0 | 0.0979% | −2.05% |
+| 0.3% | s2 | 0.3008% | +0.26% |
+| 1% | s0 | 1.0015% | +0.15% |
+| 3% | s1 | 2.9936% | −0.21% |
+| 10% | s0 | 9.9933% | −0.07% |
+
+The shortest-path RL grid (sp1, 60 runs) was auto-launched at 14:23 UTC on four 4-GPU borrowing jobs
+(`maze-rl-sp-r4-g0..g3`, code `936ce974`).
+
+**All 45 bases confirmed (17:07 UTC).** Confirmed is_shortest pass@1 vs target, fresh seed, 1000 × 2048. Bold = the
+closest seed per level:
+
+| level | XS (2.2M) | S (3.9M) | L (13.3M) |
+|---|---|---|---|
+| 0.1% | **s0 −2.05**, s1 −6.15, s2 +2.44 | s0 +0.83, s1 +0.73, **s2 −0.10** | **s0 −1.27**, s1 −7.13, s2 +2.93 |
+| 0.3% | s0 +0.33, s1 −1.87, **s2 +0.26** | s0 −3.03, s1 −3.47, **s2 −1.40** | s0 +0.93, **s1 −0.57**, s2 −5.84 |
+| 1% | **s0 +0.15**, s1 −2.04, s2 +2.25 | **s0 −0.51**, s1 +2.14, s2 −2.15 | s0 +1.05, s1 −1.59, **s2 +0.23** |
+| 3% | s0 +0.43, **s1 −0.21**, s2 −0.54 | s0 −2.08, **s1 −0.04**, s2 +0.94 | s0 −0.31, s1 +0.06, **s2 0.00** |
+| 10% | **s0 −0.07**, s1 +0.09, s2 +0.07 | s0 −0.50, **s1 +0.01**, s2 −0.39 | s0 −0.70, s1 +0.92, **s2 −0.27** |
+
+- Bases: `s3://.../maze/pt_shortest_v1/{XS,S,L}/<size>_is<seed>_a11080822/tune-<level>/best`.
+- Page: https://claude.ai/artifact/Wa9b1WEBaQZmxYHw7c4G2y.
+- RL pod g0 was blocked by the broken node `i-05390b4ff9c7f5ad4` from 14:24 to 16:19. A dedicated copy, `maze-rl-sp-r4-g0d`,
+  took over its 14 runs.
+
+**RL at LR 2.5e-5 (sp1) stopped at 17:57 UTC, 51/60 done; rerun at LR 1e-5 (sp2).**
+
+Mean best validation is_shortest (500 × 16) over seeds, by base level (rows) and prompts per step (columns):
+
+| base | 4 | 16 | 64 | 256 |
+|---|---|---|---|---|
+| 0.1% | 0.003 | 0.005 | 0.009 | 0.014 |
+| 0.3% | 0.005 | 0.015 | 0.026 | 0.041 |
+| 1% | 0.038 | 0.058 | 0.101 | 0.13 |
+| 3% | 0.19 | 0.26 | 0.37 | 0.46 |
+| 10% | 0.29 | 0.39 | 0.54 | 0.53 |
+
+- Why rerun: at 0.1–0.3% starts with 4–16 prompts, 6 of 12 finished runs peaked early and then collapsed to ~0. GRPO's
+  std normalization puts a +3.9 advantage on a lone success per group, so small batches take large, noisy steps at this
+  LR. Starts of 3% and above, and 256 prompts, were stable.
+- sp2 is the same grid at LR 1e-5 (`c5b3bcf3`, `GRID=sp2`, runs `sps2-*`, pods `maze-rl-sp2-r4-g0..g3`,
+  `s3://.../maze/rl_small_shortest_v2`), on the same bases. Launched at 18:00 UTC.
+
+**Shortest-path RL on the small (XS) bases (sp1, LR 2.5e-5) (`ad0f38d9`, `936ce974`).**
+- Recipe: the same as the v2 grid. 5 levels × prompts per step {4, 16, 64, 256} × RL seeds {0, 1, 2} = 60 runs.
+  GRPO + TIS, lr 2.5e-5 constant after a 20-step warmup, patience 50, 500 dev mazes × 16 validation, FAST_DECODE,
+  four 4-GPU borrowing jobs.
+- What changes: the reward is 1 only for a shortest path (`RL_REWARD=shortest` → `maze/maze_shortest_reward.py`, which
+  wraps TailRL's `judge_maze_binary_shortest` on the same maze_17 data). Early stopping and best_hf use
+  `val-aux/maze_17/is_shortest/mean@16`.
+- Checks: on 256 harvested paths the new reward gives 0 to all 89 goal-reaching non-optimal paths and 1 to all 167
+  optimal ones. A local 12-step RL smoke ran cleanly.
+- Bases: per level, the XS seed whose fresh-seed confirm is closest to target (`maze/pick_shortest_bases.py`), copied to
+  `s3://.../maze/rl_small_shortest_v1/bases/`.
+- Launch: `/tmp/jw_maze/autolaunch_sp_rl.sh` waits for `pt_shortest_v1/XS/COMPLETE`, picks the bases, and launches
+  `GRID=sp1 NPODS=4 GPUS=4 FAST_DECODE=1 launch_rl_small_grid.sh` if every base is within 5%; otherwise it holds.
+- Outputs: runs `sps-<level>-b<prompts>-s<seed>` in W&B `tailrl-text-maze-shortest`, S3 `maze/rl_small_shortest_v1`.
+
+---
+
 ## 2026-11-03 — Text-maze RL-curve law: extra start levels 0.3% / 3% / 5% (S and L RL done; federer)
 
 **Goal.** Runbook "Extra start levels for the maze RL-curve law" (https://claude.ai/artifact/Fppdo1u52xm7SLEQCpcN5k): more
