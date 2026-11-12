@@ -110,8 +110,26 @@ def main():
     ap.add_argument("--dtype", default="fp32", choices=["fp32", "bf16"], help="master weights; forward runs under bf16 autocast")
     ap.add_argument("--tflops-budget", type=float, default=None,
                     help="stop (and save) once teacher trace TFLOPs + cumulative student TFLOPs reach this budget, even before --steps")
+    ap.add_argument("--wandb-project", default=None, help="log metrics to W&B (entity from WANDB_ENTITY)")
+    ap.add_argument("--wandb-name", default=None)
+    ap.add_argument("--exact-eval-every", type=int, default=0, help="every N steps: save a checkpoint and score its exact pass@k")
+    ap.add_argument("--exact-parquet", default=None, help="dev-maze parquet for the exact pass@k check (exact_pass.py)")
     args = ap.parse_args()
     torch.manual_seed(args.seed)
+    wb = None
+    if args.wandb_project:
+        import wandb
+        wb = wandb.init(project=args.wandb_project, name=args.wandb_name or os.path.basename(args.out.rstrip("/")), config=vars(args))
+    exact = None
+    if args.exact_eval_every:
+        import sys
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import exact_pass as ep
+        import screen_sft_ckpts as ss
+        prompts, gts = ss.load_prompts(args.exact_parquet, 1000)
+        def exact(path):
+            r = ep.exact_screen(path, prompts, gts, batch_tokens=65536)
+            return {"exact/pass@1": r["pass@1_lo"], **{f"exact/pass@{k}": v for k, v in r["pass@k_lo"].items() if int(k) in (16, 64, 256, 1024)}}
     os.makedirs(args.out, exist_ok=True)
     device = "cuda"
 
@@ -152,8 +170,13 @@ def main():
     metrics_path = os.path.join(args.out, "train_metrics.jsonl")
     cum_tflops, step, t0 = 0.0, 0, time.time()
     val_kl = validate()
+    rec0 = {"step": 0, "val_forward_kl": val_kl, "cumulative_student_tflops": 0.0, "teacher_trace_tflops": teacher_flops}
+    if exact:
+        rec0.update(exact(args.student))
     with open(metrics_path, "a") as f:
-        f.write(json.dumps({"step": 0, "val_forward_kl": val_kl, "cumulative_student_tflops": 0.0, "teacher_trace_tflops": teacher_flops}) + "\n")
+        f.write(json.dumps(rec0) + "\n")
+    if wb:
+        wb.log(rec0, step=0)
     print(f"step 0 val forward KL {val_kl:.5f}", flush=True)
     model.train()
     done = False
@@ -183,13 +206,23 @@ def main():
                 print(f"FLOPs budget reached at step {step}: teacher {teacher_flops:.3f} + student {cum_tflops:.3f} >= {args.tflops_budget:.3f} TFLOPs", flush=True)
             with open(metrics_path, "a") as f:
                 f.write(json.dumps(rec) + "\n")
-            if step % args.save_every == 0 or step == args.steps or over_budget:
+            ex = exact and step % args.exact_eval_every == 0
+            if step % args.save_every == 0 or step == args.steps or over_budget or ex:
                 path = os.path.join(args.out, f"ckpt-{step}")
                 model.save_pretrained(path, safe_serialization=True); tok.save_pretrained(path)
+                if ex:
+                    rec.update(exact(path)); model.train()
+                    print(f"step {step} exact pass@1 {rec['exact/pass@1']:.5f} pass@1024 {rec['exact/pass@1024']:.4f}", flush=True)
+                    with open(metrics_path, "a") as f:
+                        f.write(json.dumps({"step": step, **{k: v for k, v in rec.items() if k.startswith("exact/")}}) + "\n")
+            if wb:
+                wb.log(rec, step=step)
             if step >= args.steps or over_budget:
                 done = True
                 break
     print(f"done: {step} steps, student {cum_tflops:.3f} TFLOPs + teacher traces {teacher_flops:.3f} TFLOPs")
+    if wb:
+        wb.finish()
 
 
 if __name__ == "__main__":
