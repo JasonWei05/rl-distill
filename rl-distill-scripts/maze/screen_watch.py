@@ -59,12 +59,12 @@ def main():
     ap.add_argument("--parquet", default=None)
     ap.add_argument("--n-prompts", type=int, default=1000)
     ap.add_argument("--batch-prompts", type=int, default=128)
-    ap.add_argument("--max-new-tokens", type=int, default=180)
+    ap.add_argument("--max-new-tokens", type=int, default=ss.max_new_tokens())
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     tag = args.tag or f"stride{args.stride}_k{args.k}"
 
-    parquet = args.parquet or os.path.join(args.tailrl_root, "experiments/text_maze/data/eval1000/test.parquet")
+    parquet = args.parquet or ss.dev_parquet(args.tailrl_root)
     judge = ss.load_judge(args.tailrl_root)
     prompts, gts = ss.load_prompts(parquet, args.n_prompts)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -93,9 +93,14 @@ def main():
                     done_keys.update(json.load(open(f)).keys())
                 except (json.JSONDecodeError, OSError):
                     pass
+            limit = None   # <run>/SCREEN_UNTIL: a step bound written once the run's checkpoints past it are no longer needed
+            try:
+                limit = int(open(os.path.join(run, "SCREEN_UNTIL")).read().strip())
+            except (OSError, ValueError):
+                pass
             for step in ckpt_steps(run):
                 key = f"ckpt-{step}"
-                if key in done_keys or not mine(step):
+                if key in done_keys or not mine(step) or (limit is not None and step > limit):
                     continue
                 path = os.path.join(run, key)
                 if not complete(path):

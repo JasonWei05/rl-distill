@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Per-run candidate selection for the matched starting capability (text-maze study, step 3).
 
-1. Read the run's stride-50 screening (screen_<tag>.json) and find the goal_reached crossing bracket.
+1. Read the run's stride-50 screening (screen_<tag>.json) and find the --metric crossing bracket (goal_reached or is_shortest).
 2. Build SWA-style averaged candidates (average_ckpts.py) centered on every saved checkpoint in the
    bracket that lies on the --center-step grid, each averaging the checkpoints within --half-window.
 3. Screen every candidate at --k samples per maze on the dev set and print the table.
-4. Rank candidates by |goal_reached pass@1 - target|; re-screen the --n-final closest at --final-k.
+4. Rank candidates by |--metric pass@1 - target|; re-screen the --n-final closest at --final-k.
 Writes <run>/select_<metric>.json with every candidate's metrics and per-maze counts.
 
     ~/TailRL/.venv/bin/python rl-distill-scripts/maze/select_matched_init.py --run ~/tailrl_maze_runs/pretrain20k/S_ds0_is0 \
@@ -92,7 +92,7 @@ def main():
         cands.append((c, out))
 
     judge = ss.load_judge(args.tailrl_root)
-    parquet = os.path.join(args.tailrl_root, "experiments/text_maze/data/eval1000/test.parquet")
+    parquet = ss.dev_parquet(args.tailrl_root)
     prompts, gts = ss.load_prompts(parquet, args.n_prompts)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     out_path = os.path.join(run, args.out_name or f"select_{args.metric}.json")
@@ -102,7 +102,7 @@ def main():
         if key in results and results[key]["k"] == k:
             return results[key]
         torch.manual_seed(args.seed)
-        r = ss.screen_one(path, prompts, gts, judge, SimpleNamespace(k=k, batch_prompts=args.batch_prompts, max_new_tokens=180), device)
+        r = ss.screen_one(path, prompts, gts, judge, SimpleNamespace(k=k, batch_prompts=args.batch_prompts, max_new_tokens=ss.max_new_tokens()), device)
         results[key] = r
         tmp = out_path + ".tmp"
         with open(tmp, "w") as f:
@@ -115,8 +115,9 @@ def main():
     for c, path in cands:
         r = screen(path, args.k, f"avg-{c}-w{args.half_window}@k{args.k}")
         g, s = r["goal_reached"], r["is_shortest"]
-        table.append((abs(g["pass@1"] - args.target), c, path))
-        print(f"{c:>7} {g['pass@1']:9.4f} {s['pass@1']:9.4f} {g['pass@16']:9.4f} {g['pass@64']:9.4f} {g['mixed16']:10.3f} {s['mixed16']:11.3f} {r['mean_response_tokens']:6.1f}", flush=True)
+        table.append((abs(r[args.metric]["pass@1"] - args.target), c, path))
+        print(f"{c:>7} {g['pass@1']:9.4f} {s['pass@1']:9.4f} {g.get('pass@16', float('nan')):9.4f} {g.get('pass@64', float('nan')):9.4f} "
+              f"{g['mixed16']:10.3f} {s['mixed16']:11.3f} {r['mean_response_tokens']:6.1f}", flush=True)
 
     table.sort()
     print(f"\nclosest to target {args.target} on {args.metric}: " + ", ".join(f"center {c} (|d|={d:.4f})" for d, c, _ in table[: args.n_final]))

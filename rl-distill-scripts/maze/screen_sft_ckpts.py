@@ -42,6 +42,16 @@ def field(v):
     return ast.literal_eval(v) if isinstance(v, str) else v
 
 
+def dev_parquet(tailrl_root):
+    """The dev mazes for screening / level tuning: $MAZE_EVAL_PARQUET if set, else TailRL's committed eval1000."""
+    return os.environ.get("MAZE_EVAL_PARQUET") or os.path.join(tailrl_root, "experiments/text_maze/data/eval1000/test.parquet")
+
+
+def max_new_tokens():
+    """Generation cap per response: $MAZE_MAX_NEW_TOKENS if set, else 180 (17x17 paths are <= 120 moves)."""
+    return int(os.environ.get("MAZE_MAX_NEW_TOKENS", 180))
+
+
 def load_prompts(parquet, n):
     rows = pq.read_table(parquet).to_pylist()[:n]
     prompts, gts = [], []
@@ -89,6 +99,7 @@ def screen_one(ckpt, prompts, gts, judge, args, device):
     goal = np.zeros(n)
     short = np.zeros(n)
     lengths = []
+    seen = [{} for _ in range(n)]   # per maze: response text -> (goal, shortest); sharp models repeat responses a lot
     # keep <= 8192 sequences per generate call; SCREEN_MAX_SEQS lowers the cap on smaller cards (40-60 GB peak at 8192)
     bp = max(1, min(args.batch_prompts, int(os.environ.get("SCREEN_MAX_SEQS", 8192)) // args.k))
     for i0 in range(0, n, bp):
@@ -108,9 +119,12 @@ def screen_one(ckpt, prompts, gts, judge, args, device):
         lengths.extend((gen != pad_id).sum(-1).tolist())
         for j, text in enumerate(tok.batch_decode(gen, skip_special_tokens=False)):
             m = i0 + j // args.k
-            r = judge.judge_maze(solution_str=text, ground_truth=gts[m])
-            goal[m] += 1.0 if r.get("goal_reached", 0.0) > 0 else 0.0
-            short[m] += 1.0 if r.get("is_shortest", 0.0) > 0 else 0.0
+            r = seen[m].get(text)
+            if r is None:
+                jr = judge.judge_maze(solution_str=text, ground_truth=gts[m])
+                r = seen[m][text] = (jr.get("goal_reached", 0.0) > 0, jr.get("is_shortest", 0.0) > 0)
+            goal[m] += r[0]
+            short[m] += r[1]
 
     ks = [1, 4, 16, 64, 256, 1024]
     res = {
@@ -135,16 +149,16 @@ def main():
     ap.add_argument("--ckpt-dir", default=DEFAULT_CKPT_DIR)
     ap.add_argument("--steps", type=int, nargs="*", default=[])
     ap.add_argument("--paths", nargs="*", default=[], help="explicit checkpoint directories")
-    ap.add_argument("--parquet", default=None, help="default: TailRL's committed data/eval1000/test.parquet")
+    ap.add_argument("--parquet", default=None, help="default: dev_parquet()")
     ap.add_argument("--n-prompts", type=int, default=1000)
     ap.add_argument("--k", type=int, default=64, help="samples per maze")
     ap.add_argument("--batch-prompts", type=int, default=128, help="prompts per generate call (x k sequences)")
-    ap.add_argument("--max-new-tokens", type=int, default=180)
+    ap.add_argument("--max-new-tokens", type=int, default=max_new_tokens())
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=os.path.join(HOME, "tailrl_maze_runs/screen_sft_ckpts.json"))
     args = ap.parse_args()
 
-    parquet = args.parquet or os.path.join(args.tailrl_root, "experiments/text_maze/data/eval1000/test.parquet")
+    parquet = args.parquet or dev_parquet(args.tailrl_root)
     ckpts = [os.path.join(args.ckpt_dir, f"ckpt-{s}") for s in args.steps] + list(args.paths)
     if not ckpts:
         ap.error("give --steps and/or --paths")

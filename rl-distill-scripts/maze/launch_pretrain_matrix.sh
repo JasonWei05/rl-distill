@@ -13,9 +13,11 @@
 # Usage: bash rl-distill-scripts/maze/launch_pretrain_matrix.sh [--dry-run]
 #   RUNS_ROOT (default ~/tailrl_maze_runs/pretrain), TRAIN_GPUS (default "0 1"), MAX_STEPS (6000),
 #   SAVE_STEPS (10), EVAL_STEPS (50) can be overridden in the environment.
-#   RUN_SPECS="S_ds0_is4 S 4;L_ds0_is0_rep L 0" replaces the default run list ("name size init_seed" per ';'), e.g. to
+#   RUN_SPECS="S_ds0_is4 S 4;L_ds0_is0_rep L 0" replaces the default run list ("name size init_seed" per ';', size XS / S / L), e.g. to
 #   regenerate the two trajectories the matched pairs came from (20k steps: MAX_STEPS=20000 SAVE_STEPS=20).
 #   FOREGROUND=1: after launching, wait until every run has a DONE or FAILED marker; exit 1 if any FAILED (gpu_queue.sh).
+#   USE_WANDB=1: log each run to W&B as <run name> (project WANDB_PROJECT, default tailrl-text-maze; entity from
+#   WANDB_ENTITY; needs WANDB_API_KEY in the environment).
 set -euo pipefail
 
 TAILRL=${TAILRL:-$HOME/TailRL}
@@ -33,8 +35,9 @@ DRY_RUN=0
 read -r -a GPUS <<< "${TRAIN_GPUS:-0 1}"
 
 # name  hidden layers heads kv ffn
-S_CFG="256 4 4 2 1024"
-L_CFG="384 6 6 3 1536"
+XS_CFG="192 4 4 2 768"    # "small" (2.2M): S narrowed to 0.75x width, same depth / heads (head_dim 48)
+S_CFG="256 4 4 2 1024"    # "medium" (3.9M): TailRL's released model
+L_CFG="384 6 6 3 1536"    # "large" (13.3M)
 
 # run name -> size init_seed (the _rep run repeats init_seed 0 bit-for-bit in configuration)
 RUNS=(
@@ -53,7 +56,12 @@ mkdir -p "$RUNS_ROOT"
 i=0
 for spec in "${RUNS[@]}"; do
   read -r name size init_seed <<< "$spec"
-  if [ "$size" = S ]; then read -r hid lay heads kv ffn <<< "$S_CFG"; else read -r hid lay heads kv ffn <<< "$L_CFG"; fi
+  case "$size" in
+    XS) read -r hid lay heads kv ffn <<< "$XS_CFG" ;;
+    S)  read -r hid lay heads kv ffn <<< "$S_CFG" ;;
+    L)  read -r hid lay heads kv ffn <<< "$L_CFG" ;;
+    *) echo "unknown size $size (XS, S or L)" >&2; exit 2 ;;
+  esac
   gpu=${GPUS[$(( i % ${#GPUS[@]} ))]}
   out=$RUNS_ROOT/$name
   cmd=("$PY" "$EXP/scripts/sft_pretrain.py"
@@ -63,6 +71,7 @@ for spec in "${RUNS[@]}"; do
     --learning_rate 5e-4 --batch_size 32 --micro_batch_size 8 --lr_scheduler cosine
     --max_steps "$MAX_STEPS" --save_steps "$SAVE_STEPS" --eval_steps "$EVAL_STEPS"
     --seed "$DATA_SEED" --data_seed "$DATA_SEED" --init_seed "$init_seed")
+  [ "${USE_WANDB:-0}" = 1 ] && cmd+=(--use_wandb --project_name "${WANDB_PROJECT:-tailrl-text-maze}")
   echo "[gpu $gpu] $name: ${cmd[*]}"
   if [ "$DRY_RUN" = 0 ]; then
     if [ -f "$out/DONE" ]; then echo "  [skip] $out/DONE exists"; i=$((i+1)); continue; fi
