@@ -2,7 +2,7 @@
 
 The recipe of rl/rl_tis_run.sh as the t3 grids run it on verl (TailRL + tailrl_rl_tis.patch with FAST_DECODE, PREFIX_DECODE,
 PREFIX_FORWARD), in one process: no Ray, FSDP, HF generate or reward workers.
-- Prompts are drawn in verl's order: a RandomSampler seeded with --seed (one torch.randperm per epoch), drop_last batches.
+- Prompts are drawn in verl's order: a RandomSampler seeded with --seed, drop_last batches.
 - --n samples per prompt at temperature 1 from the fp16 policy. Each prompt's KV cache is computed once and shared by its
   samples; finished rows are compacted away at 32-token segment boundaries; each segment's decode step is a CUDA graph.
   The log-prob and entropy of every sampled token are kept (the behaviour policy for TIS).
@@ -34,8 +34,8 @@ import wandb
 from safetensors.torch import load_file, save_file
 
 # The small elementwise / reduction steps (norms, rotary, attention merge, sampling) are compiled into one kernel each: the
-# decode step is launch-bound (~280 kernels before, each costing GPU time and a graph node). Shapes are dynamic and a
-# size-1 dimension reuses the dynamic kernels and equal sizes get separate symbols, so nothing recompiles mid-decode (a compile
+# decode step is launch-bound (~280 kernels before, each costing GPU time and a graph node). Shapes are dynamic, a size-1
+# dimension reuses the dynamic kernels and equal sizes get separate symbols, so nothing recompiles mid-decode (a compile
 # inside graph capture fails).
 fused = torch.compile(dynamic=True)
 torch.fx.experimental._config.backed_size_oblivious = True
@@ -51,7 +51,7 @@ class Vocab:
     def __init__(self, path):
         tok = json.load(open(os.path.join(path, "tokenizer.json")))
         self.ids = tok["model"]["vocab"]
-        self.pad, self.bos, self.eos = (self.ids[t] for t in ("<pad>", "<bos>", "<eos>"))
+        self.pad, self.eos = self.ids["<pad>"], self.ids["<eos>"]
         self.moves = torch.tensor([self.ids[a] for a in ("UP", "DOWN", "LEFT", "RIGHT")])
         # ids that vanish from decode(skip_special_tokens=True).split(): the special tokens and the "\n" token
         self.skip = torch.tensor([t["id"] for t in tok["added_tokens"] if t["special"]] + [self.ids["\n"]])
@@ -268,14 +268,18 @@ class Decoder:
     """Sampling at temperature 1 with one KV cache per prompt shared by its n rows (verl rollout/prefix_decode.py). Rows of
     a group read the prompt cache once per step; each row's own cache holds its generated tokens. Decoding runs in
     segments of SEG tokens with fixed shapes: the step is captured as a CUDA graph and replayed, sampling included
-    (Gumbel-max); the first token runs eagerly as the warm-up. At each segment boundary the layout drops finished rows (and groups with none left)
-    when that removes at least 1 - COMPACT_KEEP_FRAC of it. Attention to the prompt is a fused flash-attention call per
-    group; it merges with the attention to the row's own tokens through the log-sum-exp (one softmax over both)."""
+    (Gumbel-max); the first token runs eagerly as the warm-up. At each segment boundary the layout drops finished rows (and
+    groups with none left) when that removes at least 1 - COMPACT_KEEP_FRAC of it. Attention to the prompt is a fused
+    flash-attention call per group; it merges with the attention to the row's own tokens through the log-sum-exp (one
+    softmax over both)."""
 
     def __init__(self, model, vocab, max_new):
         self.m, self.v, self.R = model, vocab, max_new
         self.slots = -(-max_new // SEG) * SEG  # response cache slots: segments end on multiples of SEG (aligned widths)
         self.side = torch.cuda.Stream()
+        # one memory pool for every graph, so each capture reuses the memory the previous ones freed; a pool lives as long
+        # as a graph in it, so the latest graph is kept
+        self.pool, self.graph = torch.cuda.graph_pool_handle(), None
 
     @torch.no_grad()
     def generate(self, w, prompts, n):
@@ -293,7 +297,7 @@ class Decoder:
               "logits": m.logits(w, hidden[:, -1]).float().repeat_interleave(n, 0)}
         out = {"tok": torch.full((B, self.R), self.v.pad, device=dev), "logp": torch.zeros(B, self.R, device=dev),
                "ent": torch.zeros(B, self.R, device=dev)}
-        pool, graphs, t = torch.cuda.graph_pool_handle(), [], 1
+        t = 1
         self.side.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(self.side):  # token 0 eagerly, on the capture stream: warms up kernels and workspaces
             self._step(w, st, out, SEG, Lp)
@@ -302,11 +306,11 @@ class Decoder:
             W = (t // SEG + 1) * SEG  # the segment's end: response slots [0, W) cover its steps
             graph = torch.cuda.CUDAGraph()  # raw capture: torch.cuda.graph() would gc + empty_cache per segment
             with torch.cuda.stream(self.side):
-                graph.capture_begin(pool=pool, capture_error_mode="thread_local")
+                graph.capture_begin(pool=self.pool, capture_error_mode="thread_local")
                 self._step(w, st, out, W, Lp)
                 graph.capture_end()
             torch.cuda.current_stream().wait_stream(self.side)
-            graphs.append(graph)
+            self.graph = graph
             while t < min(W, self.R):
                 graph.replay()
                 t += 1
@@ -397,7 +401,8 @@ class PromptOrder:
 
 def train_tflops(c, seqlens):
     """verl FlopsCounter._estimate_qwen2_flops (forward + backward) in TFLOPs for sequences of the given lengths."""
-    H, d, h, kvh, nl = c["hidden_size"], c["hidden_size"] // c["num_attention_heads"], c["num_attention_heads"], c["num_key_value_heads"], c["num_hidden_layers"]
+    H, h, kvh, nl = c["hidden_size"], c["num_attention_heads"], c["num_key_value_heads"], c["num_hidden_layers"]
+    d = H // h
     dense = (H * c["intermediate_size"] * 3 + H * (h * d + 2 * kvh * d + h * d)) * nl + c["vocab_size"] * H * 2
     s = seqlens.double()
     return float(6 * dense * s.sum() + 12 * (s * s).sum() * d * h * nl) / 1e12
@@ -431,7 +436,7 @@ class Trainer:
             self.step, self.flops, self.best = s["step"], s["flops"], s["best"]
         else:
             torch.manual_seed(a.seed)
-        wandb.init(project=a.wandb_project, id=a.wandb_id, name=a.wandb_id, resume="allow", config=vars(a))
+        wandb.init(project=a.wandb_project, id=a.wandb_id, name=a.wandb_id, resume="allow", config=vars(a), dir=a.out)
 
     def weights16(self):
         """The fp16 compute copy of the fp32 master weights; differentiable, so gradients reach the masters in fp32."""
