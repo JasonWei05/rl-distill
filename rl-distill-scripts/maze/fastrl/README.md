@@ -55,6 +55,40 @@ and its gradient, prompt order over several epochs, FLOPs. Up to float rounding,
 Statistical: first-token frequencies (chi-square), validation outcomes against verl's decoder (paired z < 4). Plus a
 train / resume run.
 
-## Results
+## Results (2026-11-13)
 
-(filled in below)
+Speed, one dedicated H100 pod (`MODE=bench`, `fastrl-bench-v1d`), 2XS base at 3%, t3 recipe; seconds per training step
+(median), validation = 500 mazes x 16 samples:
+
+| prompts / step | verl (TailRL, same pod) | fastrl | speedup |
+|---|---|---|---|
+| 16 | 0.535 | 0.252 | 2.1x |
+| 64 | 1.18 | 0.340 | 3.5x |
+| 256 | 3.72 | 0.638 | 5.8x |
+| 1024 | 8.19 on 4 GPUs (grid pods) | 1.80 on 1 GPU | 4.5x (18x per GPU) |
+| validation | 5.9 | 0.43 | 14x |
+
+fastrl by model size (same pod): 3XS 0.26 / 0.36 / 0.60 / 1.61 s, small 0.27 / 0.39 / 0.78 / 2.39 s at 16 / 64 / 256 /
+1024 prompts. Peak GPU memory (allocated), 2XS: 4.0 / 5.1 / 10.2 / 10.3 GB against verl's 3.9 / 7.6 / 15.1 GB, and
+15.1 GB on each of 4 GPUs at 1024. At 16-64 prompts the GPU is mostly idle (the step is decode latency over up
+to 300 tokens), so packing several runs per GPU raises throughput.
+
+Learning curves: fastrl reruns of finished verl runs (2XS, 3% base, seeds 2 / 3 / 4, same bases, seeds and prompt order),
+validation is_shortest averaged over each 1000-step window (seed mean; the ranges overlap throughout):
+
+| steps | fastrl, 16 prompts | verl, 16 prompts | fastrl, 64 prompts | verl, 64 prompts |
+|---|---|---|---|---|
+| 0-999 | 0.0747 | 0.0748 | 0.0917 | 0.0928 |
+| 1000-1999 | 0.1038 | 0.1016 | 0.1298 | 0.1301 |
+| 2000-2999 | 0.1198 | 0.1181 | 0.1494 | 0.1494 |
+| 3000-3999 | 0.1294 | 0.1297 | 0.1610 | 0.1627 |
+| 4000-4999 | 0.1402 | 0.1384 | 0.1690 | 0.1711 |
+| 5000-5999 | 0.1476 | 0.1450 | 0.1763 | 0.1803 |
+| 6000-6999 | 0.1524 | 0.1507 | 0.1821 | 0.1853 |
+| 7000-7999 | 0.1583 | 0.1538 | 0.1891 | 0.1938 |
+| 8000-8999 | 0.1623 | 0.1621 | 0.1978 | 0.1991 |
+| 9000-9999 | 0.1655 | 0.1670 | 0.2036 | 0.2049 |
+| best (seeds 2 / 3 / 4) | 0.145 / 0.206 / 0.180 | 0.147 / 0.209 / 0.184 | 0.180 / 0.235 / 0.230 | 0.177 / 0.243 / 0.226 |
+
+Runs: `/tmp/fastrl/runs/e2e` on the devbox (W&B `fastrl-maze`, `fr-x2t3-p3-b{16,64}-s{2,3,4}`); 256 / 1024 prompts per step
+on ScaleTrain (`launch_fastrl_st.sh`, `s3://scale-ml/genai/rl-distill/maze/fastrl_v1/runs/`).

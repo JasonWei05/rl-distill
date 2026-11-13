@@ -12,6 +12,31 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-11-13 — maze fastrl: single-file RL trainer replacing verl for the maze runs (done; 256 / 1024 comparisons running)
+
+**Goal.** The maze RL steps were overhead-bound (2XS and 3XS ran at the same 4 s/step at 256 prompts): write the t3 recipe
+(GRPO 16, shortest-path reward, token-level TIS cap 2, lr 1e-5, fp16 compute / fp32 masters) as one clean file without Ray /
+FSDP / HF generate, prove it matches verl, benchmark it.
+
+**Code** (`maze/fastrl/`, jiahaoz): `fastrl.py` (trainer), `test_fastrl.py` (16 tests against TailRL's verl code),
+`bench.py`, `run_fastrl_st.sh` + `launch_fastrl_st.sh` (ScaleTrain, MODE=runs / bench), `README.md` (details and tables).
+
+**Equivalence.** Exact: tokens, maze parse + BFS, judge (29.5k responses, every field), GRPO advantage, TIS loss, prompt
+order (incl. RandomSampler's extra randperm per epoch), FLOPs. Rounding-level against float64: forward, decode log-probs,
+one full update vs verl's FSDP actor over 6 batches (fp32 gradient error 8.6e-5 vs verl 9.1e-5; fp16 20.4% vs 20.9% — fp16
+gradients are that noisy in verl too). Found on the way: SDPA enable_gqa has a less precise backward (2-3x the fp32 gradient
+error) -> explicit KV-head repeat as HF does. End to end (2XS, 3% base, seeds 2-4, same bases / seeds / prompt order): best
+validation is_shortest mean 0.177 vs verl 0.180 (16 prompts), 0.2145 vs 0.2153 (64 prompts); every 1000-step window within
+0.005.
+
+**Speed** (same dedicated H100 pod, 2XS): 16 / 64 / 256 prompts 0.25 / 0.34 / 0.64 s vs verl 0.54 / 1.18 / 3.72 s (2.1 / 3.5 /
+5.8x); 1024 prompts 1.80 s on 1 GPU vs 8.19 s on 4 GPUs; validation 0.43 vs 5.9 s. Peak memory 10.2 GB vs 15.1 GB at 256.
+Bugs hit: odd decode segment ends made cuBLAS pick a slow kernel (4x) -> aligned segments; per-call CUDA-graph pools grew
+reserved memory every step and OOMed shared GPUs after ~2k steps -> one pool per decoder.
+
+**Status.** Running on ScaleTrain (1-GPU dedicated, `fastrl-x2-b256-s{2,3,4}`, `fastrl-x2-b1024-s3`): 256 / 1024-prompt
+comparisons against the finished / running verl runs. Not yet used for new grids.
+
 ## 2026-11-13 — 2XS / 3XS: LR 5e-4 pretraining results, 1/3/10% bases (3 seeds each), TIS RL grids launched (running)
 
 **Pretraining (LR 5e-4, 5 seeds, 40k steps, `pt_dfs25_eps05_v1/{2XS,3XS}`).** All 10 runs trained the full 40k steps
