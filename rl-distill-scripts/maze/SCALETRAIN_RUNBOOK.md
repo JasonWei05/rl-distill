@@ -2,7 +2,7 @@
 
 How to rerun the 25×25 maze pipeline on ScaleTrain: pretraining → exact base tuning → RL grid → report pages.
 The commands are the ones the November 2026 runs used; the first RL example combines the settings those runs ended on. Results and decisions are in `../PROGRESS_LOG.md`. The earlier local budget study
-(8-GPU box) is in `BUDGET_STUDY_RUNBOOK.md`.
+(8-GPU box) is in `budget_study/BUDGET_STUDY_RUNBOOK.md`.
 
 ## Where things are
 
@@ -23,11 +23,25 @@ Launchers `cd` to the main checkout and ship `git archive <CODE_REF>`. Commit on
 
 Model sizes (`maze_pt_pipeline.py` `ARCH`): 3XS 0.55M, 2XS 1.0M, XS (small) 2.2M, S (medium) 3.9M, L (large) 13.3M.
 
+## Folder layout
+
+| Folder | Contents |
+|---|---|
+| `./` | `st_setup.sh` (sourced by every pod run-file: TailRL checkout + venv) and the two TailRL patches |
+| `data/` | maze data builders (`build_dfs_eps_data.py`; `build_optimal_sft.py` for the older 17×17 shortest-path-only set) and the pre-tokenizer |
+| `pretrain/` | pretraining supervisor, run-file and pipeline; checkpoint screening, averaging and interpolation; sampled (`tune_pass1.py`) and exact (`exact_tune.py`) base tuning; base selection across sizes |
+| `rl/` | RL grid launcher, pack supervisor and run-file, the per-run script, the shortest-path reward, decode benchmark |
+| `reports/` | report pages and status / FLOPs tools |
+| `budget_study/` | the earlier local RL-vs-distillation budget study (8-GPU box): its runbook, results, scripts, `data/`, `queues/` and `extra_levels/` |
+
+Scripts call siblings in their own folder by path; `budget_study/` reuses `pretrain/` and `reports/` through relative
+paths. Pod run-files use `${M}` (the maze root, from `st_setup.sh`).
+
 ## 1. Data (once per maze distribution)
 
 ```bash
 # 25x25 depth-first mazes, 0-20% wall knockout, eps = 0.5 noisy demonstrations, 1.3M training mazes
-~/TailRL/.venv/bin/python rl-distill-scripts/maze/build_dfs_eps_data.py --size 25 --eps 0.5 --out /tmp/maze_data/dfs25_eps05
+~/TailRL/.venv/bin/python rl-distill-scripts/maze/data/build_dfs_eps_data.py --size 25 --eps 0.5 --out /tmp/maze_data/dfs25_eps05
 aws s3 sync /tmp/maze_data/dfs25_eps05 s3://scale-ml/genai/rl-distill/maze/data/dfs25_eps05
 ```
 
@@ -37,7 +51,7 @@ the trainer's own code and requires identical ids and labels:
 
 ```bash
 aws s3 sync s3://.../maze/pt_dfs25_eps05_v1/2XS/<run>/init_model /tmp/maze_tok --exclude model.safetensors
-/tmp/jw_maze/TailRL/.venv/bin/python rl-distill-scripts/maze/tokenize_maze_sft.py --data <dir>/sft/train.json \
+/tmp/jw_maze/TailRL/.venv/bin/python rl-distill-scripts/maze/data/tokenize_maze_sft.py --data <dir>/sft/train.json \
   --tokenizer /tmp/maze_tok --max-length 1024 --out <dir>/sft/train.tok-L1024 --tailrl /tmp/jw_maze/TailRL --verify 2000
 aws s3 sync <dir>/sft/train.tok-L1024 s3://scale-ml/genai/rl-distill/maze/data/dfs25_eps05/sft/train.tok-L1024
 ```
@@ -57,7 +71,7 @@ cd /mnt/efs/jasonwei/rl-distill
 OUT=s3://scale-ml/genai/rl-distill/maze/pt_dfs25_eps05_v1; D=s3://scale-ml/genai/rl-distill/maze/data/dfs25_eps05
 EX="DATA_S3=$D/sft,TRAIN_JSON=train.json,EVAL_S3=$D/eval1000,WANDB_PROJECT_NAME=tailrl-text-maze-dfs25-eps05,MAX_LENGTH=1024,MAZE_MAX_NEW_TOKENS=300,SCREEN_MAX_SEQS=512,SEEDS=0-1-2-3-4,LR=5e-4,SAVE_STEPS=25,NO_TUNE=1"
 CODE_REF=<jiahaoz commit> SIZE=2XS GPUS=4 MAX_STEPS=40000 STOP_AT=0.14 ALLOW_BORROWING=false OUT_S3=$OUT TAG=maze-e25-2xs \
-  EXTRA_ENVS="$EX" bash /mnt/efs/jasonwei/rl-distill-jiahaoz/rl-distill-scripts/maze/start_maze_pt_supervisor.sh
+  EXTRA_ENVS="$EX" bash /mnt/efs/jasonwei/rl-distill-jiahaoz/rl-distill-scripts/maze/pretrain/start_maze_pt_supervisor.sh
 ```
 
 - **LR 5e-4 for every size**, including 3XS and 2XS. At 1e-4 the tiny models stayed on the pre-solving plateau
@@ -77,7 +91,7 @@ weights until within 0.25% (relative). Run it from the TailRL text-maze dir with
 ```bash
 cd /tmp/jw_maze/TailRL/experiments/text_maze
 CUDA_VISIBLE_DEVICES=<gpu> PYTHONNOUSERSITE=1 PYTHONPATH=$PWD /tmp/jw_maze/TailRL/.venv/bin/python \
-  /mnt/efs/jasonwei/rl-distill-jiahaoz/rl-distill-scripts/maze/exact_tune.py \
+  /mnt/efs/jasonwei/rl-distill-jiahaoz/rl-distill-scripts/maze/pretrain/exact_tune.py \
   --run-s3 s3://.../maze/pt_dfs25_eps05_v1/XS/XS_is0_a11090115 --level p1 --target 0.01 \
   --work /tmp/jw_kube/tune25/work --parquet <eval1000/test.parquet> \
   --center-step 100 --half-window 200 --ckpt-stride 100 --batch-tokens 65536 --out-name tune3-p1 --upload
@@ -117,7 +131,7 @@ Prompts per step: small 16 / 64 / 256 (+ 1024 as `t3sx`), medium 8 / 32 / 128 (+
 seeds 0 / 1 / 2.
 
 ```bash
-L=/mnt/efs/jasonwei/rl-distill-jiahaoz/rl-distill-scripts/maze/launch_rl_small_grid.sh
+L=/mnt/efs/jasonwei/rl-distill-jiahaoz/rl-distill-scripts/maze/rl/launch_rl_small_grid.sh
 # 1-GPU pods, several runs per GPU; runs to 10k steps (patience 2000 validations never binds)
 CODE_REF=<commit> FAST_DECODE=1 MAX_STEPS=10000 PATIENCE_OVERRIDE=2000 ALLOW_BORROWING=false GPUS=1 \
   GRID=t3s BATCHES="16 64 256" NPODS=7 EXTRA_ENVS_APPEND=",PREFIX_FORWARD=1" bash $L
@@ -163,7 +177,7 @@ Speed at 10k steps: small 1024 prompts 8.3 s/step and medium 512 prompts 4.5 s/s
 Run these on the devbox with `.env` sourced (W&B key).
 
 ```bash
-cd /mnt/efs/jasonwei/rl-distill-jiahaoz/rl-distill-scripts/maze; P=s3://scale-ml/genai/rl-distill/maze
+cd /mnt/efs/jasonwei/rl-distill-jiahaoz/rl-distill-scripts/maze/reports; P=s3://scale-ml/genai/rl-distill/maze
 PY=/mnt/efs/jasonwei/rl-distill/.venv/bin/python; TPY=/tmp/jw_maze/TailRL/.venv/bin/python   # TPY: the page scripts need TailRL
 $PY rl_grid_status.py --root $P/rl_small_dfs25_tis3s_v1 --prefix st3 --levels p1 p3 p10 \
   --batches 16 64 256 1024 --seeds 0 1 2 --json small.json                     # best / step / state of every run

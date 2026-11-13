@@ -1,4 +1,4 @@
-"""CPU tests for the pre-tokenized maze pretraining data (maze/tokenize_maze_sft.py + TailRL sft_pretrain MazeTokenCache).
+"""CPU tests for the pre-tokenized maze pretraining data (maze/data/tokenize_maze_sft.py + TailRL sft_pretrain MazeTokenCache).
 
 The cache must reproduce MazeSFTDataset item for item (ids, labels, attention mask; same kept items, so the same
 shuffled batch order, also with forked DataLoader workers) on edge cases: empty / missing / None sequences, no
@@ -28,7 +28,7 @@ SCRIPTS = next((os.path.join(r, "experiments/text_maze/scripts") for r in ROOTS
 pytestmark = pytest.mark.skipif(SCRIPTS is None, reason="needs a patched TailRL checkout (TAILRL_ROOT)")
 if SCRIPTS:
     sys.path.insert(0, SCRIPTS)
-    sys.path.insert(0, os.path.join(REPO, "rl-distill-scripts/maze"))
+    sys.path.insert(0, os.path.join(REPO, "rl-distill-scripts/maze/data"))
     import tokenize_maze_sft as tms
     from sft_pretrain import MazeSFTDataset, MazeTokenCache, collate_fn, create_model_from_scratch
 

@@ -1,6 +1,7 @@
-# Sourced by the maze ScaleTrain run-files (run_maze_screen_st.sh, run_maze_select_st.sh): refresh the shipped code, then
+# Sourced by the maze ScaleTrain run-files (pretrain/run_maze_pretrain_st.sh, rl/run_maze_rl_pack_st.sh, rl/run_decode_bench_st.sh):
+# refresh the shipped code, then
 # build TailRL @ 5682c6a + maze/tailrl_text_maze.patch + maze/tailrl_rl_tis.patch and its venv under /tmp/maze (BUDGET_STUDY_RUNBOOK "Setting up on
-# another machine"). Defines PROJECT_ROOT, M (this directory), T (TailRL checkout) and PY (its venv python).
+# another machine"). Defines PROJECT_ROOT, M (this directory: the maze root), T (TailRL checkout) and PY (its venv python).
 set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "${PROJECT_ROOT}"
 export PATH="${PROJECT_ROOT}/.venv/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
