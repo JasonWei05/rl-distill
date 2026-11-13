@@ -12,6 +12,44 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-11-13 — 2XS / 3XS: LR 5e-4 pretraining results, 1/3/10% bases (3 seeds each), TIS RL grids launched (running)
+
+**Pretraining (LR 5e-4, 5 seeds, 40k steps, `pt_dfs25_eps05_v1/{2XS,3XS}`).** All 10 runs trained the full 40k steps
+(none reached STOP_AT 0.14). Exact shortest-path pass@1 at step 40k (1000 dev mazes, `exact_pass.py`):
+
+| seed | 2XS (1.0M) | 3XS (0.55M) |
+|---|---|---|
+| 0 | 14.6% | 6.6% |
+| 1 | 13.6% | 2.5% |
+| 2 | 11.2% | 10.6% |
+| 3 | 13.3% | 8.4% |
+| 4 | 13.3% | 11.3% |
+
+- The LR 1e-4 runs (`pt_dfs25_eps05_lr1e4_v1/{2XS,3XS}`) stayed at pass@1 0.0 on every seed through 40k: never left the
+  pre-solving plateau. All four pretraining pods were stopped and their jobs cancelled on 11-13 at ~05:50 UTC (the 5e-4
+  pods were only screening by then).
+- **3XS seed 3 to 10%:** averaging its 38k–40k checkpoints gives 9.73%; a 10k-step LR cooldown from the 40k checkpoint
+  (fresh Adam, 203 warmup steps, cosine 5e-4 → 0 over one epoch = 10,157 steps; `sft_pretrain.py --model_path ...
+  --num_epochs 1 --max_steps 10000`, devbox GPU, ~7 min) ends at 10.97% (10.73% at 6k). Checkpoints:
+  `.../3XS/3XS_is3_a11122327_cool10k/`; W&B `3XS_is3_cool10k_e1`. The trainer sizes its LR schedule by `--num_epochs`,
+  not `--max_steps` (a first attempt with 10 epochs would have barely decayed).
+
+**Bases.** Seeds 2, 3, 4 of each size, exact-tuned (`exact_tune.py`, same settings as tune3: stride-100 averaging,
+window ±200) to 1 / 3 / 10%: 18 bases, every one within 0.5% of its target (16 within 0.25%), in ~25 min on 4 devbox
+GPUs (~20 s per exact evaluation). 3XS seed 3 at 10% is tuned on the cooldown run (`--cross 3000 --center-step 500
+--half-window 0 --ckpt-stride 500`); the late 10% crossings of 3XS seeds 2 / 4 use `--cross` + `--center-step 500`
+(new `--cross` option: the walk starts at a given step instead of the stride screens). Copied to
+`s3://.../maze/rl_{2xs,3xs}_dfs25_tis3s_v1/bases/<level>_s<seed>`.
+
+**RL (running).** The small TIS grid's recipe and final layouts on both sizes (`GRID=t3x2` / `t3x3`, code `787358c6`,
+`/tmp/jw_maze/launch_t3x.sh`): prompts per step 16 / 64 / 256 / 1024 × levels p1 / p3 / p10 × RL seeds 2 / 3 / 4 (run seed i
+from base seed i) = 36 runs per size, 10k steps (patience never binds), lr 1e-5, validation every 20 steps.
+- Pods per size: 16 + 64 packed on 4 one-GPU pods; 256 one per one-GPU pod (update micro-batch ≤ 1024); 1024 data-parallel
+  on 9 four-GPU pods (`RUN_ALL_GPUS=1`). 44 supervisors, 98 GPUs, dedicated; shared-prompt decode + update.
+- Runs `x2t3-*` / `x3t3-*` on W&B `tailrl-text-maze-dfs25-eps05`.
+- Pages: TIS RL page (four sizes) https://claude.ai/artifact/4reYVz7fi84wQ1tCaj7S16; bases page (seeds 0–4)
+  https://claude.ai/artifact/LoL3qUU48oaQj4xNNv7RCK.
+
 ## 2026-11-12 — Code review of the maze RL / pretraining additions (ml-code-reviewer × 4), fixes and tests
 
 **Scope.** Four parallel reviews:

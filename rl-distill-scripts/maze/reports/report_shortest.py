@@ -141,11 +141,21 @@ def main():
         LEVELS = [x for x in LEVELS if x[0] in args.levels.split(",")]
     tn = args.tune_name
     runs = {}   # (size, seed) -> run dir (latest attempt with screens)
+    attempts = {}   # (size, seed) -> every attempt (a level may be tuned on a continuation, e.g. an LR cooldown)
     for size, *_ in SIZES:
         for run in sorted(glob.glob(os.path.join(args.root, size, f"{size}_is*"))):
             seed = int(os.path.basename(run).split("_is")[1].split("_")[0])
+            attempts.setdefault((size, seed), []).append(run)
             if glob.glob(os.path.join(run, "screen_*.json")) or (size, seed) not in runs:
                 runs[(size, seed)] = run
+
+    def tuned(size, seed, lvl):
+        """tune.json of the level: the main attempt first, else any other attempt of the seed."""
+        for r in [runs[(size, seed)]] + [a for a in attempts[(size, seed)] if a != runs[(size, seed)]]:
+            t = load_json(os.path.join(r, f"{tn}-{lvl}", "tune.json"))
+            if t:
+                return t
+        return None
     status = {size: load_json(os.path.join(args.root, size, "status.json")) or {} for size, *_ in SIZES}
 
     # status grid + per-level curves
@@ -157,7 +167,7 @@ def main():
             st = ((status[size].get("runs") or {}).get(os.path.basename(run)) if run else None) or {}
             cells = []
             for lvl, title, tgt in LEVELS:
-                c = (((aligned(run, lvl) if tn == "tune" else None) or confirmed(load_json(os.path.join(run, f"{tn}-{lvl}", "tune.json"))))
+                c = (((aligned(run, lvl) if tn == "tune" else None) or confirmed(tuned(size, seed, lvl)))
                      if run else None)
                 if c:
                     results[(size, seed, lvl)] = c
