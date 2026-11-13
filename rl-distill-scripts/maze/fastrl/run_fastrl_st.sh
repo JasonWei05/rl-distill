@@ -51,7 +51,8 @@ L=/tmp/fastrl/bench_logs; mkdir -p "${L}"
 IFS=+ read -r -a bases <<< "${BENCH_BASES:?}"
 uv pip install --python "${PY}" -q pytest
 (cd "${F}" && FASTRL_DATA="${D}" FASTRL_BASE="$(base "${bases[0]}")" FASTRL_BASE_HI="$(base "${bases[0]/p3_/p10_}")" \
-   PYTHONPATH="${F}:${T}/experiments/text_maze:${M}/rl" "${PY}" -m pytest -q -p no:cacheprovider test_fastrl.py) 2>&1 | tail -3 | tee "${L}/tests.log"
+   PYTHONPATH="${F}:${T}/experiments/text_maze:${M}/rl" "${PY}" -m pytest -q -p no:cacheprovider test_fastrl.py) > "${L}/tests.log" 2>&1
+grep -E "passed|failed" "${L}/tests.log"
 for b in "${bases[@]}"; do
   read -r -a batches <<< "${BENCH_BATCHES:-16:512 64:512 256:1024 1024:1024}"
   WANDB_MODE=disabled "${PY}" "${F}/bench.py" --base "$(base "${b}")" --data "${D}" --batches "${batches[@]}" 2>&1 | grep BENCH | tee -a "${L}/fastrl.log"
