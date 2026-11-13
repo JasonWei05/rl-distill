@@ -38,6 +38,7 @@ def main():
     ap.add_argument("--work", required=True)
     ap.add_argument("--maze-strip", default=None)
     ap.add_argument("--flops", default=None, help="rl_flops_curves.py --out json (grids labelled as the --size labels)")
+    ap.add_argument("--stopped", action="append", default=[], help="--size label whose unfinished runs were stopped (shown as stopped, not running / queued)")
     ap.add_argument("--updated", default="")
     ap.add_argument("--wandb", default="https://wandb.ai/rl-distill/tailrl-text-maze-dfs25-eps05")
     ap.add_argument("--out", required=True)
@@ -52,15 +53,20 @@ def main():
             r["history"] = [(x, y) for x, y in (r.get("history") or []) if x <= CAP]
             if r["history"] and r["state"] == "running":
                 r["best_step"], r["best_value"] = max(r["history"], key=lambda p: (p[1], -p[0]))
+            if label in args.stopped and r["state"] in ("running", "queued"):
+                r["state"] = "stopped"
+                if not any(x > 0 for x, _ in r["history"]):  # stopped before its first RL validation: no RL result
+                    r["best_step"] = r["best_value"] = None
         sizes.append((label, {(r["level"], int(r["batch"]), int(r["seed"])): r for r in rows}, [int(b) for b in batches.split()], code, seeds))
 
     # progress
     prog = []
     for label, runs, bs, _, seeds in sizes:
         states = [r["state"] for r in runs.values()]
-        done = sum(s not in ("running", "queued") for s in states)
+        done = sum(s not in ("running", "queued", "stopped") for s in states)
         prog.append(f"<div class='stat'><b>{html.escape(label)}</b><span>{done} of {len(states) or len(LEVELS) * len(bs) * len(seeds)} done · "
-                    f"{states.count('running')} running · {states.count('queued')} queued</span></div>")
+                    f"{states.count('running')} running · {states.count('queued')} queued"
+                    + (f" · {states.count('stopped')} stopped" if "stopped" in states else "") + "</span></div>")
 
     # summary table: best is_shortest, mean over seeds (min-max), per level x size x batch
     head = "".join(f"<th colspan='{len(b)}'>{html.escape(lab)}</th>" for lab, _, b, _, _ in sizes)
@@ -74,10 +80,11 @@ def main():
                 vals = [r["best_value"] for r in rs if r and r.get("best_value") is not None]
                 live = sum(1 for r in rs if r and r["state"] == "running")
                 capped = sum(1 for r in rs if r and r["state"] == "max_steps")
+                stopped = sum(1 for r in rs if r and r["state"] == "stopped")
                 if not vals:
-                    cells.append("<td class='muted'>…</td>")
+                    cells.append("<td class='muted'>stopped</td>" if stopped else "<td class='muted'>…</td>")
                     continue
-                tag = (f" <span class='muted'>[{capped} at cap]</span>" if capped else "") + (" <span class='live'>●</span>" if live else "")
+                tag = (f" <span class='muted'>[{capped} at cap]</span>" if capped else "") + (f" <span class='muted'>[{stopped} stopped]</span>" if stopped else "") + (" <span class='live'>●</span>" if live else "")
                 cells.append(f"<td>{st.mean(vals):.3f} <span class='muted'>({min(vals):.3f}–{max(vals):.3f})</span>{tag}</td>")
         body.append(f"<tr><td>{title}</td>{''.join(cells)}</tr>")
     summary = (f"<div class='tablewrap'><table><thead><tr><th rowspan='2'>start</th>{head}</tr><tr>{sub}</tr></thead>"
@@ -202,15 +209,15 @@ Validation: shortest-path rate (mean@16) on 500 dev mazes every 20 steps.</p>
 <p class="stamp">{html.escape(args.updated)}</p></header>
 {strip}
 <section class="panel"><h2>Progress</h2><div class="stats">{''.join(prog)}</div></section>
-<section class="panel"><h2>Best validation is-shortest</h2><p class="muted" style="margin:0;font-size:13px">Mean of 3 seeds (min–max) of each run's best validation up to step 10,000; ● = at least one seed still running; [n at cap] = seeds that reached their step cap (state max_steps).</p>{summary}</section>
+<section class="panel"><h2>Best validation is-shortest</h2><p class="muted" style="margin:0;font-size:13px">Mean of 3 seeds (min–max) of each run's best validation up to step 10,000; ● = at least one seed still running; [n at cap] = seeds that reached their step cap (state max_steps); [n stopped] = seeds stopped before the cap (best so far).</p>{summary}</section>
 {means}
 {''.join(sections)}
 <section class="panel"><h2>Setup</h2><dl>
 <dt>Objective</dt><dd>−Â · min(π<sub>train</sub>/π<sub>rollout</sub>, 2) · log π<sub>train</sub> per token, weight detached; Â = group z-score (16 samples); no KL, no entropy bonus; token-mean</dd>
 <dt>Optimizer</dt><dd>lr 1e-5 constant after 20 warm-up steps; one optimizer step per rollout batch (no old-log-prob pass)</dd>
 <dt>Prompts per step</dt><dd>small, 2XS and 3XS 16 / 64 / 256 / 1024, medium 8 / 32 / 128 / 512 (× 16 samples); small / medium: the 1024 / 512 rung was added on 11-12 at 16:30 UTC</dd>
-<dt>2XS / 3XS</dt><dd>added 11-13: pretrained at LR 5e-4 (5 seeds, 40k steps); seeds 2, 3, 4 used (seeds 0 / 1 of 3XS stayed below 10%). The 3XS seed-3 10% base comes from a 10k-step LR cooldown (cosine 5e-4 → 0) of its 40k checkpoint, which ended at 8.4%; every other base is checkpoint averaging + interpolation of the constant-LR run</dd>
-<dt>Stopping</dt><dd>budget 10,000 steps per run (bests and curves use validations up to step 10,000). Small / medium: all RL was stopped on 11-12 at 18:40 UTC: the 9 small 256-prompt runs (at 5.8k–6.8k steps), 4 medium 128-prompt runs (at ~9.5k) and the 1,024 / 512-prompt rung are unfinished; the cells marked ● are their best so far. Early stopping (1,000 steps without a new best) was turned off on 11-12 at 07:35 UTC and the 4 runs it had stopped were resumed; a 20k extension started at 15:45 UTC was cancelled at 18:30 UTC (runs past 10k are reported at 10k)</dd>
+<dt>2XS / 3XS</dt><dd>added 11-13: pretrained at LR 5e-4 (5 seeds, 40k steps); seeds 2, 3, 4 used (seeds 0 / 1 of 3XS stayed below 10%). The 3XS seed-3 10% base comes from a 10k-step LR cooldown (cosine 5e-4 → 0) of its 40k checkpoint, which ended at 8.4%; every other base is checkpoint averaging + interpolation of the constant-LR run. Layout: 16 / 64 prompts packed on 1-GPU pods, 256 one per 1-GPU pod, 1,024 data-parallel on 4-GPU pods; the 9 3XS 1,024-prompt jobs have been queued (no dedicated 4-GPU capacity) since 11-13 06:21 UTC</dd>
+<dt>Stopping</dt><dd>budget 10,000 steps per run (bests and curves use validations up to step 10,000). Small / medium: all RL was stopped on 11-12 at 18:40 UTC: the 9 small 256-prompt runs (at 5.8k–6.8k steps), 4 medium 128-prompt runs (at ~9.5k) and the 1,024 / 512-prompt rung are unfinished ([n stopped] cells are their best so far; the 1,024 / 512-prompt runs never got past step 0, shown as stopped). Early stopping (1,000 steps without a new best) was turned off on 11-12 at 07:35 UTC and the 4 runs it had stopped were resumed; a 20k extension started at 15:45 UTC was cancelled at 18:30 UTC (runs past 10k are reported at 10k)</dd>
 <dt>Lengths</dt><dd>prompt 654 tokens, response cap 300; temperature 1 for training and validation</dd>
 <dt>Throughput</dt><dd>shared-prompt CUDA-graph decoder; update micro-batch ≤ 512 (small) / 256 (medium) samples; 4 reward workers; 1-GPU pods, 2–5 runs per GPU</dd>
 <dt>Bases</dt><dd><code>s3://scale-ml/genai/rl-distill/maze/rl_{{small,medium,2xs,3xs}}_dfs25_tis3s_v1/bases/&lt;level&gt;_s&lt;seed&gt;</code> (from <code>pt_dfs25_eps05_v1/&lt;size&gt;_is&lt;seed&gt;/tune3-&lt;level&gt;</code>)</dd>
