@@ -1,5 +1,8 @@
 # Budget study runbook (text-maze RL vs distillation, aiai-rtx-2, 8 GPUs)
 
+> The ScaleTrain pipeline of the 25×25 study (pretraining, exact tuning, TIS RL grids, report pages) is in
+> [`SCALETRAIN_RUNBOOK.md`](SCALETRAIN_RUNBOOK.md).
+
 Goal (set 2026-10-27; design doc section "Budget study"): three matched S/L pairs at goal_reached pass@1 ≈ 10% (`p10`,
 frozen), 1% (`p1`) and 0.1% (`p01`); per pair, five total-FLOPs budgets from S₀ RL's own saturation, Arm B = S₀ RL at
 that budget, Arm A = L₀ RL for a fraction ρ ∈ {0.5, 0.75, 0.9} of the budget then distillation (on-policy PG-k1 and
