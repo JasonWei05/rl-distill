@@ -62,6 +62,8 @@ def main():
     ap.add_argument("--ckpt-stride", type=int, default=5, help="spacing of the averaged checkpoints (5 = dense; 100 = every-100 runs)")
     ap.add_argument("--batch-tokens", type=int, default=262144, help="exact scorer tokens per batch (lower on a shared GPU)")
     ap.add_argument("--out-name", default=None, help="output dir name (default tune-<level>)")
+    ap.add_argument("--cross", type=int, default=None,
+                    help="approximate crossing step (default: from the run's stride screens; needed when they are missing or stop short)")
     args = ap.parse_args()
     t_start = time.time()
     run = os.path.join(args.work, os.path.basename(args.run_s3.rstrip("/")))
@@ -87,10 +89,15 @@ def main():
         except (json.JSONDecodeError, OSError):
             print(f"skipping unreadable {os.path.basename(f)}", flush=True)
     pts = sorted((int(k.split("-")[1]), v["is_shortest"]["pass@1"]) for k, v in sc.items() if k.startswith("ckpt-"))
-    smooth = [(s, statistics.median([q for _, q in pts[max(0, i - 2):i + 3]])) for i, (s, _) in enumerate(pts)]
-    cross = next((s for s, q in smooth if q >= args.target), pts[-1][0])
+    if args.cross is not None:
+        cross = args.cross
+    else:
+        if not pts:
+            raise SystemExit(f"no stride screens in {args.run_s3}: pass --cross")
+        smooth = [(s, statistics.median([q for _, q in pts[max(0, i - 2):i + 3]])) for i, (s, _) in enumerate(pts)]
+        cross = next((s for s, q in smooth if q >= args.target), pts[-1][0])
     hw, cs, ks = args.half_window, args.center_step, args.ckpt_stride
-    print(f"{os.path.basename(run)} {args.level}: screened crossing ~{cross}", flush=True)
+    print(f"{os.path.basename(run)} {args.level}: {'given' if args.cross is not None else 'screened'} crossing ~{cross}", flush=True)
 
     cache = {}
 

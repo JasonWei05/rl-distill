@@ -10,6 +10,8 @@
 #     (ROLLOUT_MICRO_BATCH_SIZE=8000); run names st3-* / mt3-*, S3 .../maze/rl_{small,medium}_dfs25_tis3s_v1
 #   GRID=t3sx / t3mx: the next rung of t3s / t3m (small 1024 / medium 512 prompts per step), same S3 grid, run names and W&B
 #     suffix, own pod names.
+#   GRID=t3x2 / t3x3: the t3s recipe on 2XS (1.0M) / 3XS (0.55M), prompts per step 16 64 256 1024, RL seeds 2 3 4 from base
+#     seeds 2 3 4; run names x2t3-* / x3t3-*, S3 .../maze/rl_{2xs,3xs}_dfs25_tis3s_v1
 #   GRID=e25 / e25i / e25r: the earlier small grids (TIS / IcePop train-inference masking [0.5, 5.0] / IcePop with REINFORCE,
 #     RL_ADV=reinforce_batch, at the same samples per step), one base seed per level: BASES_SPEC "<level>.s<seed> ..."
 #     (pick_shortest_bases.py / select_aligned_bases.py); run names spe25-* / spi25-* / sri25-*.
@@ -27,7 +29,7 @@ set -euo pipefail
 MAX_STEPS_IN="${MAX_STEPS:-}"   # step cap on top of early stopping (default per grid, else 5000)
 # per-grid outputs of the case below: never inherited from the caller's environment
 EXTRA_ENVS=""; WSFX=""; BATCHES_DEFAULT=""; RL_SEEDS_DEFAULT=""; MICRO_DEFAULT=""; MAX_STEPS_DEFAULT=""; PER_SEED_BASE=0; COST_DIV=1
-case "${GRID:?GRID: t3s | t3m | t3sx | t3mx | e25 | e25i | e25r}" in
+case "${GRID:?GRID: t3s | t3m | t3sx | t3mx | t3x2 | t3x3 | e25 | e25i | e25r}" in
   e25) OUT_S3=s3://scale-ml/genai/rl-distill/maze/rl_small_dfs25_eps05_v1; TAG_PREFIX=maze-rl-e25; SP=spe25; LR=1e-5; PAT=50
        : "${BASES_SPEC:?GRID=e25 needs BASES_SPEC (pick_shortest_bases.py)}"
        EXTRA_ENVS=",RL_REWARD=shortest,BASES_S3=${OUT_S3}/bases,DATA_S3=s3://scale-ml/genai/rl-distill/maze/data/dfs25_eps05,WANDB_PROJECT_NAME=tailrl-text-maze-dfs25-eps05,MAX_PROMPT_LENGTH=660,MAX_RESPONSE_LENGTH=300" ;;
@@ -54,6 +56,14 @@ case "${GRID:?GRID: t3s | t3m | t3sx | t3mx | e25 | e25i | e25r}" in
        [ "${GRID}" = t3mx ] && { OUT_S3=s3://scale-ml/genai/rl-distill/maze/rl_medium_dfs25_tis3s_v1; TAG_PREFIX=maze-rl-t3mx; SP=mt3; BATCHES_DEFAULT="512"; MICRO_DEFAULT=512; WSFX=t3m; }
        LR=1e-5; PAT=2000; MAX_STEPS_DEFAULT=20000; PER_SEED_BASE=1; BASES_SPEC="${BASES_SPEC:-p1 p3 p10}"
        EXTRA_ENVS=",RL_REWARD=shortest,RL_LOSS=tis,TEST_FREQ=20,PPO_MICRO_SAMPLES=${MICRO:-${MICRO_DEFAULT}},REWARD_NUM_PROCESSES=12,PREFIX_DECODE=1,ROLLOUT_MICRO_BATCH_SIZE=16384,BASES_S3=${OUT_S3}/bases,DATA_S3=s3://scale-ml/genai/rl-distill/maze/data/dfs25_eps05,WANDB_PROJECT_NAME=tailrl-text-maze-dfs25-eps05,MAX_PROMPT_LENGTH=660,MAX_RESPONSE_LENGTH=300" ;;
+  # the t3s recipe on the two smallest sizes, 2XS (1.0M) and 3XS (0.55M): all four rungs in one grid (launch the 1024 rung
+  # separately with BATCHES=1024 and its pod layout), RL seeds 2 3 4 from base seeds 2 3 4 (seeds 0 / 1 were not used)
+  t3x2|t3x3)
+       [ "${GRID}" = t3x2 ] && { OUT_S3=s3://scale-ml/genai/rl-distill/maze/rl_2xs_dfs25_tis3s_v1; TAG_PREFIX=maze-rl-t3x2; SP=x2t3; }
+       [ "${GRID}" = t3x3 ] && { OUT_S3=s3://scale-ml/genai/rl-distill/maze/rl_3xs_dfs25_tis3s_v1; TAG_PREFIX=maze-rl-t3x3; SP=x3t3; }
+       BATCHES_DEFAULT="16 64 256 1024"; RL_SEEDS_DEFAULT="2 3 4"; MICRO_DEFAULT=512
+       LR=1e-5; PAT=50; MAX_STEPS_DEFAULT=10000; PER_SEED_BASE=1; BASES_SPEC="${BASES_SPEC:-p1 p3 p10}"
+       EXTRA_ENVS=",RL_REWARD=shortest,RL_LOSS=tis,TEST_FREQ=20,PPO_MICRO_SAMPLES=${MICRO:-${MICRO_DEFAULT}},REWARD_NUM_PROCESSES=4,PREFIX_DECODE=1,ROLLOUT_MICRO_BATCH_SIZE=8000,BASES_S3=${OUT_S3}/bases,DATA_S3=s3://scale-ml/genai/rl-distill/maze/data/dfs25_eps05,WANDB_PROJECT_NAME=tailrl-text-maze-dfs25-eps05,MAX_PROMPT_LENGTH=660,MAX_RESPONSE_LENGTH=300" ;;
   *) echo "unknown GRID ${GRID}" >&2; exit 1 ;;
 esac
 export MAX_STEPS="${MAX_STEPS_IN:-${MAX_STEPS_DEFAULT:-5000}}"
