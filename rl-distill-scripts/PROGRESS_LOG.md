@@ -27,8 +27,12 @@ builder (`r c v` triples then DONE), a ~20-word tokenizer, a verl reward + GPU j
 
 **Prior result in that repo (`COT_COMPARISON.md`, June 2026).** A random non-language `<think>` block before the trace
 raised SFT greedy solve rate 8.7% -> ~69% (4x4, 204K) and 8.6% -> 21% (9x9 clues 20-70, 1.2M, 500 eval puzzles); short
-thinking (k 2-10) is best, k >= 20-32 degrades; a pause-token / extra-positions effect (random content), the filler-token
-control and GRPO were never run.
+thinking (k 2-10) is best, k >= 20-32 degrades; a pause-token / extra-positions effect (random content); the filler-token
+control was never run. RL was run afterwards but never written up (`logs_rl/`, W&B `sudoku-rl-dapo`, Jun 17-18): DAPO
+(token-level, clip 0.2 / 0.25, no KL, 64 puzzles x 8 samples, lr 2e-5, 5000 steps) from the 9x9 SFT checkpoints, val
+solve rate on 500 puzzles, base -> best (mean of the last 10 evals): no CoT 8.0 -> 32.2% (30.4); CoT n5 k5-10 22.0 ->
+30.6% (28.6); n10 k10-20 11.4 -> 23.6% (21.4); n20 k20-40 8.2 -> 19.4% (17.1). RL erased the CoT head start: no CoT
+ends on top. Caveat: no-CoT rollouts use position-masked decoding (always well-formed triples), CoT rollouts are free.
 
 ## 2026-11-13 — maze fastrl: single-file RL trainer replacing verl for the maze runs (done)
 
