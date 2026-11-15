@@ -28,7 +28,8 @@ CAP = 10000
 
 def base_pass1(work, size, seed, lvl):
     """Exact pass@1 of the seed's tuned base (any attempt of that seed holding tune3-<level>, e.g. a cooldown continuation)."""
-    fs = sorted(glob.glob(os.path.join(work, f"{size}_is{seed}_a*", f"tune3-{lvl}", "tune.json")))
+    fs = glob.glob(os.path.join(work, f"{size}_is{seed}_a*", f"tune3-{lvl}", "tune.json"))
+    assert len(fs) <= 1, fs
     return json.load(open(fs[0]))["best"]["passk"]["1"] if fs else None
 
 

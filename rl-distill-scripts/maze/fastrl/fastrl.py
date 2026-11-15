@@ -566,7 +566,7 @@ class Trainer:
         wandb.finish()
 
 
-def main():
+def parser():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", required=True, help="HF dir of the starting policy (config.json, model.safetensors, tokenizer.json)")
     ap.add_argument("--train", required=True, help="train parquet (verl RL format)")
@@ -586,7 +586,11 @@ def main():
     ap.add_argument("--max-response", type=int, default=300)
     ap.add_argument("--wandb-project", default="tailrl-text-maze-dfs25-eps05")
     ap.add_argument("--wandb-id", required=True)
-    Trainer(ap.parse_args()).run()
+    return ap
+
+
+def main():
+    Trainer(parser().parse_args()).run()
 
 
 if __name__ == "__main__":

@@ -22,12 +22,12 @@ ap.add_argument("--steps", type=int, default=20)
 args = ap.parse_args()
 for spec in args.batches:
     batch, micro = map(int, spec.split(":"))
-    a = argparse.Namespace(base=args.base, train=f"{args.data}/main_parquet/train.parquet", val=f"{args.data}/eval500/test.parquet",
-                           out=tempfile.mkdtemp(), batch=batch, seed=3, n=16, micro=micro, lr=1e-5, warmup=20, tis_cap=2.0,
-                           steps=args.steps, test_freq=args.steps + 1, patience=args.steps, val_n=16, max_response=300,
-                           wandb_project="bench", wandb_id=f"bench-b{batch}")
+    a = fastrl.parser().parse_args([
+        "--base", args.base, "--train", f"{args.data}/main_parquet/train.parquet", "--val", f"{args.data}/eval500/test.parquet",
+        "--out", tempfile.mkdtemp(), "--batch", str(batch), "--seed", "3", "--micro", str(micro), "--steps", str(args.steps),
+        "--wandb-project", "bench", "--wandb-id", f"bench-b{batch}"])
     tr = fastrl.Trainer(a)
-    tr.validate()
+    tr.validate()  # warm-up: compiles and captures the decode graphs
     t = time.perf_counter()
     tr.validate()
     val_s = time.perf_counter() - t

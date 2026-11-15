@@ -89,13 +89,10 @@ def main():
         except (json.JSONDecodeError, OSError):
             print(f"skipping unreadable {os.path.basename(f)}", flush=True)
     pts = sorted((int(k.split("-")[1]), v["is_shortest"]["pass@1"]) for k, v in sc.items() if k.startswith("ckpt-"))
-    if args.cross is not None:
-        cross = args.cross
-    else:
-        if not pts:
-            raise SystemExit(f"no stride screens in {args.run_s3}: pass --cross")
-        smooth = [(s, statistics.median([q for _, q in pts[max(0, i - 2):i + 3]])) for i, (s, _) in enumerate(pts)]
-        cross = next((s for s, q in smooth if q >= args.target), pts[-1][0])
+    if args.cross is None and not pts:
+        raise SystemExit(f"no stride screens in {args.run_s3}: pass --cross")
+    smooth = [(s, statistics.median([q for _, q in pts[max(0, i - 2):i + 3]])) for i, (s, _) in enumerate(pts)]
+    cross = args.cross if args.cross is not None else next((s for s, q in smooth if q >= args.target), pts[-1][0])
     hw, cs, ks = args.half_window, args.center_step, args.ckpt_stride
     print(f"{os.path.basename(run)} {args.level}: {'given' if args.cross is not None else 'screened'} crossing ~{cross}", flush=True)
 

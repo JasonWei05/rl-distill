@@ -71,7 +71,7 @@ GPUs (~20 s per exact evaluation). 3XS seed 3 at 10% is tuned on the cooldown ru
 `s3://.../maze/rl_{2xs,3xs}_dfs25_tis3s_v1/bases/<level>_s<seed>`.
 
 **RL (done 11-14).** The small TIS grid's recipe and final layouts on both sizes (`GRID=t3x2` / `t3x3`, code `787358c6`,
-`/tmp/jw_maze/launch_t3x.sh`): prompts per step 16 / 64 / 256 / 1024 × levels p1 / p3 / p10 × RL seeds 2 / 3 / 4 (run seed i
+`rl/launch_t3x_grids.sh`): prompts per step 16 / 64 / 256 / 1024 × levels p1 / p3 / p10 × RL seeds 2 / 3 / 4 (run seed i
 from base seed i) = 36 runs per size, 10k steps (patience never binds), lr 1e-5, validation every 20 steps.
 - Pods per size: 16 + 64 packed on 4 one-GPU pods; 256 one per one-GPU pod (update micro-batch ≤ 1024); 1024 data-parallel
   on 9 four-GPU pods (`RUN_ALL_GPUS=1`). 44 supervisors, 98 GPUs, dedicated; shared-prompt decode + update.

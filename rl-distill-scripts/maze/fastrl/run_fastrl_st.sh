@@ -25,17 +25,18 @@ base() { aws s3 sync --only-show-errors "${MAZE_S3}/$1" "${B}/$1"; echo "${B}/$1
 
 if [ "${MODE}" = runs ]; then
   IFS=+ read -r -a specs <<< "${RUNS:?}"
-  ( while sleep "${SYNC_SECONDS:-300}"; do aws s3 sync --only-show-errors "${R}" "${OUT_S3}/runs" --exclude "*/wandb/*"; done ) & sync=$!
+  # a transient S3 error must not end the sidecar (set -e): the final sync below is the one that has to succeed
+  ( while sleep "${SYNC_SECONDS:-300}"; do aws s3 sync --only-show-errors "${R}" "${OUT_S3}/runs" --exclude "*/wandb/*" || echo "SYNC_RETRY"; done ) & sync=$!
   pids=()
-  for i in "${!specs[@]}"; do
-    IFS=: read -r name bpath batch seed micro <<< "${specs[$i]}"
+  for spec in "${specs[@]}"; do
+    IFS=: read -r name bpath batch seed micro <<< "${spec}"
     aws s3 sync --only-show-errors "${OUT_S3}/runs/${name}" "${R}/${name}"
     if [ -f "${R}/${name}/COMPLETE.json" ]; then echo "SKIP_COMPLETE ${name}"; continue; fi
-    bdir="$(base "${bpath}")"
-    CUDA_VISIBLE_DEVICES=$(( i % ${GPUS:-1} )) "${PY}" "${F}/fastrl.py" --base "${bdir}" --train "${D}/main_parquet/train.parquet" \
+    bdir="$(base "${bpath}")"; gpu=$(( ${#pids[@]} % ${GPUS:-1} ))
+    CUDA_VISIBLE_DEVICES="${gpu}" "${PY}" "${F}/fastrl.py" --base "${bdir}" --train "${D}/main_parquet/train.parquet" \
       --val "${D}/eval500/test.parquet" --out "${R}/${name}" --batch "${batch}" --seed "${seed}" --micro "${micro}" \
       --steps "${STEPS:-10000}" --wandb-project "${WP}" --wandb-id "${name}" > "${R}/${name}.log" 2>&1 &
-    pids+=($!); echo "RUN_START ${name} gpu $(( i % ${GPUS:-1} ))"
+    pids+=($!); echo "RUN_START ${name} gpu ${gpu}"
   done
   rc=0; for p in "${pids[@]}"; do wait "${p}" || rc=1; done
   kill "${sync}"; aws s3 sync --only-show-errors "${R}" "${OUT_S3}/runs" --exclude "*/wandb/*"
@@ -49,13 +50,15 @@ fi
 [ "${MODE}" = bench ] || { echo "unknown MODE ${MODE}" >&2; exit 1; }
 L=/tmp/fastrl/bench_logs; mkdir -p "${L}"
 IFS=+ read -r -a bases <<< "${BENCH_BASES:?}"
+[[ "${bases[0]}" == */p3_* ]] || { echo "the first bench base must be a p3_ level (the tests also use its p10_ counterpart)" >&2; exit 1; }
 uv pip install --python "${PY}" -q pytest
 (cd "${F}" && FASTRL_DATA="${D}" FASTRL_BASE="$(base "${bases[0]}")" FASTRL_BASE_HI="$(base "${bases[0]/p3_/p10_}")" \
-   PYTHONPATH="${F}:${T}/experiments/text_maze:${M}/rl" "${PY}" -m pytest -q -p no:cacheprovider test_fastrl.py) > "${L}/tests.log" 2>&1
-grep -E "passed|failed" "${L}/tests.log"
+   PYTHONPATH="${F}:${T}/experiments/text_maze:${M}/rl" "${PY}" -m pytest -q -p no:cacheprovider test_fastrl.py) > "${L}/tests.log" 2>&1 \
+  || { aws s3 cp --only-show-errors "${L}/tests.log" "${OUT_S3}/bench/${TAG}/tests.log"; tail -n 30 "${L}/tests.log"; exit 1; }
+grep -E "passed" "${L}/tests.log"
 for b in "${bases[@]}"; do
   read -r -a batches <<< "${BENCH_BATCHES:-16:512 64:512 256:1024 1024:1024}"
-  WANDB_MODE=disabled "${PY}" "${F}/bench.py" --base "$(base "${b}")" --data "${D}" --batches "${batches[@]}" 2>&1 | grep BENCH | tee -a "${L}/fastrl.log"
+  WANDB_MODE=disabled "${PY}" "${F}/bench.py" --base "$(base "${b}")" --data "${D}" --batches "${batches[@]}" 2>&1 | tee -a "${L}/fastrl_full.log" | grep BENCH | tee -a "${L}/fastrl.log"
 done
 aws s3 sync --only-show-errors "${L}" "${OUT_S3}/bench/${TAG}"
 cat > "${T}/.env" <<EOF
@@ -65,6 +68,7 @@ WANDB_MODE=online
 WANDB_ENTITY=rl-distill
 WANDB_PROJECT=${WP}
 EOF
+# the t3 recipe as rl/rl_tis_run.sh runs it (keep the two in sync)
 mkdir -p /tmp/fastrl/verl_base && ln -sfn "$(base "${bases[0]}")" /tmp/fastrl/verl_base/ckpt-0
 cd "${T}/experiments/text_maze"
 export ATTN_IMPL=sdpa ACTOR_LR=1e-5 MAX_ACTOR_CKPT_TO_KEEP=2 RAY_PORT_INDEX=0 VAL_PARQUET_DIR="${D}/eval500" REWARD_NUM_PROCESSES=4 \
@@ -75,13 +79,15 @@ export EXTRA_HYDRA_ARGS="actor_rollout_ref.actor.optim.lr_warmup_steps=20 +actor
 custom_reward_function.path=${M}/rl/maze_shortest_reward.py custom_reward_function.name=compute_score \
 +actor_rollout_ref.rollout.plain_generate=True +actor_rollout_ref.rollout.graph_generate=True +actor_rollout_ref.rollout.prefix_decode=True \
 +actor_rollout_ref.actor.prefix_shared_forward=True actor_rollout_ref.model.enable_gradient_checkpointing=False"
+rc=0
 for spec in ${VERL_BATCHES:-16:512 64:512 256:1024}; do
   batch="${spec%%:*}"; micro="${spec##*:}"
   PPO_MICRO_BATCH=$(( batch * 16 < micro ? batch * 16 : micro )) bash scripts/train.sh --suite "verlbench-${TAG}-b${batch}" --method grpo \
     --model-base-dir /tmp/fastrl/verl_base --ckpt-step 0 --seed 3 --gpu-ids 0 --n-rollouts 16 --batch-size "${batch}" \
     --total-steps "${VERL_STEPS:-40}" --reward binary --reward-transform raw --val-n 16 --val-prompts 500 --test-freq 20 \
     --save-freq 1000 --max-response-length 300 --train-parquet-dir "${D}/main_parquet" --val-parquet-dir "${D}/eval500" \
-    > "${L}/verl_b${batch}.log" 2>&1 || echo "VERL_FAILED b${batch}"
+    > "${L}/verl_b${batch}.log" 2>&1 || { echo "VERL_FAILED b${batch}"; rc=1; }
   aws s3 sync --only-show-errors "${L}" "${OUT_S3}/bench/${TAG}"
 done
+[ "${rc}" = 0 ] || exit 1
 echo "{\"done\": \"$(date -u +%FT%TZ)\"}" | aws s3 cp - "${OUT_S3}/pods/${TAG}.COMPLETE"; echo "FASTRL_BENCH_DONE ${TAG}"

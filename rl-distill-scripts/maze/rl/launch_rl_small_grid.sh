@@ -56,8 +56,8 @@ case "${GRID:?GRID: t3s | t3m | t3sx | t3mx | t3x2 | t3x3 | e25 | e25i | e25r}" 
        [ "${GRID}" = t3mx ] && { OUT_S3=s3://scale-ml/genai/rl-distill/maze/rl_medium_dfs25_tis3s_v1; TAG_PREFIX=maze-rl-t3mx; SP=mt3; BATCHES_DEFAULT="512"; MICRO_DEFAULT=512; WSFX=t3m; }
        LR=1e-5; PAT=2000; MAX_STEPS_DEFAULT=20000; PER_SEED_BASE=1; BASES_SPEC="${BASES_SPEC:-p1 p3 p10}"
        EXTRA_ENVS=",RL_REWARD=shortest,RL_LOSS=tis,TEST_FREQ=20,PPO_MICRO_SAMPLES=${MICRO:-${MICRO_DEFAULT}},REWARD_NUM_PROCESSES=12,PREFIX_DECODE=1,ROLLOUT_MICRO_BATCH_SIZE=16384,BASES_S3=${OUT_S3}/bases,DATA_S3=s3://scale-ml/genai/rl-distill/maze/data/dfs25_eps05,WANDB_PROJECT_NAME=tailrl-text-maze-dfs25-eps05,MAX_PROMPT_LENGTH=660,MAX_RESPONSE_LENGTH=300" ;;
-  # the t3s recipe on the two smallest sizes, 2XS (1.0M) and 3XS (0.55M): all four rungs in one grid (launch the 1024 rung
-  # separately with BATCHES=1024 and its pod layout), RL seeds 2 3 4 from base seeds 2 3 4 (seeds 0 / 1 were not used)
+  # the t3s recipe on the two smallest sizes, 2XS (1.0M) and 3XS (0.55M): all four rungs in one grid (rl/launch_t3x_grids.sh
+  # launches it with the final pod layouts), RL seeds 2 3 4 from base seeds 2 3 4 (seeds 0 / 1 were not used)
   t3x2|t3x3)
        [ "${GRID}" = t3x2 ] && { OUT_S3=s3://scale-ml/genai/rl-distill/maze/rl_2xs_dfs25_tis3s_v1; TAG_PREFIX=maze-rl-t3x2; SP=x2t3; }
        [ "${GRID}" = t3x3 ] && { OUT_S3=s3://scale-ml/genai/rl-distill/maze/rl_3xs_dfs25_tis3s_v1; TAG_PREFIX=maze-rl-t3x3; SP=x3t3; }
