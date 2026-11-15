@@ -90,8 +90,7 @@ validation is_shortest averaged over each 1000-step window (seed mean; the range
 | 9000-9999 | 0.1655 | 0.1670 | 0.2036 | 0.2049 |
 | best (seeds 2 / 3 / 4) | 0.145 / 0.206 / 0.180 | 0.147 / 0.209 / 0.184 | 0.180 / 0.235 / 0.230 | 0.177 / 0.243 / 0.226 |
 
-256 prompts per step (ScaleTrain, one dedicated H100 each, 10k steps) and 1024 prompts (seed 3 only, verl still running;
-first 6000 steps):
+256 prompts per step (ScaleTrain, one dedicated H100 each, 10k steps) and 1024 prompts (seed 3):
 
 | steps | fastrl, 256 | verl, 256 | fastrl, 1024 (s3) | verl, 1024 (s3) |
 |---|---|---|---|---|
@@ -101,14 +100,14 @@ first 6000 steps):
 | 3000-3999 | 0.1908 | 0.1916 | 0.2427 | 0.2443 |
 | 4000-4999 | 0.2037 | 0.2042 | 0.2565 | 0.2561 |
 | 5000-5999 | 0.2115 | 0.2118 | 0.2699 | 0.2687 |
-| 6000-6999 | 0.2205 | 0.2210 | | |
-| 7000-7999 | 0.2267 | 0.2263 | | |
-| 8000-8999 | 0.2327 | 0.2334 | | |
-| 9000-9999 | 0.2393 | 0.2411 | | |
-| best (seeds 2 / 3 / 4) | 0.207 / 0.274 / 0.270 | 0.208 / 0.274 / 0.274 | | |
-| wall clock, 10k steps | 1.47 h, 1 GPU | 11.7-12.2 h, 1 GPU | ~4.5 h, 1 GPU | ~24 h, 4 GPUs (6.6k steps in 16 h) |
+| 6000-6999 | 0.2205 | 0.2210 | 0.2790 | 0.2770 |
+| 7000-7999 | 0.2267 | 0.2263 | 0.2855 | 0.2876 |
+| 8000-8999 | 0.2327 | 0.2334 | 0.2914 | 0.2910 |
+| 9000-9999 | 0.2393 | 0.2411 | 0.2974 | 0.2970 |
+| best (seeds 2 / 3 / 4) | 0.207 / 0.274 / 0.270 | 0.208 / 0.274 / 0.274 | 0.307 (s3) | 0.307 (s3) |
+| wall clock, 10k steps | 1.47 h, 1 GPU | 11.7-12.2 h, 1 GPU | 4.30 h, 1 GPU | 24.0 h, 4 GPUs |
 
-The FLOPs ledgers agree too (256, seed 2: 417.6k vs 416.7k TFLOPs).
+The FLOPs ledgers agree too (256, seed 2: 417.6k vs 416.7k TFLOPs; 1024: 1.681M vs 1.677M).
 
 Runs: `/tmp/fastrl/runs/e2e` on the devbox (W&B `fastrl-maze`, `fr-x2t3-p3-b{16,64}-s{2,3,4}`); 256 / 1024 prompts per step
 on ScaleTrain (`launch_fastrl_st.sh`, `s3://scale-ml/genai/rl-distill/maze/fastrl_v1/runs/`).

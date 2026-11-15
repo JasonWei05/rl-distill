@@ -12,7 +12,7 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
-## 2026-11-13 — maze fastrl: single-file RL trainer replacing verl for the maze runs (done; 256 / 1024 comparisons running)
+## 2026-11-13 — maze fastrl: single-file RL trainer replacing verl for the maze runs (done)
 
 **Goal.** The maze RL steps were overhead-bound (2XS and 3XS ran at the same 4 s/step at 256 prompts): write the t3 recipe
 (GRPO 16, shortest-path reward, token-level TIS cap 2, lr 1e-5, fp16 compute / fp32 masters) as one clean file without Ray /
@@ -37,9 +37,9 @@ reserved memory every step and OOMed shared GPUs after ~2k steps -> one pool per
 **ScaleTrain comparisons** (1-GPU dedicated, `fastrl-x2-b256-s{2,3,4}`, `fastrl-x2-b1024-s3`; outputs
 `s3://scale-ml/genai/rl-distill/maze/fastrl_v1/runs/`). 256 prompts, 10k steps, done 11-13: best 0.207 / 0.274 / 0.270 vs
 verl 0.208 / 0.274 / 0.274, every 1000-step window within 0.002, in 1.47 h on 1 GPU vs verl's 11.7-12.2 h on 1 GPU (8x).
-1024 prompts, seed 3: windows within 0.0016 through step 6000 (fastrl 6.2k steps in 2.7 h on 1 GPU, verl 6.6k in 16 h on 4).
+1024 prompts, seed 3, done 11-14: best 0.307 vs 0.307, windows within 0.0021, 4.30 h on 1 GPU vs verl's 24.0 h on 4 GPUs.
 
-**Status.** 1024-prompt seed-3 run still training (~2 h left). Not yet used for new grids.
+**Status.** Done. Not yet used for new grids.
 
 ## 2026-11-13 — 2XS / 3XS: LR 5e-4 pretraining results, 1/3/10% bases (3 seeds each), TIS RL grids launched (running)
 
