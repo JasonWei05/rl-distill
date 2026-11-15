@@ -47,8 +47,8 @@ cd rl-distill-scripts/maze/fastrl
 CUDA_VISIBLE_DEVICES=0 PYTHONPATH=.:$TAILRL/experiments/text_maze:../rl $TAILRL/.venv/bin/python -m pytest -q test_fastrl.py
 ```
 
-16 tests, ~2 min on an H100. Exact: prompt tokens (HF tokenizer), maze parsing + BFS (TailRL `MazeEnv`, data
-`optimal_path_length`), the judge on 29.5k real and adversarial responses (every outcome field), GRPO advantage, TIS loss
+17 tests, ~70 s on an H100. Exact: prompt tokens (HF tokenizer), the response mask, maze parsing + BFS (TailRL `MazeEnv`, data
+`optimal_path_length`), the judge on 31k real and adversarial responses (every outcome field), GRPO advantage, TIS loss
 and its gradient, prompt order over several epochs, FLOPs. Up to float rounding, measured against float64: the forward
 (fp32: as close as HF's fp32; fp16: as close as verl's prefix forward), decode log-probs (as close as verl's
 `PrefixSharedDecoder`), one full update against verl's `DataParallelPPOActor` on FSDP over 6 batches (fp32 and fp16).

@@ -8,10 +8,11 @@ DataParallelPPOActor on FSDP (fp32: equal up to float rounding; fp16 mixed preci
 
     cd rl-distill-scripts/maze/fastrl
     CUDA_VISIBLE_DEVICES=0 PYTHONPATH=.:$TAILRL/experiments/text_maze:../rl $TAILRL/.venv/bin/python -m pytest -q test_fastrl.py
-env: FASTRL_BASE (a 2XS base, HF dir), FASTRL_DATA (dir with eval500/ and main_parquet/), FASTRL_BASE_HI (a 10% base)
+env: FASTRL_BASE (a 2XS 3% base, HF dir), FASTRL_BASE_HI (its 10% counterpart), FASTRL_DATA (dir with eval500/ and main_parquet/)
 """
 
 import argparse
+import json
 import os
 
 import numpy as np
@@ -29,6 +30,7 @@ BASE_HI = os.environ.get("FASTRL_BASE_HI", "/tmp/fastrl/bases/x2_p10_s3")
 DATA = os.environ.get("FASTRL_DATA", "/tmp/jw_maze/dfs25_eps05")
 VAL, TRAIN = f"{DATA}/eval500/test.parquet", f"{DATA}/main_parquet/train.parquet"
 N = 16
+MAX_PROMPT, MAX_RESP = 660, 300  # the t3 grids' data.max_prompt_length / max_response_length
 
 
 @pytest.fixture(scope="module")
@@ -67,14 +69,17 @@ def rollouts(model, vocab, val):
     for name, base in (("lo", BASE), ("hi", BASE_HI)):
         w = {k: v.half() for k, v in master(base).items()}
         torch.manual_seed(0)
-        tok, logp, ent = fr.Decoder(model, vocab, 300).generate(w, val, N)
+        tok, logp, ent = fr.Decoder(model, vocab, MAX_RESP).generate(w, val, N)
         out[name] = (w, tok, logp, ent, fr.response_mask(tok, vocab.eos))
     return out
 
 
-def test_prompt_tokens_match_hf_tokenizer(vocab, tokenizer, val_rows):
-    """verl RLHFDataset: tokenizer("".join(contents), add_special_tokens=False) (apply_chat_template=False)."""
-    toks = fr.load_prompts(VAL, vocab)
+def test_prompt_tokens_match_hf_tokenizer(vocab, tokenizer, val_rows, tmp_path):
+    """verl RLHFDataset: tokenizer("".join(contents), add_special_tokens=False) (apply_chat_template=False). The validation
+    set is tokenized afresh; the train half reads the shared cache."""
+    fresh = str(tmp_path / "test.parquet")
+    pq.write_table(pq.read_table(VAL), fresh)
+    toks = fr.load_prompts(fresh, vocab)
     for i, r in enumerate(val_rows):
         assert tokenizer(r["prompt"][0]["content"], add_special_tokens=False)["input_ids"] == toks[i].tolist()
     train, pf = fr.load_prompts(TRAIN, vocab), pq.ParquetFile(TRAIN)
@@ -102,14 +107,14 @@ def test_mazes_match_tailrl(vocab, val, val_rows):
             assert _bfs_optimal_length(env.grid, env.start, env.goal) == lstar[i] == r["extra_info"]["optimal_path_length"]
 
 
-def synthetic_responses(vocab, val_rows, R=300):
+def synthetic_responses(vocab, val_rows):
     """Hand-made and random responses per validation maze (rows of maze i at i), EOS-terminated and pad-filled as the
     decoder returns them: the optimal path, variations of it (short, overshooting, detours, extra / special / newline /
     unknown words, no DONE, words after DONE), random move strings and random token strings."""
     v, rng = vocab.ids, np.random.default_rng(0)
     moves = [v[a] for a in ("UP", "DOWN", "LEFT", "RIGHT")]
     undo = {v["UP"]: v["DOWN"], v["DOWN"]: v["UP"], v["LEFT"]: v["RIGHT"], v["RIGHT"]: v["LEFT"]}
-    DONE, EOS = v["DONE"], v["<eos>"]
+    DONE, EOS, R = v["DONE"], v["<eos>"], MAX_RESP
     rows, maze = [], []
     for i, r in enumerate(val_rows):
         path = r["extra_info"]["answer"].split()
@@ -136,21 +141,25 @@ def synthetic_responses(vocab, val_rows, R=300):
 
 def test_judge_matches_tailrl(vocab, tokenizer, val, val_rows, rollouts):
     """Every outcome field against maze_shortest_reward.compute_score(decode(response, skip_special_tokens=True)), as
-    verl's PrimeRewardManager calls it, on 16000 real samples and 13500 synthetic responses."""
+    verl's PrimeRewardManager calls it, on 16000 real samples and 15000 synthetic responses."""
     from maze_shortest_reward import compute_score
     syn, syn_maze = synthetic_responses(vocab, val_rows)
     sets = [(rollouts[k][1], torch.arange(len(val), device="cuda").repeat_interleave(N)) for k in ("lo", "hi")] + [(syn, syn_maze)]
     mz = fr.Mazes(val, vocab)
     for tok, mi in sets:
-        sub = object.__new__(fr.Mazes)
-        sub.S, sub.free, sub.start, sub.goal, sub.lstar = mz.S, mz.free[mi], mz.start[mi], mz.goal[mi], mz.lstar[mi]
-        mine = {k: x.tolist() for k, x in fr.judge(tok, sub, vocab).items()}
+        mine = {k: x.tolist() for k, x in fr.judge(tok, mz, mi, vocab).items()}
         texts = tokenizer.batch_decode(tok.tolist(), skip_special_tokens=True)
         for j, (s, i) in enumerate(zip(texts, mi.tolist())):
             ref = compute_score("maze_17", s, val_rows[i]["reward_model"]["ground_truth"])
             for key in ("score",) + fr.OUTCOMES:
                 assert mine[key][j] == ref[key], (key, j, s, ref, {k: mine[k][j] for k in mine})
-    assert sum(fr.judge(rollouts["hi"][1], mz.repeat(N), vocab)["score"].tolist()) > 500  # the 10% base scores
+    assert fr.judge(rollouts["hi"][1], mz, sets[1][1], vocab)["score"].sum() > 500  # the 10% base scores
+
+
+def test_response_mask_matches_verl(vocab, val_rows, rollouts):
+    from verl.utils.torch_functional import get_response_mask
+    for tok in (rollouts["hi"][1], synthetic_responses(vocab, val_rows)[0]):
+        assert torch.equal(fr.response_mask(tok, vocab.eos), get_response_mask(tok, vocab.eos, dtype=torch.bool))
 
 
 def test_grpo_advantage_matches_verl():
@@ -176,6 +185,7 @@ def test_tis_loss_matches_verl():
     mask = (torch.arange(R) < torch.randint(1, R + 1, (B, 1))).float()
     logp = (-5 * torch.rand(B, R)).requires_grad_()
     old = logp.detach() + 0.8 * torch.randn(B, R)  # ratios well above 2 and below 1/2
+    old[0, :8] = logp[0, :8].detach() + 25  # beyond the +-20 log-ratio clamp
     adv = torch.randn(B, 1) * mask
     ref = compute_policy_loss_tis(old, logp, adv, mask, "token-mean", OmegaConf.create({"policy_loss": {"tis_cap": 2.0}}))
     (g_ref,) = torch.autograd.grad(ref[0], logp)
@@ -186,7 +196,7 @@ def test_tis_loss_matches_verl():
     assert 0.05 < stats[1] < 0.5 and 0.05 < stats[3] < 0.5
 
 
-@pytest.mark.parametrize("n,batch,workers", [(1000, 64, 0), (1000, 64, 2), (1300000, 256, 0)])
+@pytest.mark.parametrize("n,batch,workers", [(1000, 64, 0), (1000, 64, 2), (pq.ParquetFile(TRAIN).metadata.num_rows, 256, 0)])
 def test_prompt_order_matches_verl(n, batch, workers):
     """verl main_ppo.create_rl_sampler + the trainer's StatefulDataLoader (drop_last), over several epochs."""
     from omegaconf import OmegaConf
@@ -207,14 +217,17 @@ def test_prompt_order_matches_verl(n, batch, workers):
 def test_flops_match_verl_ledger():
     from verl.utils.flops_ledger import FlopsLedger
     led = FlopsLedger.from_model_path(BASE)
+    torch.manual_seed(0)
     seqlens = torch.randint(655, 955, (4096,))
-    import json
     assert abs(fr.train_tflops(json.load(open(f"{BASE}/config.json")), seqlens) - led.train_tflops(seqlens.tolist())) < 1e-9
 
 
+def group_rows(groups):
+    return (groups[:, None] * N + torch.arange(N, device="cuda")).flatten()
+
+
 def full_sequences(val, tok, mask, groups):
-    G = len(groups)
-    rows = (groups[:, None] * N + torch.arange(N, device="cuda")).flatten()
+    rows = group_rows(groups)
     r = max(int(mask[rows].sum(1).max()), 2)
     return val[groups], tok[rows, :r], mask[rows, :r]
 
@@ -245,7 +258,7 @@ def test_forward_matches_hf_and_verl(model, val, rollouts):
     assert err32.mean() < 1e-5 and err32.mean() <= 1.5 * err32_hf.mean() and err32.max() <= 1.5 * err32_hf.max()
     with torch.no_grad():
         mine16 = model.train_logprobs(w16, prompts, resp, N)
-        pad = 660 - Lp
+        pad = MAX_PROMPT - Lp
         ids = torch.cat([torch.zeros(len(resp), pad, dtype=torch.long, device="cuda"), ids], 1)
         am = torch.cat([torch.zeros(len(resp), pad, dtype=torch.long, device="cuda"), torch.ones(len(resp), Lp, dtype=torch.long, device="cuda"), mk.long()], 1)
         with torch.autocast("cuda", dtype=torch.float16):
@@ -267,15 +280,15 @@ def test_decode_logprobs_match_forward(model, val, rollouts, vocab):
     errors = {}
     for name, base in (("lo", BASE), ("hi", BASE_HI)):
         w16, tok, logp, ent, mask = rollouts[name]
-        assert (tok[~mask] == vocab.pad).all() and (mask.sum(1) < 300).float().mean() > 0.9
+        assert (tok[~mask] == vocab.pad).all() and (mask.sum(1) < MAX_RESP).float().mean() > 0.9
         hf = AutoModelForCausalLM.from_pretrained(base, torch_dtype=torch.float16, attn_implementation="sdpa").cuda().eval()
         torch.manual_seed(0)
-        out = PrefixSharedDecoder(hf, 300).generate(val[:100], 1.0, [vocab.eos], vocab.pad, N, want_logits=True)
-        ref_tok = torch.full((100 * N, 300), vocab.pad, device="cuda")
+        out = PrefixSharedDecoder(hf, MAX_RESP).generate(val[:100], 1.0, [vocab.eos], vocab.pad, N, want_logits=True)
+        ref_tok = torch.full((100 * N, MAX_RESP), vocab.pad, device="cuda")
         ref_tok[:, :len(out.logits)] = out.sequences[:, val.shape[1]:]
-        ref_logp = torch.zeros(100 * N, 300, device="cuda")
+        ref_logp = torch.zeros(100 * N, MAX_RESP, device="cuda")
         ref_logp[:, :len(out.logits)] = torch.stack(out.logits, 1).log_softmax(-1).gather(-1, ref_tok[:, :len(out.logits), None]).squeeze(-1)
-        e = {"fastrl": [], "verl": []}
+        e, w32 = {"fastrl": [], "verl": []}, master(base)
         with torch.no_grad():
             for g0 in range(0, len(val), 100):
                 prompts, resp, mk = full_sequences(val, tok, mask, torch.arange(g0, g0 + 100, device="cuda"))
@@ -283,10 +296,10 @@ def test_decode_logprobs_match_forward(model, val, rollouts, vocab):
                 r = resp.shape[1]
                 tf16 = model.train_logprobs(w16, prompts, resp, N)
                 assert (logp[rows, :r] - tf16)[mk].abs().mean() < 1e-3
-                e["fastrl"].append((logp[rows, :r] - model.train_logprobs(master(base), prompts, resp, N))[mk].abs())
+                e["fastrl"].append((logp[rows, :r] - model.train_logprobs(w32, prompts, resp, N))[mk].abs())
             ref_mask = fr.response_mask(ref_tok, vocab.eos)
             prompts, resp, mk = full_sequences(val, ref_tok, ref_mask, torch.arange(100, device="cuda"))
-            e["verl"].append((ref_logp[:, :resp.shape[1]] - model.train_logprobs(master(base), prompts, resp, N))[mk].abs())
+            e["verl"].append((ref_logp[:, :resp.shape[1]] - model.train_logprobs(w32, prompts, resp, N))[mk].abs())
         errors[name] = {k: torch.cat(x) for k, x in e.items()}
         for q in (0.5, 0.99, 0.999):
             a, b = (errors[name][k].quantile(q) for k in ("fastrl", "verl"))
@@ -320,9 +333,9 @@ def test_sampling_statistics_match_verl_decoder(model, vocab, val):
     samples per prompt each): paired by prompt, every mean within 4 standard errors."""
     from verl.workers.rollout.prefix_decode import PrefixSharedDecoder
     hf = AutoModelForCausalLM.from_pretrained(BASE_HI, torch_dtype=torch.float16, attn_implementation="sdpa").cuda().eval()
-    ref_dec, dec = PrefixSharedDecoder(hf, 300), fr.Decoder(model, vocab, 300)
+    ref_dec, dec = PrefixSharedDecoder(hf, MAX_RESP), fr.Decoder(model, vocab, MAX_RESP)
     w = {k: v.half() for k, v in master(BASE_HI).items()}
-    mz = fr.Mazes(val, vocab).repeat(N)
+    mz, idx = fr.Mazes(val, vocab), torch.arange(len(val), device="cuda").repeat_interleave(N)
     stats = {"mine": [], "verl": []}
     for rep in range(3):
         torch.manual_seed(100 + rep)
@@ -331,7 +344,7 @@ def test_sampling_statistics_match_verl_decoder(model, vocab, val):
         ref = torch.full_like(tok, vocab.pad)
         ref[:, :out.shape[1]] = out
         for key, t in (("mine", tok), ("verl", ref)):
-            j = fr.judge(t, mz, vocab)
+            j = fr.judge(t, mz, idx, vocab)
             j["length"] = fr.response_mask(t, vocab.eos).sum(1).float()
             stats[key].append(torch.stack([j[k].view(-1, N).mean(1) for k in ("is_shortest", "goal_reached", "valid_format", "wall_collision", "length")]))
     a, b = torch.stack(stats["mine"]).mean(0), torch.stack(stats["verl"]).mean(0)  # (5, prompts)
@@ -345,9 +358,9 @@ def verl_batch(val, tok, mask, groups, old_logp, adv):
     from tensordict import TensorDict
     from verl import DataProto
     prompts = val[groups].repeat_interleave(N, 0)
-    rows = (groups[:, None] * N + torch.arange(N, device="cuda")).flatten()
+    rows = group_rows(groups)
     B, Lp = prompts.shape
-    pad = torch.zeros(B, 660 - Lp, dtype=torch.long, device="cuda")
+    pad = torch.zeros(B, MAX_PROMPT - Lp, dtype=torch.long, device="cuda")
     am = torch.cat([pad, torch.ones_like(prompts), mask[rows].long()], 1)
     td = TensorDict({"responses": tok[rows], "input_ids": torch.cat([pad, prompts, tok[rows]], 1), "attention_mask": am,
                      "position_ids": torch.clip(am.cumsum(-1) - 1, min=0), "old_log_probs": old_logp[rows],
@@ -367,7 +380,7 @@ def verl_actor(base, dtype, micro, batch, lr):
     from transformers.models.qwen2.modeling_qwen2 import Qwen2DecoderLayer
     from verl.workers.actor.dp_actor import DataParallelPPOActor
     if not dist.is_initialized():
-        dist.init_process_group("nccl", init_method="tcp://127.0.0.1:29571", rank=0, world_size=1)
+        dist.init_process_group("nccl", store=dist.HashStore(), rank=0, world_size=1)
     hf = AutoModelForCausalLM.from_pretrained(base, torch_dtype=torch.float32, attn_implementation="sdpa")
     pd = {"float16": torch.float16, "float32": torch.float32}[dtype]
     module = FSDP(hf, mixed_precision=MixedPrecision(param_dtype=pd, reduce_dtype=torch.float32, buffer_dtype=torch.float32),
@@ -419,7 +432,7 @@ def fp64_update(prompts, tok, old, adv, mask, micro):
             (part / k).backward()
             total += part.item()
         losses.append(total)
-    grads = {name.replace("lm_head.weight", "model.embed_tokens.weight"): p.grad for name, p in hf.named_parameters()}
+    grads = {name: p.grad for name, p in hf.named_parameters()}
     return grads, float(np.mean(losses))
 
 
@@ -433,7 +446,7 @@ def test_update_matches_verl_actor(model, vocab, val, rollouts, dtype):
     from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
     _, tok, logp, _, mask = rollouts["hi"]
     micro, lr = 256, 1e-5
-    adv = fr.grpo_advantage(fr.judge(tok, fr.Mazes(val, vocab).repeat(N), vocab)["score"], N)[:, None] * mask
+    adv = fr.grpo_advantage(fr.judge(tok, fr.Mazes(val, vocab), torch.arange(len(val), device="cuda").repeat_interleave(N), vocab)["score"], N)[:, None] * mask
     old = logp * mask
     errs, metric_errs, coss = [], [], []
     for b in range(6):
@@ -443,10 +456,10 @@ def test_update_matches_verl_actor(model, vocab, val, rollouts, dtype):
         vm = actor.update_policy(data)
         with FSDP.summon_full_params(module):
             v_new = {k.replace("_fsdp_wrapped_module.", ""): p.detach().clone() for k, p in module.named_parameters()}
-        g_verl = {k: s["exp_avg"].cuda() / 0.1 for k, s in FSDP.optim_state_dict(module, vopt)["state"].items()}
+        g_verl = {k: s["exp_avg"].cuda() / (1 - 0.9) for k, s in FSDP.optim_state_dict(module, vopt)["state"].items()}
         batch = (val[groups], tok[rows], old[rows], adv[rows], mask[rows])
         mm, m1, w0, w1 = fastrl_update(model, dtype, micro, lr, *batch)
-        g_fast = {k: v / 0.1 for k, v in m1.items()}
+        g_fast = {k: v / (1 - 0.9) for k, v in m1.items()}  # AdamW's first moment after one step: (1 - beta1) * grad
         g64, loss64 = fp64_update(*batch, micro)
         flat = lambda d: torch.cat([d[k].double().flatten() for k in w0])
         norm64 = flat(g64).norm().item()
@@ -471,15 +484,15 @@ def test_update_matches_verl_actor(model, vocab, val, rollouts, dtype):
 
 def test_train_and_resume(tmp_path, monkeypatch):
     """6 steps of the real Trainer with validations at 3 and 6; then the same run stopped at 3 and resumed to 6: same
-    step count, validation history and weights restored exactly at the resume point."""
+    validation steps, same step-0 validation, weights restored exactly at the resume point. A run resumed right after its
+    step-0 validation does not validate step 0 again."""
     monkeypatch.setenv("WANDB_MODE", "disabled")
     args = lambda out, steps: argparse.Namespace(base=BASE, train=TRAIN, val=VAL, out=str(out), batch=16, seed=3, n=N, micro=128,
                                                  lr=1e-5, warmup=2, tis_cap=2.0, steps=steps, test_freq=3, patience=100,
-                                                 val_n=N, max_response=300, wandb_project="x", wandb_id="t")
-    import json
+                                                 val_n=N, max_response=MAX_RESP, wandb_project="x", wandb_id="t")
     fr.Trainer(args(tmp_path / "a", 6)).run()
     fr.Trainer(args(tmp_path / "b", 3)).run()
-    saved = torch.load(tmp_path / "b" / "ckpt.pt", weights_only=False)
+    saved = torch.load(tmp_path / "b" / "ckpt.pt")
     tr = fr.Trainer(args(tmp_path / "b", 6))
     assert tr.step == 3 and all(torch.equal(tr.params[k].detach(), saved["params"][k]) for k in tr.params)
     assert tr.opt.state_dict()["state"][0]["step"] == 3
@@ -490,3 +503,7 @@ def test_train_and_resume(tmp_path, monkeypatch):
         assert [h[0] for h in best["history"]] == [0, 3, 6] and done["reason"] == "max_steps" and done["last_step"] == 6
         assert os.path.exists(tmp_path / run / "best_hf" / "model.safetensors")
         assert json.load(open(tmp_path / run / "best_hf" / "best_step.json"))["step"] == best["best_step"]
+    assert json.load(open(tmp_path / "a" / "best.json"))["history"][0] == json.load(open(tmp_path / "b" / "best.json"))["history"][0]
+    fr.Trainer(args(tmp_path / "c", 0)).run()
+    fr.Trainer(args(tmp_path / "c", 3)).run()
+    assert [h[0] for h in json.load(open(tmp_path / "c" / "best.json"))["history"]] == [0, 3]

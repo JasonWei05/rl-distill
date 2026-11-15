@@ -29,9 +29,9 @@ import pyarrow.parquet as pq
 import torch
 import torch.fx.experimental._config
 import torch.nn.functional as F
-from torch.nn.attention.bias import causal_lower_right
 import wandb
 from safetensors.torch import load_file, save_file
+from torch.nn.attention.bias import causal_lower_right
 
 # The small elementwise / reduction steps (norms, rotary, attention merge, sampling) are compiled into one kernel each: the
 # decode step is launch-bound (~280 kernels before, each costing GPU time and a graph node). Shapes are dynamic, a size-1
@@ -52,12 +52,11 @@ class Vocab:
         tok = json.load(open(os.path.join(path, "tokenizer.json")))
         self.ids = tok["model"]["vocab"]
         self.pad, self.eos = self.ids["<pad>"], self.ids["<eos>"]
-        self.moves = torch.tensor([self.ids[a] for a in ("UP", "DOWN", "LEFT", "RIGHT")])
+        self.moves = torch.tensor([self.ids[a] for a in ("UP", "DOWN", "LEFT", "RIGHT")], device="cuda")
         # ids that vanish from decode(skip_special_tokens=True).split(): the special tokens and the "\n" token
-        self.skip = torch.tensor([t["id"] for t in tok["added_tokens"] if t["special"]] + [self.ids["\n"]])
-        delta = torch.zeros(len(self.ids), 2, dtype=torch.long)
-        delta[self.moves] = torch.tensor([[-1, 0], [1, 0], [0, -1], [0, 1]])
-        self.delta = delta
+        self.skip = torch.tensor([t["id"] for t in tok["added_tokens"] if t["special"]] + [self.ids["\n"]], device="cuda")
+        self.delta = torch.zeros(len(self.ids), 2, dtype=torch.long, device="cuda")
+        self.delta[self.moves] = torch.tensor([[-1, 0], [1, 0], [0, -1], [0, 1]], device="cuda")
 
 
 def load_prompts(path, vocab):
@@ -123,36 +122,30 @@ class Mazes:
                 break
         return dist
 
-    def repeat(self, n):
-        out = object.__new__(Mazes)
-        out.S = self.S
-        out.free, out.start, out.goal, out.lstar = (x.repeat_interleave(n, 0) for x in (self.free, self.start, self.goal, self.lstar))
-        return out
 
 
-def judge(resp, maze, vocab):
-    """TailRL's judge_maze_binary_shortest on token ids (B, R), one maze per row: the actions are the words of
+def judge(resp, maze, idx, vocab):
+    """TailRL's judge_maze_binary_shortest on token ids (B, R), row i on maze idx[i]: the actions are the words of
     decode(resp, skip_special_tokens=True) before the first DONE (all of them moves, else invalid format), run from the start
     until the goal or a wall / the edge. Returns float (B,) tensors: score (= is_shortest) and the OUTCOMES."""
-    B, R = resp.shape
-    dev = resp.device
+    R = resp.shape[1]
     done_tok = resp == vocab.ids["DONE"]
     has_done = done_tok.any(1)
     first_done = torch.where(has_done, done_tok.int().argmax(1), R)
-    before = torch.arange(R, device=dev) < first_done[:, None]
-    move = before & torch.isin(resp, vocab.moves.to(dev))
-    valid = has_done & ~(before & ~move & ~torch.isin(resp, vocab.skip.to(dev))).any(1)
-    pos = maze.start[:, None] + (vocab.delta.to(dev)[resp] * move[..., None]).cumsum(1)  # (B, R, 2) after each token
+    before = torch.arange(R, device=resp.device) < first_done[:, None]
+    move = before & torch.isin(resp, vocab.moves)
+    valid = has_done & ~(before & ~move & ~torch.isin(resp, vocab.skip)).any(1)
+    pos = maze.start[idx, None] + (vocab.delta[resp] * move[..., None]).cumsum(1)  # (B, R, 2) after each token
     inside = ((pos >= 0) & (pos < maze.S)).all(-1)
     p = pos.clamp(0, maze.S - 1)
-    blocked = move & (~inside | ~maze.free[torch.arange(B, device=dev)[:, None], p[..., 0], p[..., 1]])
-    at_goal = move & ~blocked & (pos == maze.goal[:, None]).all(-1)
+    blocked = move & (~inside | ~maze.free[idx[:, None], p[..., 0], p[..., 1]])
+    at_goal = move & ~blocked & (pos == maze.goal[idx, None]).all(-1)
     first = lambda m: torch.where(m.any(1), m.int().argmax(1), R)
     first_block, first_goal = first(blocked), first(at_goal)
     reached = valid & (first_goal < first_block)
     hit = valid & (first_block < first_goal)
     n_moves = move.cumsum(1).gather(1, first_goal.clamp(max=R - 1)[:, None]).squeeze(1)
-    shortest = reached & (n_moves <= maze.lstar)
+    shortest = reached & (n_moves <= maze.lstar[idx])
     out = {"goal_reached": reached, "wall_collision": hit, "valid_format": valid, "done_token_generated": has_done,
            "valid_path_no_goal": valid & ~reached & ~hit, "is_shortest": shortest, "score": shortest}
     return {k: x.float() for k, x in out.items()}
@@ -301,6 +294,7 @@ class Decoder:
         self.side.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(self.side):  # token 0 eagerly, on the capture stream: warms up kernels and workspaces
             self._step(w, st, out, SEG, Lp)
+        torch.cuda.current_stream().wait_stream(self.side)
         while t < self.R and not bool(st["done"].all()):
             self._compact(st)
             W = (t // SEG + 1) * SEG  # the segment's end: response slots [0, W) cover its steps
@@ -309,7 +303,6 @@ class Decoder:
                 graph.capture_begin(pool=self.pool, capture_error_mode="thread_local")
                 self._step(w, st, out, W, Lp)
                 graph.capture_end()
-            torch.cuda.current_stream().wait_stream(self.side)
             self.graph = graph
             while t < min(W, self.R):
                 graph.replay()
@@ -419,14 +412,15 @@ class Trainer:
         self.decoder = Decoder(self.model, self.vocab, a.max_response)
         self.train = load_prompts(a.train, self.vocab)
         self.val = torch.from_numpy(np.array(load_prompts(a.val, self.vocab))).cuda().long()
-        self.val_maze = Mazes(self.val, self.vocab).repeat(a.val_n)
+        self.val_maze = Mazes(self.val, self.vocab)
+        self.val_idx = torch.arange(len(self.val), device="cuda").repeat_interleave(a.val_n)
         self.order = PromptOrder(len(self.train), a.batch, a.seed)
         self.step, self.flops = 0, {"gen": 0.0, "update_actor": 0.0, "total": 0.0}
         self.best = {"metric": ES_METRIC, "best_value": None, "best_step": None, "since_best": 0, "history": []}
         os.makedirs(a.out, exist_ok=True)
         self.ckpt = os.path.join(a.out, "ckpt.pt")
         if os.path.exists(self.ckpt):
-            s = torch.load(self.ckpt, weights_only=False)
+            s = torch.load(self.ckpt)
             with torch.no_grad():
                 for k, p in self.params.items():
                     p.copy_(s["params"][k])
@@ -447,7 +441,7 @@ class Trainer:
 
     def validate(self):
         tok, _, _ = self.decoder.generate(self.rollout_weights(), self.val, self.a.val_n)
-        out = judge(tok, self.val_maze, self.vocab)
+        out = judge(tok, self.val_maze, self.val_idx, self.vocab)
         metrics = {f"val-aux/maze_17/{k}/mean@{self.a.val_n}": out[k].mean().item() for k in OUTCOMES}
         metrics[f"val-core/maze_17/reward/mean@{self.a.val_n}"] = out["score"].mean().item()
         return metrics
@@ -462,10 +456,9 @@ class Trainer:
         stats = []
         for j in range(k):
             s = slice(j * rows, (j + 1) * rows)
-            mk = mask[s]
-            r = max(max(lens[s]), 2)
+            r = max(max(lens[s]), 2)  # >= 1 response query for train_logprobs
             logp = self.model.train_logprobs(self.weights16(), prompts[j * rows // n:(j + 1) * rows // n], tok[s, :r], n)
-            loss, st = tis_loss(logp, old_logp[s, :r], adv[s, :r], mk[:, :r].float(), a.tis_cap)
+            loss, st = tis_loss(logp, old_logp[s, :r], adv[s, :r], mask[s, :r].float(), a.tis_cap)
             self.scaler.scale(loss / k).backward()
             stats.append(st)
         self.scaler.unscale_(self.opt)
@@ -485,7 +478,7 @@ class Trainer:
         mask = response_mask(tok, self.vocab.eos)
         torch.cuda.synchronize()
         t1 = time.perf_counter()
-        out = judge(tok, Mazes(prompts, self.vocab).repeat(n), self.vocab)
+        out = judge(tok, Mazes(prompts, self.vocab), torch.arange(len(prompts), device="cuda").repeat_interleave(n), self.vocab)
         adv = grpo_advantage(out["score"], n)[:, None] * mask
         torch.cuda.synchronize()
         t2 = time.perf_counter()
@@ -512,8 +505,7 @@ class Trainer:
             "training/global_step": self.step, "perf/max_memory_allocated_gb": torch.cuda.max_memory_allocated() / 2 ** 30})
         return metrics
 
-    def write_json(self, name, obj):
-        path = os.path.join(self.a.out, name)
+    def write_json(self, path, obj):
         with open(path + ".tmp", "w") as f:
             json.dump(obj, f, indent=1)
         os.replace(path + ".tmp", path)
@@ -522,9 +514,10 @@ class Trainer:
         """best_hf/: the weights in HF format next to the base's config and tokenizer, plus best_step.json."""
         dst = os.path.join(self.a.out, "best_hf")
         shutil.rmtree(dst + ".tmp", ignore_errors=True)
+        # *.txt: the base's AVERAGED_FROM / INTERPOLATED_FROM provenance notes
         shutil.copytree(self.a.base, dst + ".tmp", ignore=shutil.ignore_patterns("*.safetensors", "*.txt"))
         save_file({k: p.detach().cpu().contiguous() for k, p in self.params.items()}, os.path.join(dst + ".tmp", "model.safetensors"))
-        json.dump({"step": self.step, "metric": ES_METRIC, "value": value}, open(os.path.join(dst + ".tmp", "best_step.json"), "w"))
+        self.write_json(os.path.join(dst + ".tmp", "best_step.json"), {"step": self.step, "metric": ES_METRIC, "value": value})
         shutil.rmtree(dst, ignore_errors=True)
         os.replace(dst + ".tmp", dst)
 
@@ -538,7 +531,7 @@ class Trainer:
             self.save_hf(value)
         else:
             b["since_best"] += 1
-        self.write_json("best.json", b)
+        self.write_json(os.path.join(self.a.out, "best.json"), b)
         torch.save({"params": {k: p.detach() for k, p in self.params.items()}, "opt": self.opt.state_dict(),
                     "scaler": self.scaler.state_dict(), "rng": torch.cuda.get_rng_state(), "step": self.step,
                     "flops": self.flops, "best": b}, self.ckpt + ".tmp")
@@ -547,13 +540,13 @@ class Trainer:
 
     def run(self):
         a = self.a
-        if self.step == 0:
+        if not self.best["history"]:
             t = time.perf_counter()
             metrics = self.validate()
             metrics["timing_s/testing"] = time.perf_counter() - t
             self.checkpoint(metrics)
             wandb.log(metrics, step=0)
-        stop = False
+        stop = self.best["since_best"] >= a.patience
         while self.step < a.steps and not stop:
             self.step += 1
             t = time.perf_counter()
@@ -567,9 +560,9 @@ class Trainer:
             metrics["timing_s/step"] = time.perf_counter() - t
             wandb.log(metrics, step=self.step)
         reason = "early_stop" if stop else "max_steps"
-        self.write_json("COMPLETE.json", {"reason": reason, "last_step": self.step, "best_step": self.best["best_step"],
-                                          "best_value": self.best["best_value"], "metric": ES_METRIC,
-                                          "flops_total_tflops": self.flops["total"]})
+        self.write_json(os.path.join(a.out, "COMPLETE.json"), {
+            "reason": reason, "last_step": self.step, "best_step": self.best["best_step"], "best_value": self.best["best_value"],
+            "metric": ES_METRIC, "flops_total_tflops": self.flops["total"]})
         wandb.finish()
 
 

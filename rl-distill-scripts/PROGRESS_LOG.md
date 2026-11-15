@@ -18,10 +18,10 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 (GRPO 16, shortest-path reward, token-level TIS cap 2, lr 1e-5, fp16 compute / fp32 masters) as one clean file without Ray /
 FSDP / HF generate, prove it matches verl, benchmark it.
 
-**Code** (`maze/fastrl/`, jiahaoz): `fastrl.py` (trainer), `test_fastrl.py` (16 tests against TailRL's verl code),
+**Code** (`maze/fastrl/`, jiahaoz): `fastrl.py` (trainer), `test_fastrl.py` (17 tests against TailRL's verl code),
 `bench.py`, `run_fastrl_st.sh` + `launch_fastrl_st.sh` (ScaleTrain, MODE=runs / bench), `README.md` (details and tables).
 
-**Equivalence.** Exact: tokens, maze parse + BFS, judge (29.5k responses, every field), GRPO advantage, TIS loss, prompt
+**Equivalence.** Exact: tokens, maze parse + BFS, judge (31k responses, every field), GRPO advantage, TIS loss, prompt
 order (incl. RandomSampler's extra randperm per epoch), FLOPs. Rounding-level against float64: forward, decode log-probs,
 one full update vs verl's FSDP actor over 6 batches (fp32 gradient error 8.6e-5 vs verl 9.1e-5; fp16 20.4% vs 20.9% — fp16
 gradients are that noisy in verl too). Found on the way: SDPA enable_gqa has a less precise backward (2-3x the fp32 gradient
