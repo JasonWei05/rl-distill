@@ -12,6 +12,24 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-11-15 — sudoku as a second synthetic task: port assessment (planning, no runs)
+
+**Goal.** Decide whether `/mnt/efs/jasonwei/sudoku-transfomer` can run through the maze pipeline (pretrain on demos,
+tune 1 / 3 / 10% bases, t3 RL with fastrl) with only the task and vocab swapped.
+
+**Assessment.** Yes for the pipeline: fastrl's model, decoder, update, checkpointing and the ScaleTrain / base-tuning
+tooling are task-agnostic (~100 of fastrl.py's 590 lines are maze-specific: Vocab, Mazes, judge). Take from
+sudoku-transfomer only `generate_data.py` (puzzles + step-by-step solver) and the validity check; not its model
+(`nn.TransformerEncoder`, absolute positions), position-masked decoding or shaped reward. To write: a parquet / SFT data
+builder (`r c v` triples then DONE), a ~20-word tokenizer, a verl reward + GPU judge with exact-match tests, a sudoku
+`exact_pass`. Open choices: difficulty (4x4 too easy; 9x9 with mean 52 blanks floors every model at 0%, clues 20-70 gave
+8.6% SFT for the 1.2M model there) and the noisy-demo distribution (its solver drops backtracking).
+
+**Prior result in that repo (`COT_COMPARISON.md`, June 2026).** A random non-language `<think>` block before the trace
+raised SFT greedy solve rate 8.7% -> ~69% (4x4, 204K) and 8.6% -> 21% (9x9 clues 20-70, 1.2M, 500 eval puzzles); short
+thinking (k 2-10) is best, k >= 20-32 degrades; a pause-token / extra-positions effect (random content), the filler-token
+control and GRPO were never run.
+
 ## 2026-11-13 — maze fastrl: single-file RL trainer replacing verl for the maze runs (done)
 
 **Goal.** The maze RL steps were overhead-bound (2XS and 3XS ran at the same 4 s/step at 256 prompts): write the t3 recipe
@@ -39,7 +57,15 @@ reserved memory every step and OOMed shared GPUs after ~2k steps -> one pool per
 verl 0.208 / 0.274 / 0.274, every 1000-step window within 0.002, in 1.47 h on 1 GPU vs verl's 11.7-12.2 h on 1 GPU (8x).
 1024 prompts, seed 3, done 11-14: best 0.307 vs 0.307, windows within 0.0021, 4.30 h on 1 GPU vs verl's 24.0 h on 4 GPUs.
 
-**Status.** Done. Not yet used for new grids.
+**Code review (11-15).** Three reviewers over all unpushed maze commits; fixes in `4ab10a8d` (fastrl.py / tests) and
+`72e7919d` (scripts). Bugs: the decoder read the finished-row flags without waiting for the stream that wrote them after
+the eager first token (harmless in practice: the legacy default stream synchronizes); a run resumed from its step-0
+checkpoint re-validated step 0 (patience off by one) and a resumed run forgot an early stop; a failed verl bench still
+wrote the pod's COMPLETE marker. Test gaps closed: the tokenizer test read a stale cache, the response mask was never
+compared with verl's; plus the ±20 log-ratio clamp and resume-from-step-0 cases (17 tests pass). The 2XS / 3XS launch
+script moved from /tmp to `rl/launch_t3x_grids.sh`. None of the fixes changes a result above.
+
+**Status.** Done; pushed to origin/jiahaoz 11-15. Not yet used for new grids.
 
 ## 2026-11-13 — 2XS / 3XS: LR 5e-4 pretraining results, 1/3/10% bases (3 seeds each), TIS RL grids (done 11-14)
 
