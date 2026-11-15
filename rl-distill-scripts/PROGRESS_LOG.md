@@ -41,7 +41,7 @@ verl 0.208 / 0.274 / 0.274, every 1000-step window within 0.002, in 1.47 h on 1 
 
 **Status.** Done. Not yet used for new grids.
 
-## 2026-11-13 — 2XS / 3XS: LR 5e-4 pretraining results, 1/3/10% bases (3 seeds each), TIS RL grids launched (running)
+## 2026-11-13 — 2XS / 3XS: LR 5e-4 pretraining results, 1/3/10% bases (3 seeds each), TIS RL grids (done 11-14)
 
 **Pretraining (LR 5e-4, 5 seeds, 40k steps, `pt_dfs25_eps05_v1/{2XS,3XS}`).** All 10 runs trained the full 40k steps
 (none reached STOP_AT 0.14). Exact shortest-path pass@1 at step 40k (1000 dev mazes, `exact_pass.py`):
@@ -70,7 +70,7 @@ GPUs (~20 s per exact evaluation). 3XS seed 3 at 10% is tuned on the cooldown ru
 (new `--cross` option: the walk starts at a given step instead of the stride screens). Copied to
 `s3://.../maze/rl_{2xs,3xs}_dfs25_tis3s_v1/bases/<level>_s<seed>`.
 
-**RL (running).** The small TIS grid's recipe and final layouts on both sizes (`GRID=t3x2` / `t3x3`, code `787358c6`,
+**RL (done 11-14).** The small TIS grid's recipe and final layouts on both sizes (`GRID=t3x2` / `t3x3`, code `787358c6`,
 `/tmp/jw_maze/launch_t3x.sh`): prompts per step 16 / 64 / 256 / 1024 × levels p1 / p3 / p10 × RL seeds 2 / 3 / 4 (run seed i
 from base seed i) = 36 runs per size, 10k steps (patience never binds), lr 1e-5, validation every 20 steps.
 - Pods per size: 16 + 64 packed on 4 one-GPU pods; 256 one per one-GPU pod (update micro-batch ≤ 1024); 1024 data-parallel
@@ -78,6 +78,27 @@ from base seed i) = 36 runs per size, 10k steps (patience never binds), lr 1e-5,
 - Runs `x2t3-*` / `x3t3-*` on W&B `tailrl-text-maze-dfs25-eps05`.
 - Pages: TIS RL page (four sizes) https://claude.ai/artifact/4reYVz7fi84wQ1tCaj7S16; bases page (seeds 0–4)
   https://claude.ai/artifact/LoL3qUU48oaQj4xNNv7RCK.
+
+**RL results.** All 72 runs reached 10k steps (none early-stopped). Best validation is_shortest (mean@16), mean of seeds
+2 / 3 / 4; base at step 0 ≈ 0.011 / 0.034 / 0.108 for p1 / p3 / p10:
+
+| level | size | 16 prompts | 64 | 256 | 1024 |
+|---|---|---|---|---|---|
+| p1 | 2XS | 0.108 | 0.149 | 0.195 | 0.235 |
+| p1 | 3XS | 0.091 | 0.114 | 0.144 | 0.180 |
+| p3 | 2XS | 0.180 | 0.215 | 0.252 | 0.286 |
+| p3 | 3XS | 0.176 | 0.211 | 0.241 | 0.270 |
+| p10 | 2XS | 0.387 | 0.415 | 0.447 | 0.463 |
+| p10 | 3XS | 0.442 | 0.483 | 0.513 | 0.547 |
+
+- More prompts per step is better in every row.
+- At p10 the smaller 3XS beats 2XS at every batch; at p1 it is clearly worse; at p3 they are close.
+- The 3XS 1024 runs sat queued ~11 h (dedicated 4-GPU) before starting; the last finished 11-14 21:40 UTC. The 2XS 1024 runs
+  took ~24 h each on 4 GPUs (fastrl does one in 4.3 h on 1 GPU, see the fastrl entry).
+- Small / Medium grids (t3s / t3m) were stopped by request on 11-13 with only part of them finished: small 16 / 64 done,
+  256 partial, 1024 not started; medium 8 / 32 done, 128 partial (3/3 at p3, 1/3 at p1 and p10), 512 not started. The page
+  marks them "stopped".
+- The report loop and stray-pod killer were stopped 11-15 after the last run finished.
 
 ## 2026-11-12 — Code review of the maze RL / pretraining additions (ml-code-reviewer × 4), fixes and tests
 
