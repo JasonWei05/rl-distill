@@ -12,6 +12,408 @@ what was run (config + exact scripts/data), results, and status, so work is resu
 
 ---
 
+## 2026-11-19 — chess SFT on all 180 trace shards (2.3x data), 20M / 50M / 100M (running)
+
+**Goal (user).** New SFT for 20M, 50M and 100M on the extra released traces, at their lr 3e-4; the validation loss
+every 10 steps and B1-B5 pass@1 / pass@16 at every checkpoint, on the page; report each model's checkpoint equal to the
+best 20M and its final checkpoint.
+
+**Data.** HF chess-pre-to-post/sft_v1_200m_90k (revision 97f60746) has 180 shards; we had used the first 85 (their
+max_train_files). The other 95 (43,922 traces) got the same label strip (traces/scripts/fix_traces.py) into
+`s3://.../synth/chess/traces/fixed_all` (180 shards). `data/chess_big` (`configs/chess_big.yaml`): the same 2 held-out
+shards, the other 178 for training: train 76,780 (= 32,858 + 43,922, no repeats); test / dev / val / rl byte-identical
+to data/chess.
+
+**Recipe.** Their SFT for every size (sft/run_sft.sh hardcodes LR=3e-4; warmup a fixed 50 of their scheduler steps =
+13 of ours), cosine to 1e-5 over 3 epochs = 896 steps at 256 sequences per step; from the same pretrained checkpoints
+(model_20m_16B, 50m_1.1B, 100m_0.53B). Checkpoint every 32 steps, validation loss every 10 (new sft.val_every,
+val.jsonl), each checkpoint on B1-B5 with n 16 (new eval_curve.py, running next to the SFT). Pod chess-sft2 (4 H100,
+borrowing true, code cd7764c6): runs/chess/sft_big/model_*, runs/chess/sft_big_eval/model_*; W&B synth-chess-sft
+chess-big-model_*. Their pretraining also used one lr for all sizes (1e-3, cosine to 1e-4); their RL used lr 1e-5, KL
+0.001, 256 prompts x 8, one update per step.
+
+---
+
+## 2026-11-19 — chess RL grid rerun at lr 2.5e-5 (all 12 configs) (running)
+
+**17:56, user: stop 100M, try 1e-5.** The 100M runs at 5e-5 / 2.5e-5 that were left (P64 n16 5e-5 at step 100, P4 n16
+2.5e-5 at step 1620 sliding to ~2%, P16 / P64 n16 2.5e-5 not started) got STOPPED.json ("replaced by 1e-5"); the four
+100M configs at lr 1e-5 run on chess-rl1 (`chess_rl_plan.py` LRS maps each lr to its models; `f113555e`). At 2.5e-5:
+20M P16 n4 (collapsed at 5e-5) reached 17.0 by step 1980; 100M P4 n4 early-stopped at its step-0 best again.
+Both pods relaunched on plan v7, training code unchanged (78945fd4).
+
+**Speed work (`3416e7aa`, not yet on the training pods).** Decoder response caches grow 256 slots at a time instead of
+being sized for 2,624 up front, so a step's prompts decode in one layout (prompts that would not fit wait in host memory);
+fastrl micro-batches are whole prompts packed to the memory of rl.micro full-length rows (same gradient). Bench on a
+ScaleTrain H100 (pod chess-test1): decode 20M 64x16 9.25 -> 8.06 s, 256x16 32.3 -> 23.4 s, 100M 64x16 15.5 -> 11.5 s,
+256x16 49.9 -> 47.2 s (memory-bound at 60 GB), samples' log-probs vs train_logprobs unchanged; late-training steps
+(fastrl bench.py on best_hf): 50M P32 n16 update 8.1 -> 2.6 s, step 9.2 -> 3.5 s; 20M P64 n16 update 4.3 -> 3.8 s.
+Tests on a ScaleTrain pod (chess-test1, 2 GPUs, `fc1fa6b9`): test_fastrl.py + test_model.py 22 passed (incl. the
+2-GPU micro-batch / GPU invariance and the new grow-and-park decoder test). Earlier pod attempts hung because
+data.build's forkserver workers re-ran tests/run.py (no __main__ guard).
+
+**Why (user).** At lr 5e-5 every config with <= 64 rollouts per update failed (20M P16 n4, 50M P8 n4, 100M P4 n4 / P4 n16)
+and so did 100M P16 n16 (256 per update, which works for 20M): val ~1%, </T> nearly gone, entropy ~0.03, responses near
+the 2,560-token cap. Our maze runs with 4 updates per step used lr 2.5e-5. User: rerun the full 12-run grid at 2.5e-5;
+stop the collapsing 100M P16 n16 (STOPPED.json at step 420; best stays its step-0 5.16).
+
+**Setup.** Same as the 5e-5 grid below except `--lr 2.5e-05` (runs `..._lr2.5e-05`, W&B `chess-<run>`). Plan from
+`synth/chess_rl_plan.py` (`16256510`; leaves out runs with COMPLETE.json / STOPPED.json; the 5e-5 jobs are unchanged):
+the running 5e-5 runs (20M P64, 50M P32, 100M P64), then the 2.5e-5 grid smallest batch first, then the four runs
+over 4,096 rollouts per step (20M P256, 50M P128 at both lrs). Pod chess-rl1 restarted on it at 15:19 (plan
+`plans/chess-rl1.json`; v3 kept as `chess-rl1.v3.json`). The page shows both lrs. **15:27, user: use borrowing true
+and false**: plan split with `chess_rl_plan.py --pod` (`847ffddd`): chess-rl1 (borrowing false, 4 GPUs) keeps the 5e-5
+grid and the 2.5e-5 n 4 runs; new pod chess-rl2 (borrowing true, 4 GPUs, code 0e561780, supervisor
+`.scale_train_supervisors/chess-rl2-20261119`) runs the 2.5e-5 n 16 runs. Warmup: 20 linear steps for every run
+(fastrl `lr * min(1, (step - 1) / rl.warmup)`, chess.yaml rl.warmup 20). **15:37: both pods relaunched on `78945fd4`**
+(pack.py best fit: a job goes on the fullest GPUs that fit, so half-GPU runs pair up instead of one per GPU, which had
+left chess-rl2's whole-GPU runs waiting; user: "fix the packer and relaunch"). Supervisors restarted with the new
+CODE_REF (STOP + kill, cancel both jobs, launch_synth_st.sh): chess-rl1 job_dbvhfb7jvrf008e1q0o0 (borrowing false),
+chess-rl2 job_dbvhfb7jvrf007nh7j8g (borrowing true).
+
+---
+
+## 2026-11-19 — chess RL grid: 20M / 50M / 100M from matched SFT bases, 4 configs each (running)
+
+**Goal (user).** Take 20M, 50M and 100M with SFT bases near the 20M's benchmark score, then run the synth RL recipe
+(GRPO + PPO clip x TIS, lr 5e-5, 4 updates per step; max 5k steps with the early-stop rule), one seed per config.
+20M: group size 16 with 16 / 64 / 256 prompts per update, plus n 4 with 16 prompts; 50M and 100M use 1/2 and 1/4 of
+the 20M's prompts (about equal training FLOPs per step). Results page updated as runs land.
+
+**Bases (B1-B5, our eval, n 64; pass@1 / pass@16 %): matched.** 20m_16B 6.13 / 32.73 (the target); 50m_1.1B 5.48 /
+33.68; 100m_0.53B 5.46 / 30.73 (100m_1.1B overshoots: 12.28 / 47.70 at n 16). All SFT 384 steps from the released
+pretrained checkpoints; HF bases at `s3://.../synth/chess/bases/model_{20m_16B,50m_1.1B,100m_0.53B}@384`.
+
+**RL setup** (`fastrl.py`, `configs/chess.yaml` rl section; code `0e561780`). Prompts from their rl split (62,207
+puzzles); each step samples 4P prompts x n rollouts (multi-turn: scripted environment reply after each <call_env>,
+2560 sampled tokens, 6 calls max) and takes 4 updates of P prompts. Loss and advantage on sampled tokens only;
+fp16 rollouts and updates over fp32 master weights; warmup 20; validation every 20 steps on every 3rd benchmark
+puzzle (494) x 4 samples; early stop after 100 validations without a new best. Runs named
+`runs/chess/rl/{model}_s0_b{P}x4_n{n}_lr5e-05` (W&B project synth-chess-rl). Measured step times on an H100:
+20M P64 n16 (4,096 rollouts) ~51 s, so the full grid is ~970 GPU-hours if nothing early-stops (the P256 / P128 runs dominate).
+
+**Running.** Pod `chess-rl1` (4 H100, borrowing false; supervisor `.scale_train_supervisors/chess-rl1-20261119`):
+plan v1 (`s3://.../synth/plans/chess-rl1.v1.json`: 100m SFT + eval, the 50M n 64 eval, the 8 20M / 50M runs), then at
+08:16 restarted on v2 (`plans/chess-rl1.json`: + the 4 100M runs, micro 16) by cancelling its job; pack skipped the done
+jobs and resumed the RL runs from S3. Page: `synth/chess_report.py` (commits `5238643a`, `d31cce8f`).
+
+**Results so far (val pass@1 %, best @ step).** 20M: P16 n16 21.6 @4900 (max steps), P64 n16 22.7 @1240 (running),
+P16 n4 collapsed (early stop at 2000, best = step 0, 6.5). 50M: P8 n16 19.9 @4100 (max steps), P32 n16 23.6 @1820
+(running), P8 n4 early stop at 2020 (best 6.6 @20). 100M: P4 n4 collapsed (early stop at 2000, best = step 0), P4 n16
+collapsed (score 0 from step ~200, responses at the 2,560-token cap; taken out of the plan at step 580 with a
+`STOPPED.json`, since the early stop would only have ended it at step 2000 with the same best, after ~17 h of half a GPU),
+P16 n16 at 1.6 at step 320 (running, below its 5.2 start). RL removes the search-trace CoT: tokens per rollout fall from
+~550 to ~17 (the bare answer) while pass@1 rises. No run with <= 64 rollouts per update (P x n) beat its start; once
+every rollout scores 0 there is no gradient. Pod restarted at 13:29 on plan v3 (`plans/chess-rl1.json`; v2 kept as
+`chess-rl1.v2.json`) without the stopped run.
+
+---
+
+## 2026-11-18 — chess (pre2post-chess, arXiv 2607.16097) ported into synth; parity with their code (running)
+
+**Goal (user).** Move from the mazes (RL does not plateau) to their chess testbed, which has a CoT. First: SFT checkpoints
+of 20M, 50M, 100M, 200M and 410M models all very close to `model_20m_16B` (SFT, no RL) in starting pass@1 / pass@16,
+taking a released SFT checkpoint where one is within ~1% and otherwise SFT'ing on. Their environment set up next to ours;
+every new SFT run done on both their trainer and ours, checked to perform alike. Stop and ask on substantial risks.
+
+**Findings.** (1) Their model-card pass@k (20m_16B: 36.8 / 93.2) is on test_B0, an unreleased 468-puzzle set (it is
+the smallest N for which every card's pass@16 is c/N); the released benchmark is B1-B5 (1484; 1480 under their
+512-token prompt filter). Target = 20m_16B measured on B1-B5 by the same evaluator as every other model. (2) The SFT
+traces are released after all, unlinked: HF `chess-pre-to-post/sft_v1_200m_90k`; their trainer takes the first 85 shards
+in name order (83 train = 32,858 traces = exactly their `existing_sft` puzzles, 2 held out = 937). The stored
+`cot_format_no_labels` field is stale (keeps ±0.5/±2/±3 labels, ~77 <unk> per example); rebuilt from `cot_format` with
+the full strip (`s3://scale-ml/genai/rl-distill/synth/chess/traces/fixed`); an NLL probe shows the released models
+trained on these exact traces. (3) Their eval (verl val-only): scripted environment (the solution's opponent move after
+every <call_env>, whatever the move), no <bos>, T 1, 2560 sampled tokens, 3072 context, reward = all H moves match
+(castling always white: 3 black-castling benchmark puzzles never score). (4) 33 SFT checkpoints (20m x10, 50m x9, 100m
+x4, 200m x10; the 32m / 410m SFT folders are empty) and 42 pretrained ones mirrored to `.../synth/chess/ckpt/`.
+
+**Code.** `230351e7` (synth/): Qwen3 in model.py (q/k norms, head_dim, YaRN, per-row positions); a scripted decoder path
+(right-padded prompts, replies fed after each sampled call token, budget / context caps); tasks.Chess (rows via their
+tokenizer, vendored in chess_hf/; judge = their reward_function_multiturn, equal on the benchmark answers and 20k
+corrupted ones); data.py task splits; sft.py --init (mean-init new words, YaRN to 3072), joined rows, their loss
+(per-4-row-group token means), fp32, cosine to 1e-5, no decay on norms; eval.py (unbiased pass@k per bin); export.py;
+theirs.py (their SFT trainer, unchanged, as a pack job); plan.py eval / sft --inits / theirs. 45 old tests + 10 new pass.
+Data `s3://.../synth/data/chess` (test 1480, dev 933, val 937, train 32,858, rl 62,207).
+
+**Their environment.** SFT: their run_sft.py runs unmodified in our .venv (masking checked on all 33,795 examples).
+Eval: their fork needs vLLM 0.8.5 (fails on our 0.15.1); venv `/tmp/jw_chess/venv_verl` on the devbox,
+`/tmp/jw_chess/their_eval/run_their_eval.sh MODEL OUT N` (code + results `.../synth/chess/their_eval/`).
+
+**Eval parity, model_20m_16B, B1-B5 pooled, n = 16 (pass@1 / 4 / 8 / 16 %).** Theirs (vLLM bf16): 7.6 / 19.6 / 27.4 /
+35.4 (B1 19.5 / 72.4, B2 10.7, B3 5.3, B4 1.8, B5 0.4; B1-B4 9.6 / 43.8). Ours (fp16): 7.2 / 19.2 / 26.9 / 34.8 (B1 18.1 /
+69.2, B2 10.8, B3 4.7, B4 2.0, B5 0.3). </T> 98.3% in both; first move 20.8 vs 21.2%. Ours at n = 64 (seed 1): 7.57 /
+19.69 / 27.58 / 35.77 (B1 19.2, B2 10.9, B3 5.2, B4 1.8, B5 0.5): the n = 16 gap was sampling noise; the evaluators agree.
+
+**The released SFT checkpoints were trained with plain RoPE** (before their 2026-09-22 YaRN fix) though their configs
+say YaRN, which their eval then applies. Val NLL (937 held-out traces) YaRN vs plain: 20m_16B 0.597 vs 0.553, 50m_1.1B
+0.599 vs 0.564, 100m_0.53B 0.625 vs 0.589, 200m_5.3B 0.512 vs 0.494; a YaRN-trained retrain: 0.567 vs 0.670. 20m_16B on
+the benchmark (ours, n = 32): YaRN 7.6 / 35.6, plain 8.7 / 40.2.
+
+**SFT parity, model_20m_16B from its pretrained base** (pod `chess-eval-sft`, code e7f84d96): their trainer (4-GPU DDP,
+387 steps, 6 min) and ours (1 GPU, 384 steps, 16 min): val NLL 0.5665 vs 0.5648; benchmark (our eval, n = 64) theirs
+5.79 / 16.49 / 24.20 / 32.40, ours 6.13 / 17.04 / 24.63 / 32.73. Released checkpoints under their YaRN eval (ours, n =
+32, reference only): 50m 0.69B 6.3 / 31.1, 1.1B 8.6 / 37.5; 100m 0.53B 6.9 / 31.9; 200m 0.27B 2.1 / 14.8, 0.53B 13.9 /
+46.9, 1.1B 14.7 / 46.8, 2.1B 20.3 / 55.5, 4.0B 23.8 / 59.7, 11B 26.9 / 65.0, 21B 28.6 / 64.5, 40B 29.6 / 67.1 (200m evals
+~2 h each at n = 32, 2 per GPU: slow).
+
+**Decision (user, 2026-11-19): YaRN, re-SFT every size from the pretrained checkpoints** with the current trainer (theirs
+and ours in parity); target = our retrained 20m_16B (6.13 / 32.73); released SFT checkpoints are reference only.
+
+**Running.** Pod `chess-sft-match1` (code 4b3cf603): our SFT (1 GPU each) from pretrained 410m_0.26B, 410m_0.13B,
+200m_0.53B, 100m_1.1B, 50m_1.1B (checkpoints every 32 steps: the matched model is the step that reaches the target),
+then theirs (4-GPU DDP) from the same five.
+
+---
+
+## 2026-11-17 — maze33 rerun: LR 2.5e-5, 4 PPO-clip x TIS updates per step (math recipe loss), early stop (stopped)
+
+**Why (user).** At LR 1e-5 with one update per step the 10k-step maze33 / sudoku runs were still climbing (3-11% of the
+total gain in the last ~1.5k steps), and at equal samples smaller batches (more updates) won in every row while sampling
+barely grows with batch (launch-bound): more updates per sample should reach the plateau sooner.
+
+**Code.** `64597c72`: fastrl's loss is the math recipe's (docs/RECIPES.md 1.1): per token max(-A rho, -A clip(rho, 0.8,
+1.28)), rho = pi / pi_old, dual clip -10 A for A < 0, times the detached TIS weight min(pi_old / pi_rollout, 2),
+token-mean over the whole mini-batch (summed over micro-batches and ranks, so the update does not depend on micro-batch
+size or GPU count; tested at fp32 1e-7-1.6e-6, fp16 <= 1.5e-3). `--minibatches k`: k optimizer steps per training step,
+pi_old recomputed before the first; with k = 1 the gradient equals the old TIS one. verl is gone from synth/ (the
+TailRL/verl comparison suite `maze/fastrl/test_fastrl.py` was removed; the loss is tested against a plain-Python
+reference). `3e942ad4`: `--patience`. `94a93962`: report variant pages with the old grid as baseline.
+
+**Runs.** 100 = the maze33 grid's 25 bases x 4 prompts-per-step positions; each step samples 4 x the batch (2XS 256 /
+1024 / 4096 / 16384, XS 128 / 512 / 2048 / 8192, S 64 / 256 / 1024 / 4096) and takes 4 updates on mini-batches of the
+old batch (same micro-batches); LR 2.5e-5 (20-step warmup), 10k steps, early stop after 100 validations (2,000 steps)
+without a new best. GPUs / share by sampled prompts (8192 / 16384 on 4). Names `<size>_<level>_s<seed>_b<batch>x4_lr2.5e-05`.
+Estimated ~2,900 GPU-hours (old-run timings x ~4), longest run ~25 h. Pods `synth-rl6-maze33-{0..23}` (4 GPUs, borrowing
+on, split by estimated run time), launched 04:45 UTC. maze49 (9 / 68 done) stopped 03:50 UTC at the user's request.
+Results page https://claude.ai/artifact/P97osuhp9J6Nu1tgdMdG9B (`report.py --configs maze33 --minibatches 4 --lr 2.5e-5`).
+**Stopped 2026-11-18 04:30 UTC (user: performance does not plateau; moving to chess).** 36 of 100 finished (19 at 10k
+steps, 17 early-stopped: mean last step 7,054, mean best step 5,054), 57 had started. Against the old 10k grid: median
+6.9x fewer steps to its best, ~4x less wall-clock, ~1.5x fewer FLOPs, higher finals (S p3 s0 0.316 vs 0.194).
+
+---
+
+## 2026-11-15 — maze49 SFT extended to 120k steps (bases at 40k were under-trained)
+
+**Why.** At the 40k cap maze49 pass@1 was still rising steeply (last 10k steps: XS s0 1.0 -> 3.1%, S s1 0.4 -> 2.1%) and
+val loss still falling (0.08-0.15 vs maze33's flat ~0.07); runs left the pre-solving plateau at 15-30k steps (maze33:
+5-15k) and reached the goal on only 2-47% of mazes (maze33: 62-80%). A perfect imitator of the eps 0.2 demonstrations
+is shortest ~22% of the time, so 10% is reachable. Only 9 of 27 levels had been reached (no 3% / 10% except XS s0 3%).
+
+**What (user, 23:00 UTC).** Stop the maze49 RL (it started from the 40k bases), resume all 9 SFT runs from their 40k state
+to at most 120k steps, stop a run once the median of its last 4 screens reaches 12% (10% safely passed), re-tune to
+1 / 3 / 10% and rerun the maze49 RL grid. The 40k tunes and RL runs moved to `runs/maze49/archive_40k/` on S3.
+Code `770cfba6`: `sft.max_steps` / `stop_at` are extendable on resume (they only decide when training stops). Pods
+`synth-sft2-maze49-{0,1}` (4 GPUs each). Tuning stays on the 1000 dev prompts, RL validation on the first 500 (user:
+tune on the large set, validate on the smaller one; no re-tuning of the other tasks).
+
+**Result (done 02:40 UTC 11-16).** Every run went to 120k steps (none reached the 12% stop); final screens ~4-7% except
+S s0 (~1%). Bases: 1% for all 9 (0.99-1.06), 3% for 8 (2.94-3.03; not S s0), 10% for none (40k bases: 9 levels, only one
+3%). **maze49 RL relaunched 02:45 UTC**: 68 runs (17 bases x the size's 4 prompts-per-step), pods
+`synth-rl4-maze49-{0..5}`, code `ba43b91b`.
+
+## 2026-11-15 — synth RL grids re-laid out with FLOP-matched prompts per step per model size; harder sudoku (30–55 clues)
+
+**Ask (15:00 UTC).** Same prompts per step for every size gave the 3.9M model 2.5-3.7x the FLOPs per step of the 1M one.
+Use powers of 2 per size instead: 2XS 64 / 256 / 1024 / 4096, XS 32 / 128 / 512 / 2048, S 16 / 64 / 256 / 1024 (each
+position about the same FLOPs per step: per-sample training FLOPs XS : 2XS = 1.7-2.1x, S : 2XS = 2.5-3.7x depending on the
+task's sequence length). Apply to sudoku9 / maze33 / maze49, then a harder sudoku with 30-55 clues.
+
+**Changes (`30605f48`, `7c7466d5`).** Configs carry `rl.batches` per size, `rl.micro` / `rl.gpus` for every batch size and
+a `pack` section (GPU shares, moved out of plan.py); plan.py builds each size's batches from the config and leaves out
+runs already done on S3; report.py tables / page columns are the FLOP-matched positions (headings "2XS / XS / S"
+prompts per step). Data-parallel GPUs: maze33 1024-2048 on 2, 4096 on 4; maze49 512 on 2, 1024+ on 4; sudoku 2048+ on 2.
+
+**Reuse.** S runs (16 / 64 / 256 / 1024) and 2XS 64 / 256 / 1024 are in the new grid: done ones kept, partial ones (maze33
+2XS / S at 1024) resumed from S3. Not in the new grid (kept on S3, not reported): 2XS at 16 and XS at 16 / 64 / 256 /
+1024. 26 maze33 / maze49 pods stopped (jobs cancelled by ID) and replanned: remaining runs maze33 59, maze49 36 (all new),
+sudoku9 45 (2XS 4096, all XS). Pods `synth-rl2-{maze33-0..4, maze49-0..5, sudoku9-0..3}` (4 GPUs each, queue jobs
+longest-first), code `7c7466d5`.
+
+**Sudoku9 FLOP-matched grid: done 05:50 UTC 11-16** (108 / 108; best validation score, mean of 3 seeds; columns =
+prompts per step for 2XS / XS / S, about equal FLOPs per step):
+
+| size | level | step 0 | 64 / 32 / 16 | 256 / 128 / 64 | 1024 / 512 / 256 | 4096 / 2048 / 1024 |
+|---|---|---|---|---|---|---|
+| 2XS | p1 | 0.011 | 0.037 | 0.048 | 0.087 | 0.147 |
+| 2XS | p3 | 0.033 | 0.063 | 0.094 | 0.133 | 0.226 |
+| 2XS | p10 | 0.095 | 0.220 | 0.295 | 0.485 | 0.596 |
+| XS | p1 | 0.011 | 0.044 | 0.057 | 0.069 | 0.088 |
+| XS | p3 | 0.033 | 0.057 | 0.071 | 0.089 | 0.103 |
+| XS | p10 | 0.099 | 0.164 | 0.199 | 0.237 | 0.306 |
+| S | p1 | 0.011 | 0.045 | 0.059 | 0.079 | 0.116 |
+| S | p3 | 0.033 | 0.061 | 0.077 | 0.109 | 0.151 |
+| S | p10 | 0.098 | 0.362 | 0.448 | 0.533 | 0.594 |
+
+- More compute per step is better in every row. At equal FLOPs per step the 1M 2XS matches or beats the 3.9M S from
+  10% (0.596 vs 0.594 in the last column) and beats it from 1% / 3%; XS is the weakest size throughout.
+
+**Sudoku9hard (`configs/sudoku9hard.yaml`, seed base 100M).** 30-55 clues; 1.3M train; responses mean 117 tokens (max 155);
+56% of puzzles need at least one solver guess (97% at 30-34 clues, 15% at 50-55; mean 1.3 guesses). SFT + tuning pod
+`synth-sft-sudoku9hard` (2 GPUs, 9 runs) launched 15:23 UTC; RL with the FLOP-matched grid once the bases are in.
+
+**Sudoku9hard FLOP-matched grid: done by 19:57 UTC 11-16** (108 / 108; all 27 bases reached 1 / 3 / 10%; best
+validation score, mean of 3 seeds; columns as above):
+
+| size | level | step 0 | 64 / 32 / 16 | 256 / 128 / 64 | 1024 / 512 / 256 | 4096 / 2048 / 1024 |
+|---|---|---|---|---|---|---|
+| 2XS | p1 | 0.009 | 0.077 | 0.108 | 0.144 | 0.174 |
+| 2XS | p3 | 0.026 | 0.135 | 0.159 | 0.189 | 0.214 |
+| 2XS | p10 | 0.092 | 0.261 | 0.294 | 0.324 | 0.350 |
+| XS | p1 | 0.008 | 0.072 | 0.097 | 0.122 | 0.161 |
+| XS | p3 | 0.026 | 0.132 | 0.161 | 0.181 | 0.222 |
+| XS | p10 | 0.093 | 0.248 | 0.291 | 0.337 | 0.390 |
+| S | p1 | 0.009 | 0.080 | 0.109 | 0.133 | 0.159 |
+| S | p3 | 0.027 | 0.120 | 0.147 | 0.186 | 0.213 |
+| S | p10 | 0.088 | 0.247 | 0.296 | 0.339 | 0.385 |
+
+- More compute per step is better in every row. Unlike sudoku9, the three sizes are within ~0.04 of each other at
+  equal FLOPs per step (XS / S slightly ahead from 10% in the last column: 0.390 / 0.385 vs 0.350).
+
+**Maze33 FLOP-matched grid: done by 23:57 UTC 11-16** (2XS p10 has 1 seed: s1 / s2 never reached 10%; best validation
+score, mean of seeds; columns as above):
+
+| size | level | step 0 | 64 / 32 / 16 | 256 / 128 / 64 | 1024 / 512 / 256 | 4096 / 2048 / 1024 |
+|---|---|---|---|---|---|---|
+| 2XS | p1 | 0.010 | 0.088 | 0.106 | 0.121 | 0.141 |
+| 2XS | p3 | 0.031 | 0.145 | 0.163 | 0.179 | 0.200 |
+| 2XS | p10 | 0.106 | 0.464 | 0.477 | 0.502 | 0.523 |
+| XS | p1 | 0.010 | 0.087 | 0.111 | 0.140 | 0.161 |
+| XS | p3 | 0.031 | 0.137 | 0.165 | 0.189 | 0.205 |
+| XS | p10 | 0.105 | 0.418 | 0.450 | 0.470 | 0.486 |
+| S | p1 | 0.011 | 0.087 | 0.119 | 0.143 | 0.165 |
+| S | p3 | 0.031 | 0.126 | 0.156 | 0.194 | 0.229 |
+| S | p10 | 0.105 | 0.437 | 0.465 | 0.493 | 0.519 |
+
+- More prompts per step is better in every row; sizes are close at equal FLOPs per step (S ahead from 1% / 3% in the last
+  column, 2XS / S tied from 10%). The report's FLOP estimate (`report.py step_flops`, `10f74079`) puts maze S at
+  0.68-0.74x the 2XS FLOPs per step at the same position (the prompt runs once per 16 samples and maze prompts are
+  long), so S does slightly better per FLOP than the table suggests; the page plots score vs cumulative FLOPs per level.
+
+**Maze49 repacked (00:20 UTC 11-17).** At 9 / 68 done the 6 pods (4-GPU jobs run one after another, ~13 h per 10k steps
+at 4096 / 2048 prompts) had ~40 h left. Stopped `synth-rl4-maze49-{0..5}` (jobs cancelled by ID), replanned the 59
+not-done runs over 15 pods `synth-rl5-maze49-{0..14}` (one 4-GPU job each plus small ones; the 6 started runs resume
+from their last checkpoint, saved every 20 steps), same code `ba43b91b`.
+
+## 2026-11-15 — synth pipeline; maze 33×33 / 49×49 and sudoku 9×9: pretraining 3 sizes × 3 seeds, 1/3/10% bases, then RL grids (running)
+
+**Ask.** A clean, well-tested, config-driven pipeline where maze vs sudoku (and their settings) is one config file;
+fast SFT that packs many runs per GPU. Then on maze 33×33 (ε 0.3), maze 49×49 (ε 0.2) and sudoku 9×9 (40–75 clues, no
+CoT, always-correct demonstrations): pretrain 1M / 2.2M / 3.9M (2XS / XS / S) × 3 seeds, tune bases to 1 / 3 / 10%
+pass@1 (whatever is reachable), then fastrl grids (16 / 64 / 256 / 1024 prompts per step × levels × seeds) of exactly
+10k steps, packed on GPUs.
+
+**Code: `rl-distill-scripts/synth/`** (README there; commit `5915c871`).
+- `tasks.py` (Maze, Sudoku: generation + GPU judge), `data.py` (uint8 token arrays per split), `model.py` (Qwen2 forward,
+  init, HF dirs, the CUDA-graph sampler), `sft.py`, `tune.py`, `fastrl.py` (moved from `maze/fastrl/`), `plan.py` +
+  `pack.py` (job plans, GPU-share packing, S3 mirror, resume), `run_synth_st.sh` / `launch_synth_st.sh`.
+- Configs `configs/{maze33,maze49,sudoku9,maze25}.yaml`; maze25 reproduces the 25×25 study's data exactly.
+- New SFT trainer (replaces TailRL's `sft_pretrain.py`): fp32 masters, bf16 compiled forward, batches cut to their
+  longest row, same recipe otherwise (batch 128, constant lr 5e-4, AdamW 0.9 / 0.95, wd 0.01, clip 1). ms / step on an
+  H100: sudoku 7.6 (any size), maze33 2XS 20 / S 34, maze49 2XS 50 / S 83 (TailRL: ~80 for 2XS on 25×25).
+- Tuning is sampled (k = 256 on the 1000 dev prompts, confirm k = 1024), task-generic; exact pass@1 does not extend to
+  sudoku or to 49×49 (some mazes have 10⁵ shortest paths).
+- Decoder change: each 32-token segment's first step runs eagerly before the CUDA-graph capture (torch 2.9.1 recompiles
+  when compaction makes a dimension 1, which failed inside the capture).
+- Tests: `synth/tests` (31: sudoku solver = sudoku-transfomer's on 2000 traces, sudoku judge = plain-Python reference on
+  2550 adversarial responses, HF logits / tokenizer, decoder, SFT loss vs HF, resume, stop rule, the tuning search,
+  fastrl resume, pack.py against S3) and `maze/fastrl/test_fastrl.py` (16, against verl / TailRL: the generator
+  reproduces the 25×25 study's tokenized files, judge, forward, sampler statistics, FSDP update). All pass.
+
+**Data** (`s3://scale-ml/genai/rl-distill/synth/data/<config>/`; 1.3M train, dev 1000, test 1000, val 256, no repeats):
+
+| config | prompt / width (tokens) | demonstrations | decode cap |
+|---|---|---|---|
+| maze33 (seed base 70M) | 1126 / 1702 | 26.2% shortest; L* mean 91, max 410 | 448 |
+| maze49 (80M) | 2454 / 3734 | 22.4% shortest; L* mean 144, max 800 | 832 |
+| sudoku9 (90M) | 94 / 222 | clues mean 57.5; 20% need a guess; response mean 73 tokens | 128 |
+
+**SFT + tuning (launched 11-15 07:02 UTC).** One supervised pod per config (`synth-sft-{sudoku9,maze33,maze49}`, 2 / 4 /
+4 GPUs, borrowing, MPS): 9 jobs each (2XS / XS / S × seeds 0–2), each `sft.py` then `tune.py`; 40k steps max, stop
+once the median of 4 screens ≥ 13%. Runs: `s3://.../synth/runs/<config>/sft/<size>_s<seed>/` (`tune/<level>/` = the bases,
+`tune.json`); W&B `synth-<config>-sft`.
+
+**Incidents (11-15) and fixes, all in code before the bases were used:**
+- Borrowing pods sat queued 45 min; relaunched dedicated (started within a minute).
+- Tuning OOM'd (judging 256k samples at once: ~30 GB per process, 3 per GPU): `evaluate` now samples and judges ~16k
+  rows at a time (`ebac4987`).
+- A torn `state.pt` on S3 (maze33 S_s1): `aws s3 sync` re-reads a file per multipart part, and SFT replaced it mid-upload.
+  `pack.py` now uploads from a hard-link snapshot of the run dir (`65716166`, test added); every other state on S3 was
+  checked loadable, S_s1 restarted from scratch.
+- Two code reviews (ml-code-reviewer): resume edge cases (step-0 re-screen, stale checkpoints from a lost trajectory),
+  a per-step 1.3M-row permutation in the SFT loader (capped SFT at ~24 steps/s), tune candidates from step 0, S3 sync
+  retries; all fixed with tests (synth tests now 30, all pass).
+
+**Sudoku bases (done 08:31 UTC).** All 27 levels reached and confirmed (k = 1024 x 1000 dev puzzles), pass@1 %:
+
+| size | seed | p1 | p3 | p10 | SFT steps (stopped at 13%) |
+|---|---|---|---|---|---|
+| 2XS | 0 / 1 / 2 | 1.05 / 1.04 / 1.00 | 3.00 / 3.10 / 3.08 | 9.90 / 9.47 / 10.07 | 5500 / 4500 / 4000 |
+| XS | 0 / 1 / 2 | 1.04 / 1.03 / 0.99 | 3.09 / 3.01 / 2.94 | 9.98 / 9.96 / 10.12 | 5000 / 6000 / 4500 |
+| S | 0 / 1 / 2 | 1.05 / 1.00 / 0.99 | 2.90 / 3.06 / 3.15 | 9.60 / 10.10 / 9.89 | 2500 / 3500 / 3000 |
+
+**Sudoku RL (launched 11-15 ~09:00 UTC).** 108 runs (3 sizes x 3 seeds x 3 levels x 16 / 64 / 256 / 1024 prompts, run
+seed = base seed, 10k steps, t3 recipe), 7 dedicated 4-GPU pods `synth-rl-sudoku9-{0..6}` (plans balanced by GPU share).
+Step time alone on an H100 (2XS): 0.15 / 0.20 / 0.31 / 0.84 s; four b64 runs on one GPU without MPS: 1.9x throughput.
+Runs `s3://.../synth/runs/sudoku9/rl/<size>_<level>_s<seed>_b<batch>/`, W&B `synth-sudoku9-rl`. Tables:
+`synth/report.py --configs sudoku9 maze33 maze49`.
+
+**Results page:** https://claude.ai/artifact/GEBZYSbx1YsKGHRZThKZ4a (`report.py --html`, republished as runs finish).
+
+**Sudoku RL: done 12:25 UTC** (108 / 108 runs, 10k steps). Best validation score (500 dev puzzles x 16), mean of 3 seeds:
+
+| size | level | step 0 | 16 prompts | 64 | 256 | 1024 |
+|---|---|---|---|---|---|---|
+| 2XS | p1 | 0.011 | 0.029 | 0.037 | 0.048 | 0.087 |
+| 2XS | p3 | 0.033 | 0.046 | 0.063 | 0.094 | 0.133 |
+| 2XS | p10 | 0.095 | 0.181 | 0.220 | 0.295 | 0.485 |
+| XS | p1 | 0.012 | 0.039 | 0.049 | 0.062 | 0.080 |
+| XS | p3 | 0.033 | 0.051 | 0.063 | 0.080 | 0.098 |
+| XS | p10 | 0.099 | 0.152 | 0.180 | 0.216 | 0.265 |
+| S | p1 | 0.011 | 0.045 | 0.059 | 0.079 | 0.116 |
+| S | p3 | 0.033 | 0.061 | 0.077 | 0.109 | 0.151 |
+| S | p10 | 0.098 | 0.362 | 0.448 | 0.533 | 0.594 |
+
+- More prompts per step is better in every row (as on the 25×25 maze).
+- From 10%, S reaches 0.59 and 2XS 0.49 at 1024, while XS stays at 0.27: model size is not monotone here (the XS
+  bases took the most SFT steps to reach 13%, 4.5-6k).
+
+**Maze33 bases (done 10:43 UTC).** 25 of 27 levels; SFT ran to the 40k cap except XS s0 / S s2 (13% stop at 37k):
+
+| size | seed 0 (p1 / p3 / p10) | seed 1 | seed 2 |
+|---|---|---|---|
+| 2XS | 1.04 / 3.11 / 9.94 | 1.03 / 3.04 / not reached | 1.02 / 2.92 / not reached |
+| XS | 1.04 / 2.88 / 10.11 | 0.96 / 2.91 / 9.97 | 1.04 / 3.03 / 10.00 |
+| S | 1.03 / 3.01 / 9.98 | 1.05 / 2.97 / 10.00 | 1.01 / 2.89 / 10.05 |
+
+**RL scaling fixes before the maze RL (commits `9b2a069f`, `59e091de`):**
+- maze49 b256 OOM'd in the update (each sample's copy of the 2454-token prompt's KV at 1024 samples per micro-batch):
+  the update micro-batch is now a config setting per prompts per step (`rl.micro`; maze49 256, the others unchanged).
+- Decode KV budget 16 GB for the mazes (`decode.mem_gb`): maze49 S b1024 decode 7.5 -> 3.8 s per step.
+- Data-parallel fastrl (`--gpus`, config `rl.gpus`): ranks split the prompts, gradients averaged; the update equals the
+  one-GPU update (fp32 gradient rel. error 1.4e-7 in the test; fp16 3.6e-4, rounding). maze33 b1024 runs on 2 GPUs,
+  maze49 b1024 on 4. On the pod: maze33 b1024 2.0 s per step on 2 GPUs (~5.6 h per 10k steps).
+- Stages compare only the frozen config sections (`task`, `max_response`, `data`, `sft`); `data.py --refresh` brings
+  new tune / decode / rl settings into a built dataset's meta.json.
+
+**Maze33 RL (launched 10:45-10:55 UTC).** 100 runs (25 bases x 4 batch sizes): 13 pods `synth-rl-maze33-b1024-{0..12}`
+(two 2-GPU b1024 runs each) + 7 pods `synth-rl-maze33-small-{0..6}` (the 16 / 64 / 256 runs packed by share), all
+dedicated 4-GPU, code `d51637d6`. W&B `synth-maze33-rl`.
+
+**Maze49 bases (done 12:13 UTC).** All runs went to the 40k cap; 9 of 27 levels reached. 1% for every run except S s0
+(never left the pre-solving plateau: val loss 0.43 vs ~0.09); 3% only for XS s0; 10% for none. Most runs that solved
+hovered at 1-2% screened pass@1 after leaving the plateau (2XS ~16-23k steps, XS ~12k, S s1 22k, S s2 31k).
+
+| size | seed 0 (p1 / p3) | seed 1 | seed 2 |
+|---|---|---|---|
+| 2XS | 1.01 / – | 1.01 / – | 1.02 / – |
+| XS | 1.01 / 2.95 | 0.99 / – | 1.01 / – |
+| S | – / – | 1.02 / – | 0.97 / – |
+
+**Maze49 RL (launched 12:20 UTC).** 36 runs (9 bases x 4 batch sizes): 9 pods `synth-rl-maze49-b1024-{0..8}` (one 4-GPU
+data-parallel b1024 run each) + 3 pods `synth-rl-maze49-small-{0..2}`, dedicated, code `d51637d6`. W&B `synth-maze49-rl`.
+Several maze33 / maze49 pods are queued for dedicated capacity behind the running ones.
+
 ## 2026-11-15 — sudoku as a second synthetic task: port assessment (planning, no runs)
 
 **Goal.** Decide whether `/mnt/efs/jasonwei/sudoku-transfomer` can run through the maze pipeline (pretrain on demos,
