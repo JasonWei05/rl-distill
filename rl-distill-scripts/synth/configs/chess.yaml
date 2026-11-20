@@ -1,0 +1,23 @@
+# Lichess puzzles with search-trace CoT: the pre2post-chess testbed (arXiv 2607.16097) on its released data, tokenizer
+# and Qwen3 checkpoints (tasks.Chess). Built on the devbox (python-chess) from local copies of the released files:
+# the benchmark (HF pavelslab-nyu/chess_puzzle_benchmark, think/), the first 85 trace shards in name order of HF
+# chess-pre-to-post/sft_v1_200m_90k with the labels fully stripped (s3://scale-ml/genai/rl-distill/synth/chess/traces/fixed),
+# and HF pavelslab-nyu/chess_puzzle_training_datasets rl/rl_dataset_easy_skewed.csv.
+task: {name: chess, slot: 832, bench: /tmp/jw_chess/hf/chess_puzzle_benchmark/think, traces: /tmp/jw_chess/traces/fixed,
+       rl: /tmp/jw_chess/hf/chess_puzzle_training_datasets/rl/rl_dataset_easy_skewed.csv}
+max_response: 2304           # trace responses (prompt + response <= their 3072-token SFT block)
+data: {seed_base: 0}
+# their SFT (run_sft.sh, 4 GPUs): 3 epochs of the 32,858 traces at 256 per step (128 full steps an epoch here), loss = mean
+# of per-4-row token means, fp32, AdamW (0.9, 0.95) wd 0.01 off the norms, lr 3e-4: warmup ~13 steps, cosine to 1e-5;
+# the pretrained models' 1024 positions extended to 3072 with YaRN
+sft: {batch: 256, group: 4, lr: 3.0e-4, min_lr: 1.0e-5, warmup: 13, decay_steps: 384, context: 3072, dtype: float32, decay_norms: false,
+      data_seed: 0, max_steps: 384, log_every: 4, save_every: 32, screen_every: 64, screen_k: 4, stop_at: 2.0,
+      screen_split: test}  # screens on the benchmark (B1-B5), the split the models are matched on
+# their multi-turn rollout: 2560 sampled tokens, 3072 tokens of context (prompt + response), T 1
+decode: {max_new: 2624, mem_gb: 24.0, budget: 2560, max_ctx: 3072}  # mem_gb: 2 evals per GPU (pack.eval 0.5)
+# RL (fastrl.py): their puzzles (rl split), validation on every 3rd benchmark puzzle (494, B1-B5) x 4 samples; the
+# synth recipe: GRPO, PPO clip x TIS (cap 2), lr 5e-5 after 20 warmup steps, early stop after 100 validations (2,000
+# steps) without a new best; group size, prompts per step, mini-batches and micro-batches per run (plan)
+rl: {split: rl, val_split: test, val_stride: 3, val_prompts: 494, val_n: 4, n: 16, lr: 5.0e-5, warmup: 20, tis_cap: 2.0,
+     patience: 100, test_freq: 20}
+pack: {sft: 1.0, eval: 0.5}

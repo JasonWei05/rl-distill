@@ -1,0 +1,28 @@
+{
+  "tokenizer_class": "HFTokenizerWrapper",
+  "auto_map": {
+    "AutoTokenizer": [
+      "tokenizer.HFTokenizerWrapper",
+      null
+    ]
+  },
+  "model_max_length": 3072,
+  "bos_token": "<bos>",
+  "eos_token": "<eos>",
+  "pad_token": "<bos>",
+  "unk_token": "<unk>",
+  "env_token": "<call_env>",
+  "use_fast": false,
+  "lan_config": {
+    "name": "LanTokenizerSFT",
+    "include_move_numbers": false,
+    "include_black_tripledots": false,
+    "bos": "<bos>",
+    "eos": "<eos>",
+    "unk": "<unk>",
+    "keep_result": false,
+    "include_env_tokens": true
+  },
+  "lan_tokenizer_class": "LanTokenizerSFT",
+  "env_id": 84
+}

@@ -1,0 +1,334 @@
+<title>Chess RL Grid</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+:root {
+  --bg: #f5f4ef; --surface: #fcfcfb; --fg: #0b0b0b; --fg2: #52514e; --fg3: #77766f; --rule: #e2e0d8; --grid: #ebe9e2;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --chip: #ecebe4;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121211; --surface: #1a1a19; --fg: #f0efec; --fg2: #c3c2b7; --fg3: #98978d; --rule: #31302d; --grid: #262523;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --chip: #262523; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121211; --surface: #1a1a19; --fg: #f0efec; --fg2: #c3c2b7; --fg3: #98978d; --rule: #31302d; --grid: #262523;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --chip: #262523; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 "IBM Plex Sans", system-ui, sans-serif;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 56px; }
+main { max-width: 1120px; margin: 0 auto; display: grid; gap: 28px; }
+h1, h2 { font-family: "Space Grotesk", system-ui, sans-serif; text-wrap: balance; margin: 0; letter-spacing: -.01em; }
+h1 { font-size: 1.9rem; line-height: 1.15; } h2 { font-size: 1.2rem; }
+header { display: grid; gap: 10px; } p { margin: 0; max-width: 72ch; color: var(--fg2); }
+.eyebrow { font: 500 .74rem/1 "IBM Plex Mono", monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--fg3); }
+.status { font-size: .9rem; color: var(--fg2); } .status b { color: var(--fg); font-weight: 600; }
+section { display: grid; gap: 12px; } .head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.num, td, th { font-variant-numeric: tabular-nums; }
+.scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+th, td { padding: 7px 9px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--grid); }
+th { font-weight: 500; color: var(--fg3); font-size: .74rem; letter-spacing: .05em; text-transform: uppercase; }
+tr:last-child td { border-bottom: 0; } td.l, th.l { text-align: left; } td.mono { font-family: "IBM Plex Mono", monospace; font-size: .82rem; }
+tr.group td { border-top: 1px solid var(--rule); } .dim { color: var(--fg3); }
+.sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 8px; }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 99px; background: var(--chip); color: var(--fg2); font-size: .78rem; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: .86rem; color: var(--fg2); }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 7px; overflow: hidden; background: var(--surface); }
+.seg button { font: inherit; font-size: .84rem; border: 0; padding: 5px 12px; background: transparent; color: var(--fg2); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--chip); color: var(--fg); font-weight: 500; }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+figure { margin: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 10px 6px; position: relative; min-width: 0; }
+figcaption { display: flex; justify-content: space-between; gap: 8px; padding: 0 4px 4px; font-size: .9rem; }
+figcaption b { font-family: "Space Grotesk", system-ui, sans-serif; font-weight: 600; } figcaption span { color: var(--fg3); font-size: .8rem; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+.ax { fill: var(--fg3); font: 10px "IBM Plex Sans", system-ui, sans-serif; } .gl { stroke: var(--grid); } .base { stroke: var(--rule); }
+.lbl { fill: var(--fg2); font: 500 10px "IBM Plex Sans", system-ui, sans-serif; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+.line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.ref { stroke: var(--fg3); stroke-dasharray: 3 3; } .rule { stroke: var(--fg3); stroke-width: 1; }
+.dot { stroke: var(--surface); stroke-width: 2; }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 6px 9px; font-size: .78rem; line-height: 1.45; box-shadow: 0 4px 14px rgb(0 0 0 / .12); white-space: nowrap; z-index: 2; }
+.tip .t { color: var(--fg3); margin-bottom: 2px; }
+.empty { fill: var(--fg3); font: 12px "IBM Plex Sans", system-ui, sans-serif; }
+footer { font-size: .82rem; color: var(--fg3); }
+h3 { font: 600 .95rem/1.3 "IBM Plex Sans", system-ui, sans-serif; margin: 6px 0 0; }
+.fine { font-size: .84rem; }
+.rowlabel { grid-column: 1 / -1; font-size: .84rem; font-weight: 600; color: var(--fg2); margin-top: 4px; }
+tr.lrrow td { background: var(--chip); border-top: 1px solid var(--rule); font-size: .84rem; }
+.findings { margin: 4px 0 0; padding-left: 1.2em; max-width: 80ch; color: var(--fg2); display: grid; gap: 4px; font-size: .92rem; }
+.findings li::marker { color: var(--fg3); } code { font: .8rem "IBM Plex Mono", monospace; color: var(--fg2); }
+</style>
+<script type="application/json" id="data">__DATA__</script>
+<main>
+  <header>
+    <div class="eyebrow">pre2post-chess · Lichess puzzles · synth fastrl</div>
+    <h1>Chess RL grid: 20M, 50M, 100M from matched SFT bases</h1>
+    <p>Three released Qwen3 pretraining checkpoints, each SFT'd for 384 steps on search-trace CoT (their 3-epoch recipe, YaRN to
+      3,072 tokens). Pretraining budgets are chosen so all three bases land near the 20M's benchmark pass@1. Each base then runs GRPO
+      with four group-size × batch configs, at lr 5e-5 and again at 2.5e-5.</p>
+    <div class="status" id="status"></div>
+    <ul class="findings" id="findings" hidden></ul>
+  </header>
+
+  <section>
+    <div class="head"><h2>SFT bases on the benchmark</h2><span class="dim" style="font-size:.84rem">B1–B5, 1,480 puzzles; pass@1 in %</span></div>
+    <div class="scroll"><table id="bases"></table></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>New SFT on 2.3&times; the traces</h2><span class="dim" style="font-size:.84rem">76,780 traces (all 178 training shards), 3 epochs = 896 steps, lr 3e-4 cosine to 1e-5, from the same pretrained checkpoints</span></div>
+    <div class="legend" id="sftLegend"></div>
+    <div class="charts" id="sftCharts"></div>
+    <p class="fine">Validation loss: the 937 held-out traces, every 10 steps (train loss faint). pass@1 / pass@16: B1&ndash;B5 (1,480 puzzles) &times; 16 samples at every checkpoint (every 32 steps). Dashed: the best 20M checkpoint's pass@1, the level the other models are matched to.</p>
+    <div class="scroll"><table id="sftTable"></table></div>
+  </section>
+
+  <section>
+    <div class="head">
+      <h2>RL curves</h2>
+      <div class="seg" role="group" aria-label="x axis">
+        <button type="button" data-x="step" aria-pressed="true">vs steps</button>
+        <button type="button" data-x="rollouts" aria-pressed="false">vs rollouts sampled</button>
+      </div>
+    </div>
+    <div class="legend" id="legend"></div>
+    <h3>Validation pass@1</h3>
+    <div class="charts" id="charts"></div>
+    <p class="fine">Every 3rd benchmark puzzle (494, B1–B5) × 4 samples, every 20 steps. A puzzle counts only if the whole solution line is
+      right. Dashed: the step-0 score. Configs in the same slot sample about the same training FLOPs per step across models.</p>
+    <h3>Sampled tokens per rollout <span class="dim" style="font-weight:400">(log scale)</span></h3>
+    <div class="charts" id="lenCharts"></div>
+    <p class="fine">Training rollouts' mean, from W&amp;B; environment replies excluded. The SFT traces' search lines (<code>&lt;T&gt; line &lt;sep&gt; …</code>)
+      are most of the step-0 length; the bare answer (<code>&lt;/T&gt;</code>, then each move and its <code>&lt;call_env&gt;</code>) is about 10–20 tokens.</p>
+  </section>
+
+  <section>
+    <div class="head"><h2>Runs</h2><span class="dim" style="font-size:.84rem">P = prompts per update · 4 updates per step</span></div>
+    <div class="scroll"><table id="runs"></table></div>
+  </section>
+
+  <footer id="foot"></footer>
+</main>
+<script>
+const D = JSON.parse(document.getElementById("data").textContent);
+const NS = "http://www.w3.org/2000/svg", SLOTS = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--s4)"];
+const SLOT_NAMES = ["n 4 · smallest P", "n 16 · smallest P", "n 16 · 4× P", "n 16 · 16× P"];
+const pct = (v, d = 2) => v == null ? "–" : v.toFixed(d);
+const short = r => `P${r.prompts} n${r.n}`;
+const fmtN = v => v >= 1e6 ? `${+(v / 1e6).toFixed(v >= 1e7 ? 0 : 1)}M` : v >= 1e3 ? `${+(v / 1e3).toFixed(v >= 1e4 ? 0 : 1)}k` : `${v}`;
+let xmode = "step";
+const nice = max => [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000].find(t => max / t <= 6) ?? 5000;
+
+function el(tag, attrs = {}, parent, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+// status line
+for (const g of D.grids) for (const m of g.models) for (const r of m.runs) r.lengths = r.train.map(p => [p[0], p[1]]);
+const runs = D.grids.flatMap(g => g.models.flatMap(m => m.runs));
+const count = s => runs.filter(r => r.status.startsWith(s)).length;
+const doneN = count("early stop") + count("max steps") + count("stopped");
+document.getElementById("status").innerHTML =
+  `<b>${doneN} of ${runs.length}</b> runs finished · <b>${count("running") + count("starting")}</b> running · ${count("queued")} queued` +
+  (count("error") ? ` · <b>${count("error")}</b> errored` : "") + ` · updated ${D.updated}` + (D.note ? ` · ${D.note.replace(/</g, "&lt;")}` : "");
+
+// findings
+if (D.findings.length) {
+  const ul = document.getElementById("findings");
+  for (const f of D.findings) { const li = document.createElement("li"); li.textContent = f; ul.appendChild(li); }
+  ul.hidden = false;
+}
+
+// bases table
+const target = D.bases[0].base;
+let bh = `<tr><th class="l">model</th><th>pretraining</th><th>samples</th><th>pass@1</th><th>vs 20M</th><th>pass@4</th><th>pass@16</th>` +
+  ["B1", "B2", "B3", "B4", "B5"].map(b => `<th>${b}</th>`).join("") + `<th>first move</th><th>closed &lt;/T&gt;</th></tr>`;
+for (const m of D.bases) {
+  const b = m.base;
+  bh += `<tr><td class="l"><b>${m.label}</b> <span class="dim">Qwen3</span></td><td>${m.tokens} tok</td>` + (b ?
+    `<td>n = ${b.n}</td><td><b>${pct(b["pass@1"])}</b></td><td class="dim">${m === D.bases[0] ? "target" : (b["pass@1"] - target["pass@1"] >= 0 ? "+" : "") + pct(b["pass@1"] - target["pass@1"])}</td>` +
+    `<td>${pct(b["pass@4"])}</td><td>${pct(b["pass@16"])}</td>` + Object.values(b.bands).map(v => `<td>${pct(v)}</td>`).join("") +
+    `<td>${pct(b.first_move)}</td><td>${pct(b.closed_think, 1)}</td>` : `<td colspan="13" class="l dim">SFT training; its benchmark eval lands here</td>`) + `</tr>`;
+}
+document.getElementById("bases").innerHTML = bh;
+
+// legend
+document.getElementById("legend").innerHTML = SLOT_NAMES.map((s, i) => `<span><i class="sw" style="background:${SLOTS[i]}"></i>${s}</span>`).join("");
+
+
+// new SFT (bigger trace set): loss and the benchmark at every checkpoint, one line per model
+const SFT = D.sft, MS = ["var(--s1)", "var(--s2)", "var(--s3)"];
+document.getElementById("sftLegend").innerHTML = SFT.models.map((m, i) => `<span><i class="sw" style="background:${MS[i]}"></i>${m.label}</span>`).join("");
+const best20 = SFT.models[0].evals.reduce((a, e) => a && a[1] >= e[1] ? a : e, null);  // [step, pass@1, pass@16]
+function sftChart(title, pick, fmt, opts = {}) {
+  const W = 380, H = 236, L = 40, R = 14, T = 10, B = 26;
+  const fig = document.createElement("figure"), cap = document.createElement("figcaption");
+  cap.innerHTML = `<b>${title}</b><span>${opts.sub || ""}</span>`; fig.appendChild(cap);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": title }, fig);
+  const series = SFT.models.map((m, i) => ({ m, i, pts: pick(m).filter(p => !opts.log || p[1] > 0) }));
+  const all = series.flatMap(s => s.pts), faint = opts.faint ? SFT.models.flatMap(m => opts.faint(m)) : [];
+  const xTop0 = Math.max(100, ...all.map(p => p[0]), ...faint.map(p => p[0])), xTick = nice(xTop0), xTop = Math.ceil(xTop0 / xTick) * xTick;
+  const X = v => L + (W - L - R) * v / xTop;
+  let Y, yTicks;
+  if (opts.log) {
+    const ys = [...all, ...faint].map(p => p[1]).filter(v => v > 0), lo = Math.log10(Math.min(...ys, 1) * 0.95), hi = Math.log10(Math.max(...ys, 1) * 1.05);
+    Y = v => H - B - (H - B - T) * (Math.log10(v) - lo) / (hi - lo);
+    yTicks = [0.3, 0.5, 1, 2, 5, 10].filter(v => Math.log10(v) >= lo && Math.log10(v) <= hi);
+  } else {
+    const top0 = Math.max(opts.min || 5, ...all.map(p => p[1]), opts.ref || 0) * 1.08, yStep = nice(top0), top = Math.ceil(top0 / yStep) * yStep;
+    Y = v => H - B - (H - B - T) * v / top;
+    yTicks = Array.from({ length: top / yStep + 1 }, (_, i) => i * yStep);
+  }
+  yTicks.forEach((v, k) => { el("line", { class: k ? "gl" : "base", x1: L, x2: W - R, y1: Y(v), y2: Y(v) }, svg);
+    el("text", { class: "ax", x: L - 6, y: Y(v) + 3.5, "text-anchor": "end" }, svg, opts.tick ? opts.tick(v) : v); });
+  for (let v = 0; v <= xTop; v += xTick) el("text", { class: "ax", x: X(v), y: H - 8, "text-anchor": "middle" }, svg, v);
+  if (opts.ref) el("line", { class: "ref", x1: L, x2: W - R, y1: Y(opts.ref), y2: Y(opts.ref) }, svg);
+  if (opts.faint) SFT.models.forEach((m, i) => { const f = opts.faint(m).filter(p => p[1] > 0);
+    if (f.length) el("polyline", { class: "line", stroke: MS[i], opacity: 0.25, "stroke-width": 1, points: f.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ") }, svg); });
+  const live = series.filter(s => s.pts.length);
+  live.forEach(s => el("polyline", { class: "line", stroke: MS[s.i], points: s.pts.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ") }, svg));
+  if (!live.length) el("text", { class: "empty", x: (L + W - R) / 2, y: (T + H - B) / 2, "text-anchor": "middle" }, svg, "waiting for the first checkpoints");
+  const hover = el("g", { visibility: "hidden" }, svg), rule = el("line", { class: "rule", y1: T, y2: H - B }, hover);
+  const dots = live.map(s => el("circle", { class: "dot", r: 4, fill: MS[s.i] }, hover));
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true; fig.appendChild(tip);
+  const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - B - T, fill: "transparent" }, svg);
+  hit.addEventListener("pointermove", ev => {
+    if (!live.length) return;
+    const box = svg.getBoundingClientRect(), px = (ev.clientX - box.left) * W / box.width;
+    const near = live.map(s => s.pts.reduce((a, p) => Math.abs(X(p[0]) - px) < Math.abs(X(a[0]) - px) ? p : a));
+    const rx = X(near.reduce((a, p) => Math.abs(X(p[0]) - px) < Math.abs(X(a[0]) - px) ? p : a)[0]);
+    rule.setAttribute("x1", rx); rule.setAttribute("x2", rx); hover.setAttribute("visibility", "visible");
+    near.forEach((p, k) => { dots[k].setAttribute("cx", X(p[0])); dots[k].setAttribute("cy", Y(p[1])); });
+    tip.innerHTML = live.map((s, k) => `<div><i class="sw" style="background:${MS[s.i]}"></i>${s.m.label} <b>${fmt(near[k][1])}</b> <span class="dim">@${near[k][0]}</span></div>`).join("");
+    tip.hidden = false;
+    const fb = fig.getBoundingClientRect(), tx = ev.clientX - fb.left;
+    tip.style.left = `${tx + 14 + tip.offsetWidth > fb.width - 6 ? Math.max(6, tx - tip.offsetWidth - 14) : tx + 14}px`; tip.style.top = `${ev.clientY - fb.top + 14}px`;
+  });
+  hit.addEventListener("pointerleave", () => { hover.setAttribute("visibility", "hidden"); tip.hidden = true; });
+  document.getElementById("sftCharts").appendChild(fig);
+}
+sftChart("Validation loss", m => m.val, v => v.toFixed(3), { log: true, sub: "log scale; train loss faint", faint: m => m.train.filter(p => p[0] >= 8), tick: v => v });
+sftChart("pass@1 on B1–B5", m => m.evals.map(e => [e[0], e[1]]), v => `${pct(v)}%`, { ref: best20?.[1], sub: best20 ? `best 20M ${pct(best20[1])}% @${best20[0]}` : "", tick: v => `${v}%` });
+sftChart("pass@16 on B1–B5", m => m.evals.map(e => [e[0], e[2]]), v => `${pct(v)}%`, { min: 20, tick: v => `${v}%` });
+let sh = `<tr><th class="l">model</th><th class="l">status</th><th>step</th><th>val loss</th><th>best pass@1 / @16</th>` +
+  `<th>final pass@1 / @16</th><th>closest to best 20M</th><th>n 64: 832 / 896</th><th>old base</th></tr>`;
+SFT.models.forEach((m, i) => {
+  const ev = m.evals, best = ev.reduce((a, e) => a && a[1] >= e[1] ? a : e, null), fin = ev.find(e => e[0] === SFT.steps);
+  const match = i && best20 && ev.length ? ev.reduce((a, e) => Math.abs(a[1] - best20[1]) <= Math.abs(e[1] - best20[1]) ? a : e) : null;
+  const step = Math.max(0, ...m.train.map(p => p[0])), vl = m.val.at(-1), ob = D.bases.find(b => b.key === m.key)?.base;
+  sh += `<tr><td class="l"><i class="sw" style="background:${MS[i]}"></i><b>${m.label}</b></td><td class="l"><span class="chip">${m.done ? (ev.some(e => e[0] === SFT.steps) ? "done" : "evaluating") : m.started ? "training" : "queued"}</span></td>` +
+    `<td>${step}<span class="dim"> / ${SFT.steps}</span></td><td>${vl ? vl[1].toFixed(4) : "–"}</td>` +
+    `<td>${best ? `<b>${pct(best[1])}</b> / ${pct(best[2])}<span class="dim"> @${best[0]}</span>` : "–"}</td>` +
+    `<td>${fin ? `${pct(fin[1])} / ${pct(fin[2])}` : "–"}</td>` +
+    `<td>${i === 0 ? (best ? `<span class="dim">target</span>` : "–") : match ? `${pct(match[1])} / ${pct(match[2])}<span class="dim"> @${match[0]}</span>` : "–"}</td>` +
+    `<td>${[832, SFT.steps].map(k => m.confirm[k] ? `${pct(m.confirm[k][0])} / ${pct(m.confirm[k][1])}` : "–").join("<br>")}</td>` +
+    `<td class="dim">${ob ? `${pct(ob["pass@1"])} / ${pct(ob["pass@16"])}` : "–"}</td></tr>`;
+});
+document.getElementById("sftTable").innerHTML = sh;
+
+// charts: per metric, one per model (shared axes), 4 config lines each; x: steps or rollouts sampled (log)
+const METRICS = [
+  { key: "history", root: "charts", fmt: v => `${pct(v)}%`, tick: v => v ? `${v}%` : "0", ref: true, what: "validation pass@1" },
+  { key: "lengths", root: "lenCharts", fmt: v => `${Math.round(v)} tok`, tick: v => fmtN(v), ref: false, log: true, what: "sampled tokens per rollout" }];
+// each chart's x axis spans its own runs so far (steps, or rollouts sampled on a log scale)
+function xAxis(m, W, L, R) {
+  const pts = m.runs.flatMap(r => [...r.history, ...r.lengths].map(p => [p[0], p[0] * r.rollouts]));
+  const stepMax = Math.max(100, ...pts.map(p => p[0])), stepTick = nice(stepMax), stepTop = Math.ceil(stepMax / stepTick) * stepTick;
+  const rolls = pts.filter(p => p[0] > 0).map(p => p[1]);
+  const lo = Math.floor(Math.log10(Math.min(1e4, ...rolls))), hi = Math.max(lo + 1, Math.ceil(Math.log10(Math.max(...rolls, 1))));
+  return xmode === "step" ? {
+    X: v => L + (W - L - R) * v / stepTop, inv: px => (px - L) / (W - L - R) * stepTop,
+    ticks: Array.from({ length: stepTop / stepTick + 1 }, (_, i) => i * stepTick), label: v => v >= 1000 ? `${v / 1000}k` : v,
+  } : {
+    X: v => L + (W - L - R) * (Math.log10(v) - lo) / (hi - lo), inv: px => 10 ** (lo + (px - L) / (W - L - R) * (hi - lo)),
+    ticks: Array.from({ length: hi - lo + 1 }, (_, i) => 10 ** (lo + i)), label: fmtN,
+  };
+}
+
+function drawMetric(M) {
+  const W = 380, H = 236, L = 34, R = 62, T = 10, B = 26, root = document.getElementById(M.root);
+  root.innerHTML = "";
+  const ys = runs.flatMap(r => r[M.key].map(p => p[1]));
+  const yMax = Math.max(M.ref ? 10 : 100, ...ys), yStep = nice(yMax * 1.08), yTop = Math.ceil(yMax * 1.08 / yStep) * yStep;
+  const ylo = Math.floor(Math.log10(Math.max(1, Math.min(10, ...ys)))), yhi = Math.ceil(Math.log10(yMax));
+  const yTicks = M.log ? Array.from({ length: yhi - ylo + 1 }, (_, i) => 10 ** (ylo + i)) : Array.from({ length: yTop / yStep + 1 }, (_, i) => i * yStep);
+  const Y = M.log ? (v => H - B - (H - B - T) * (Math.log10(Math.max(v, 10 ** ylo)) - ylo) / (yhi - ylo)) : (v => H - B - (H - B - T) * v / yTop);
+  for (const g of D.grids) {
+  const row = document.createElement("div"); row.className = "rowlabel"; row.textContent = `lr ${g.lr}`; root.appendChild(row);
+  for (const m of g.models) {
+    const fig = document.createElement("figure"), cap = document.createElement("figcaption");
+    const live = m.runs.filter(r => r[M.key].length), ax = xAxis(m, W, L, R), X = ax.X, Xinv = ax.inv;
+    cap.innerHTML = `<b>${m.label}</b><span>lr ${g.lr}</span>`;
+    fig.appendChild(cap);
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `${m.label} ${M.what} vs ${xmode}` }, fig);
+    for (const v of yTicks) {
+      el("line", { class: v === yTicks[0] ? "base" : "gl", x1: L, x2: W - R, y1: Y(v), y2: Y(v) }, svg);
+      el("text", { class: "ax", x: L - 6, y: Y(v) + 3.5, "text-anchor": "end" }, svg, M.tick(v));
+    }
+    for (const v of ax.ticks) el("text", { class: "ax", x: X(v), y: H - 8, "text-anchor": "middle" }, svg, ax.label(v));
+    if (M.ref && live.length) el("line", { class: "ref", x1: L, x2: W - R, y1: Y(live[0].history[0][1]), y2: Y(live[0].history[0][1]) }, svg);
+    if (!live.length) el("text", { class: "empty", x: (L + W - R) / 2, y: (T + H - B) / 2, "text-anchor": "middle" }, svg, "queued");
+    const series = live.map(r => {
+      const i = m.runs.indexOf(r);
+      const pts = r[M.key].filter(p => xmode === "step" || p[0] > 0).map(p => [xmode === "step" ? p[0] : p[0] * r.rollouts, p[1], p[0]]);
+      if (pts.length) el("polyline", { class: "line", stroke: SLOTS[i], points: pts.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ") }, svg);
+      return { r, i, pts };
+    }).filter(s => s.pts.length);
+    // direct end labels, nudged apart
+    const ends = series.map(s => ({ s, y: Y(s.pts.at(-1)[1]) })).sort((a, b) => a.y - b.y);
+    for (let k = 1; k < ends.length; k++) ends[k].y = Math.max(ends[k].y, ends[k - 1].y + 11);
+    for (const e of ends) el("text", { class: "lbl", x: X(e.s.pts.at(-1)[0]) + 5, y: e.y + 3.5 }, svg, short(e.s.r));
+    // hover: crosshair + each line's nearest point
+    const hover = el("g", { visibility: "hidden" }, svg), rule = el("line", { class: "rule", y1: T, y2: H - B }, hover);
+    const dots = series.map(s => el("circle", { class: "dot", r: 4, fill: SLOTS[s.i] }, hover));
+    const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true; fig.appendChild(tip);
+    const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - B - T, fill: "transparent" }, svg);
+    hit.addEventListener("pointermove", ev => {
+      if (!series.length) return;
+      const box = svg.getBoundingClientRect(), px = (ev.clientX - box.left) * W / box.width, xv = Xinv(px);
+      const near = series.map(s => s.pts.reduce((a, p) => Math.abs(X(p[0]) - px) < Math.abs(X(a[0]) - px) ? p : a));
+      const rx = X(near.reduce((a, p) => Math.abs(X(p[0]) - px) < Math.abs(X(a[0]) - px) ? p : a)[0]);
+      rule.setAttribute("x1", rx); rule.setAttribute("x2", rx); hover.setAttribute("visibility", "visible");
+      near.forEach((p, k) => { dots[k].setAttribute("cx", X(p[0])); dots[k].setAttribute("cy", Y(p[1])); });
+      tip.innerHTML = `<div class="t">${xmode === "step" ? `step ${Math.round(xv)}` : `${fmtN(Math.round(xv))} rollouts`}</div>` + series.map((s, k) =>
+        `<div><i class="sw" style="background:${SLOTS[s.i]}"></i>${short(s.r)} <b>${M.fmt(near[k][1])}</b> <span class="dim">@${near[k][2]}</span></div>`).join("");
+      tip.hidden = false;
+      const fb = fig.getBoundingClientRect(), tx = ev.clientX - fb.left;
+      tip.style.left = `${Math.min(tx + 14, fb.width - tip.offsetWidth - 6)}px`; tip.style.top = `${ev.clientY - fb.top + 14}px`;
+      if (tx + 14 + tip.offsetWidth > fb.width - 6) tip.style.left = `${Math.max(6, tx - tip.offsetWidth - 14)}px`;
+    });
+    hit.addEventListener("pointerleave", () => { hover.setAttribute("visibility", "hidden"); tip.hidden = true; });
+    root.appendChild(fig);
+  }
+  }
+}
+const draw = () => METRICS.forEach(drawMetric);
+draw();
+document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
+  xmode = b.dataset.x;
+  document.querySelectorAll(".seg button").forEach(o => o.setAttribute("aria-pressed", o === b));
+  draw();
+}));
+
+// runs table
+let rh = `<tr><th class="l">model</th><th class="l">config</th><th>P</th><th>n</th><th>rollouts/step</th><th class="l">status</th><th>step</th>` +
+  `<th>step 0</th><th>best @ step</th><th>latest</th><th>Δ best</th><th>since best</th><th>tokens</th><th>train %</th></tr>`;
+for (const g of D.grids) {
+rh += `<tr class="lrrow"><td class="l" colspan="14"><b>lr ${g.lr}</b></td></tr>`;
+for (const m of g.models) m.runs.forEach((r, i) => {
+  const h = r.history, last = h.at(-1);
+  rh += `<tr class="${i ? "" : "group"}"><td class="l">${i ? "" : `<b>${m.label}</b>`}</td><td class="l"><i class="sw" style="background:${SLOTS[i]}"></i>${short(r)}</td>` +
+    `<td>${r.prompts}</td><td>${r.n}</td><td>${r.rollouts.toLocaleString()}</td><td class="l"><span class="chip">${r.status}</span></td>` +
+    `<td>${last ? `${last[0].toLocaleString()}<span class="dim"> / ${D.steps / 1000}k</span>` : "–"}</td><td>${pct(h[0]?.[1])}</td><td><b>${pct(r.best?.[1])}</b><span class="dim">${r.best ? ` @${r.best[0]}` : ""}</span></td>` +
+    `<td>${pct(last?.[1])}</td><td>${r.best ? (r.best[1] - h[0][1] >= 0 ? "+" : "") + pct(r.best[1] - h[0][1]) : "–"}</td>` +
+    `<td>${r.since_best ?? "–"}<span class="dim">${r.since_best != null ? " / 100" : ""}</span></td><td>${r.lengths.length ? Math.round(r.lengths.at(-1)[1]) : "–"}</td><td>${r.train.length ? pct(r.train.slice(-10).reduce((a, p) => a + p[2], 0) / Math.min(10, r.train.length), 1) : "–"}</td></tr>`;
+});
+}
+document.getElementById("runs").innerHTML = rh;
+document.getElementById("foot").textContent = "GRPO (unbiased std), PPO clip 0.2 / 0.28 with dual clip 10, token TIS capped at 2, lr 5e-5 or 2.5e-5 after 20 warmup steps, " +
+  "AdamW (0.9, 0.999) wd 0.01, grad clip 1.0, fp16 rollouts and updates over fp32 master weights; 2,560 sampled tokens and up to 6 environment " +
+  "calls per episode; max 5k steps, early stop after 100 validations (2,000 steps) without a new best. Code: rl-distill-scripts/synth (fastrl.py, chess_report.py).";
+</script>

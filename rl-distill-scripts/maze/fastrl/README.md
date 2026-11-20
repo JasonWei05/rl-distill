@@ -1,24 +1,16 @@
 # fastrl: single-GPU GRPO + TIS for the text-maze models
 
-`fastrl.py` is the maze RL recipe of `../rl/rl_tis_run.sh` (the t3 grids: GRPO with 16 samples per prompt, reward 1 for a
+> **2026-11-17:** the verl comparison suite described below (`test_fastrl.py`) was removed (last at `e642401a`); synth/ no
+> longer depends on verl. synth/fastrl.py now runs the math recipe's PPO clip x token TIS loss with mini-batches
+> (`--minibatches`); its tests are in synth/tests. This page records the maze grids' trainer as it was.
+
+fastrl is the maze RL recipe of `../rl/rl_tis_run.sh` (the t3 grids: GRPO with 16 samples per prompt, reward 1 for a
 shortest path, token-level TIS `min(pi / pi_rollout, 2)`, lr 1e-5 with a 20-step warmup, validation every 20 steps on 500
-mazes x 16 samples) in one process and one file, without Ray, FSDP, HF generate or reward workers. `test_fastrl.py` checks
-it piece by piece against the verl stack it replaces (TailRL `experiments/text_maze` + `../tailrl_rl_tis.patch`).
-
-## Run
-
-Needs the TailRL venv (torch 2.8, safetensors, pyarrow, wandb) and one GPU; prompts are tokenized once into
-`<parquet>.tokens.npy` next to the parquet (1.3M train prompts: ~5 min, 850 MB).
-
-```bash
-python fastrl.py --base <HF dir of the start policy> --train <dir>/main_parquet/train.parquet \
-  --val <dir>/eval500/test.parquet --out /tmp/runs/<name> --batch 64 --seed 3 --micro 512 --wandb-id <name>
-```
-
-`--micro` caps the samples per update micro-batch (verl `PPO_MICRO_SAMPLES`; the t3 grids used 512 for 16 / 64 prompts
-per step and 1024 for 256 / 1024). The run dir gets `ckpt.pt` (resumed in place), `best.json` / `best_hf/` /
-`COMPLETE.json` in verl's format, and the W&B files; W&B metric names are verl's (`val-aux/maze_17/is_shortest/mean@16`,
-`tflops/cumulative_total`, ...). Several runs can share a GPU.
+mazes x 16 samples) in one process, without Ray, FSDP, HF generate or reward workers. It now lives in `../../synth/`
+(`fastrl.py`, the model and sampler in `model.py`, the maze in `tasks.py`), where it runs any synth task;
+`test_fastrl.py` here checks it piece by piece against the verl stack it replaces (TailRL `experiments/text_maze` +
+`../tailrl_rl_tis.patch`) on the 25x25 study's data and bases. The single-file version, its benchmark and its
+ScaleTrain launcher (used for the results below) are at commit `a1aca9f5` (`maze/fastrl/`).
 
 ## What it does the same way as verl
 
@@ -44,16 +36,16 @@ per step and 1024 for 256 / 1024). The run dir gets `ckpt.pt` (resumed in place)
 
 ```bash
 cd rl-distill-scripts/maze/fastrl
-CUDA_VISIBLE_DEVICES=0 PYTHONPATH=.:$TAILRL/experiments/text_maze:../rl $TAILRL/.venv/bin/python -m pytest -q test_fastrl.py
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH=../../synth:$TAILRL/experiments/text_maze:../rl $TAILRL/.venv/bin/python -m pytest -q test_fastrl.py
 ```
 
-17 tests, ~70 s on an H100. Exact: prompt tokens (HF tokenizer), the response mask, maze parsing + BFS (TailRL `MazeEnv`, data
+16 tests, ~90 s on an H100 (the train / resume test is in `synth/tests`). Exact: the synth maze generator reproduces the
+study's tokenized prompts and pretraining sequences, the response mask, maze parsing + BFS (TailRL `MazeEnv`, data
 `optimal_path_length`), the judge on 31k real and adversarial responses (every outcome field), GRPO advantage, TIS loss
 and its gradient, prompt order over several epochs, FLOPs. Up to float rounding, measured against float64: the forward
 (fp32: as close as HF's fp32; fp16: as close as verl's prefix forward), decode log-probs (as close as verl's
 `PrefixSharedDecoder`), one full update against verl's `DataParallelPPOActor` on FSDP over 6 batches (fp32 and fp16).
-Statistical: first-token frequencies (chi-square), validation outcomes against verl's decoder (paired z < 4). Plus a
-train / resume run.
+Statistical: first-token frequencies (chi-square), validation outcomes against verl's decoder (paired z < 4).
 
 ## Results (2026-11-13)
 

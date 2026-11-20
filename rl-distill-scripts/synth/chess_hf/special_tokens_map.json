@@ -1,0 +1,7 @@
+{
+  "bos_token": "<bos>",
+  "eos_token": "<eos>",
+  "pad_token": "<bos>",
+  "unk_token": "<unk>",
+  "env_token": "<call_env>"
+}

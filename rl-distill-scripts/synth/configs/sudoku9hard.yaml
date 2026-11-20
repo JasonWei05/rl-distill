@@ -1,0 +1,16 @@
+# 9x9 sudoku, harder: 30-55 clues (26-51 blanks), solver-trace demonstrations (always correct), no CoT
+task: {name: sudoku, clue_min: 30, clue_max: 55}
+max_response: 160            # 51 blanks x 3 tokens + DONE <eos> = 155
+data: {n_train: 1300000, seed_base: 100000000}
+sft: {batch: 128, lr: 5.0e-4, data_seed: 0, max_steps: 40000, log_every: 50, save_every: 100, screen_every: 500,
+      screen_k: 16, stop_at: 0.13}
+tune: {levels: {p1: 0.01, p3: 0.03, p10: 0.10}, window: 200, k: 256, confirm_k: 1024, tol: 0.05, max_iters: 6}
+decode: {max_new: 160, mem_gb: 4.0}  # sampling (screens, tuning, RL): response cap, KV-cache budget per chunk (GB)
+# rl.batches: prompts per step per model size, about equal FLOPs per step across sizes in each position (2XS : XS : S
+# FLOPs per sample ~ 1 : 2 : 3-4); rl.micro: update micro-batch (samples) per prompts per step; rl.gpus: data-parallel GPUs
+rl: {n: 16, lr: 1.0e-5, warmup: 20, tis_cap: 2.0, patience: 100000, test_freq: 20, val_prompts: 500, val_n: 16,
+     batches: {2XS: [64, 256, 1024, 4096], XS: [32, 128, 512, 2048], S: [16, 64, 256, 1024]},
+     micro: {16: 512, 32: 512, 64: 512, 128: 1024, 256: 1024, 512: 1024, 1024: 1024, 2048: 1024, 4096: 1024},
+     gpus: {16: 1, 32: 1, 64: 1, 128: 1, 256: 1, 512: 1, 1024: 1, 2048: 2, 4096: 2}}
+# pack.py GPU shares (fraction of a GPU a job takes; a multi-GPU job takes its GPUs whole): sft runs, rl runs per prompts per step
+pack: {sft: 0.2, rl: {16: 0.1, 32: 0.1, 64: 0.15, 128: 0.15, 256: 0.25, 512: 0.25, 1024: 0.5, 2048: 1.0, 4096: 1.0}}

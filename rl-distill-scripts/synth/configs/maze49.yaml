@@ -1,0 +1,18 @@
+# 49x49 maze: depth-first + 0-20% wall knockout, eps 0.2 demonstrations (~23% of them shortest paths)
+# sft extended 11-15 from 40k to 120k max steps, stop once the median of 4 screens >= 12% (pass@1 was still rising at 40k)
+task: {name: maze, size: 49, eps: 0.2, k_min: 0.0, k_max: 0.2}
+max_response: 1280           # demonstrations (a self-avoiding walk visits at most ~1260 cells) and SFT sequences
+data: {n_train: 1300000, seed_base: 80000000}
+sft: {batch: 128, lr: 5.0e-4, data_seed: 0, max_steps: 120000, log_every: 50, save_every: 100, screen_every: 500,
+      screen_k: 16, stop_at: 0.12}
+tune: {levels: {p1: 0.01, p3: 0.03, p10: 0.10}, window: 200, k: 256, confirm_k: 1024, tol: 0.05, max_iters: 6}
+decode: {max_new: 832, mem_gb: 16.0}  # sampling (screens, tuning, RL): response cap, KV-cache budget per chunk (GB)
+# rl.batches: prompts per step per model size, about equal FLOPs per step across sizes in each position (2XS : XS : S
+# FLOPs per sample ~ 1 : 2 : 3-4); rl.micro: update micro-batch (samples) per prompts per step; rl.gpus: data-parallel GPUs
+# micro 256: at 1024 the prompt KV repeated for each sample of a 2454-token prompt overflows an H100
+rl: {n: 16, lr: 1.0e-5, warmup: 20, tis_cap: 2.0, patience: 100000, test_freq: 20, val_prompts: 500, val_n: 16,
+     batches: {2XS: [64, 256, 1024, 4096], XS: [32, 128, 512, 2048], S: [16, 64, 256, 1024]},
+     micro: {16: 256, 32: 256, 64: 256, 128: 256, 256: 256, 512: 256, 1024: 256, 2048: 256, 4096: 256},
+     gpus: {16: 1, 32: 1, 64: 1, 128: 1, 256: 1, 512: 2, 1024: 4, 2048: 4, 4096: 4}}
+# pack.py GPU shares (fraction of a GPU a job takes; a multi-GPU job takes its GPUs whole): sft runs, rl runs per prompts per step
+pack: {sft: 0.5, rl: {16: 0.125, 32: 0.125, 64: 0.25, 128: 0.25, 256: 0.5, 512: 1.0, 1024: 1.0, 2048: 1.0, 4096: 1.0}}
